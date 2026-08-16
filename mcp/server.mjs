@@ -490,7 +490,11 @@ function spawnBackend() {
     }
   );
   backendProc.stdout.setEncoding("utf8");
-  backendProc.stderr.on("data", () => { /* diagnostics only */ });
+  // Forward backend diagnostics (parse errors, P/Invoke failures, backend
+  // tracebacks) to our stderr so they surface in the MCP client's log and in CI.
+  backendProc.stderr.on("data", (chunk) => {
+    process.stderr.write(`[wcu-backend] ${chunk}`);
+  });
   backendProc.stdout.on("data", (chunk) => {
     backendBuf += chunk;
     let idx;
