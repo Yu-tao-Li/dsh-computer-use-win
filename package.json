@@ -1,0 +1,54 @@
+{
+  "name": "computer-use-win",
+  "version": "0.1.2",
+  "description": "Windows computer use for DeepSeek Harness: an MCP stdio server + PowerShell UIA backend, bridged into DSH via @deepseek-ai/dsh-mcp-client. Read/act on real Windows desktop apps (UI Automation tree, screenshots, typed input, OCR, window management).",
+  "type": "module",
+  "bin": {
+    "wcu-mcp": "mcp/server.mjs"
+  },
+  "main": "mcp/server.mjs",
+  "files": [
+    "mcp/server.mjs",
+    "scripts/windows-uia.ps1",
+    "docs/",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "selftest": "node mcp/server.mjs --self-test",
+    "mcp-test": "node test/mcp-test.mjs",
+    "e2e": "node test/notepad-e2e.mjs"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "mcp",
+    "computer-use",
+    "windows",
+    "uia",
+    "desktop-automation"
+  ],
+  "author": "Yu-tao-Li",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yu-tao-Li/computer-use-win.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Yu-tao-Li/computer-use-win/issues"
+  },
+  "homepage": "https://github.com/Yu-tao-Li/computer-use-win#readme",
+  "engines": {
+    "node": ">=22"
+  },
+  "os": [
+    "win32"
+  ],
+  "license": "MIT"
+}

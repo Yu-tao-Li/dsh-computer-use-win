@@ -1,0 +1,22 @@
+# computer-use-win — DSH bundle patch layer
+#
+# Mounts the Windows computer-use MCP server through the in-box
+# @deepseek-ai/dsh-mcp-client bridge. After DSH starts, the model sees tools
+# named mcp__wincu__<tool> (health, snapshot, click, type_text, ocr, ...).
+#
+# Path resolution: both the node executable and server.mjs are resolved
+# relative to THIS patch file's own directory (baseUrl) via !!js, so the
+# install works in any profile under any $DSH_HOME with no hard-coded paths.
+# `process.execPath` is the absolute node binary that is running DSH itself.
+
+- insert:
+    - id: mcp-computer-use-win
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: wincu
+        transport: stdio
+        command: !!js process.execPath
+        args:
+          - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('mcp/server.mjs', baseUrl))"
+        toolCallTimeoutMs: 60000
+        failOnStartupError: false
