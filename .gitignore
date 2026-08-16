@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+
+# local runtime artifacts
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# local secrets (never commit tokens)
+.secrets/
+*.token
+.env

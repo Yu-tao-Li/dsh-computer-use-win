@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  selftest:
+    # The backend drives a real Windows desktop (UIA + SendInput), so the
+    # smoke test must run on a Windows runner with a desktop session.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # No install step: the package has zero runtime dependencies. The MCP
+      # server is plain ESM and the backend is PowerShell 5.1 + csc.
+
+      # Prove the whole stack (server <-> persistent PowerShell backend)
+      # comes up on a fresh machine: 22 tools + backend health.
+      - name: MCP server self-test
+        run: node mcp/server.mjs --self-test
+        timeout-minutes: 10
+
+      # MCP protocol round-trip (initialize -> tools/list -> tools/call).
+      - name: MCP protocol test
+        run: node test/mcp-test.mjs
+        timeout-minutes: 10
