@@ -295,8 +295,10 @@ node E:\PythonFiles\computer-use-win\test\test-features.mjs
 - 元素路径 id 会 stale：UI 重排后 `click` 可能点错，先重新 `snapshot`/`find`。
 - 高 DPI 多显示器下坐标以**物理像素**为准（后端显式 Per-Monitor V2 DPI）。
 - OCR 对 CJK 文本按**字符**给词框（引擎特性），不是按词；坐标足够点选。
-- 参考实现来源：[cgissing/windows-computer-use](https://github.com/cgissing/windows-computer-use)
-  （本项目在其基础上适配了 DSH 接入路径并做了上述加固，见其 `docs/wiki/` 架构文档）。
+- 本项目是 [cgissing/windows-computer-use](https://github.com/cgissing/windows-computer-use)
+  （MIT）的**衍生作品**：引擎核心与 MCP server 骨架来自上游，`docs/wiki/` 为其文档原样收录；
+  本项目新增了 DSH 集成、WGC/OCR、homing/failsafe/identity guard、测试套件等（详见
+  `THIRD_PARTY.md`，双方版权声明见 `LICENSE`）。
 
 ## 可扩展方向（来自调研，按价值排序）
 
