@@ -39,13 +39,16 @@
 | `publish/awesome-list-entry.yml` | 收录条目（PR 里直接用） |
 | `publish/screenshots.json` | 截图清单片段（PR 里合并进列表仓库） |
 
-### 第 1 步：推 GitHub（本仓库 git 历史已 ≥ 10 个提交）
+### 第 1 步：推 GitHub（✅ 已完成 2026-08-16）
+
+- 仓库：<https://github.com/Yu-tao-Li/computer-use-win>（public，11 个提交）
+- topic `dsh-plugin` 已添加
+- CI（windows-latest：self-test + MCP 协议测试）已绿
+- 创建/推送命令（留档）：
 
 ```powershell
-# 仓库名与包名一致：Yu-tao-Li/computer-use-win
-gh repo create Yu-tao-Li/computer-use-win --private=false --source . --push
-# 或：git remote add origin https://github.com/Yu-tao-Li/computer-use-win.git
-#     git push -u origin main
+gh repo create computer-use-win --public --source . --push
+gh repo edit Yu-tao-Li/computer-use-win --add-topic dsh-plugin
 ```
 
 ### 第 2 步：给仓库加 topic
