@@ -1,0 +1,9 @@
+// 可选：给插件市场（dsh-market）详情页配 AppStore 风格截图。
+// 提交 PR 时，把这段合并进 awesome-dsh-plugin 仓库的 data/screenshots.json
+// （key 必须与收录条目的 url 完全一致）。
+{
+  "https://github.com/Yu-tao-Li/computer-use-win": [
+    "https://raw.githubusercontent.com/Yu-tao-Li/computer-use-win/main/assets/screenshot-1.png",
+    "https://raw.githubusercontent.com/Yu-tao-Li/computer-use-win/main/assets/screenshot-2.png"
+  ]
+}
