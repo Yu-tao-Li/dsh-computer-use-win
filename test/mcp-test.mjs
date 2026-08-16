@@ -1,8 +1,11 @@
 // MCP protocol test: initialize -> tools/list -> tools/call
 // Simulates what DSH's dsh-mcp-client (official MCP SDK StdioClientTransport) does.
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
-const SERVER = process.argv[2] || "E:/PythonFiles/computer-use-win/mcp/server.mjs";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SERVER = process.argv[2] || path.join(__dirname, "..", "mcp", "server.mjs");
 const TOOL = process.argv[3] || "windows_computer_use_list_windows";
 const ARGS = process.argv[4] || JSON.stringify({ maxWindows: 5 });
 

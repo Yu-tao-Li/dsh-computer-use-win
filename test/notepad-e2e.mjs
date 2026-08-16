@@ -3,9 +3,12 @@
 // Verifies the real input stack (SendKeys + clipboard) end to end.
 import { spawn, exec } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 const pexec = promisify(exec);
 
-const SERVER = process.argv[2] || "E:/PythonFiles/computer-use-win/mcp/server.mjs";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SERVER = process.argv[2] || path.join(__dirname, "..", "mcp", "server.mjs");
 const MARKER = "wcu-e2e-" + Date.now();
 
 const child = spawn("node", [SERVER], { stdio: ["pipe", "pipe", "pipe"] });
