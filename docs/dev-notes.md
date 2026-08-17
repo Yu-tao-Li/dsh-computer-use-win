@@ -1,7 +1,7 @@
 # 开发笔记（Development Notes）
 
 本文件保留项目的开发过程记录：设计原理、踩坑、社区调研对比、性能数据与测试记录。
-产品说明见 [README.md](../README.md) / [README.zh.md](../README.zh.md)。
+产品说明见 [README.md](../README.md)（中文）/ [README.en.md](../README.en.md)（English）。
 
 ## 原理（为什么这样做）
 
