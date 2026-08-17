@@ -13,6 +13,7 @@
     "docs/",
     "cordis.patch.yml",
     "README.md",
+    "README.zh.md",
     "LICENSE",
     "THIRD_PARTY.md"
   ],
