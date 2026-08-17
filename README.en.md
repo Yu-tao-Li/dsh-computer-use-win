@@ -3,7 +3,7 @@
 # dsh-computer-use-win
 
 [![CI](https://github.com/Yu-tao-Li/dsh-computer-use-win/actions/workflows/ci.yml/badge.svg)](https://github.com/Yu-tao-Li/dsh-computer-use-win/actions/workflows/ci.yml)
-[![license](https://img.shields.io/github/license/Yu-tao-Li/dsh-computer-use-win)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![platform](https://img.shields.io/badge/platform-Windows-0078D6)
 [![stars](https://img.shields.io/github/stars/Yu-tao-Li/dsh-computer-use-win?style=social)](https://github.com/Yu-tao-Li/dsh-computer-use-win)
 
@@ -13,9 +13,9 @@
 
 Bridges into DSH through the in-box `@deepseek-ai/dsh-mcp-client` — no DSH modifications. Zero runtime dependencies.
 
-| Window-cropped capture + UIA tree (`snapshot`) | OCR fallback (CJK UI, word boxes in screen coordinates) |
-|---|---|
-| ![screenshot 1](assets/screenshot-1.png) | ![screenshot 2](assets/screenshot-2.png) |
+| ① File Explorer: `find` locates the file, semantic `invoke` selects it (status bar: "1 item selected") | ② `type_text` writing a real document (clipboard path, `verifyValue` read-back) | ③ UWP Calculator: `find` locates buttons, semantic `Invoke` clicks (25×4=100) |
+|---|---|---|
+| ![1](assets/screenshot-1.png) | ![2](assets/screenshot-2.png) | ![3](assets/screenshot-3.png) |
 
 ## Features
 

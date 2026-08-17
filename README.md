@@ -3,7 +3,7 @@
 # dsh-computer-use-win
 
 [![CI](https://github.com/Yu-tao-Li/dsh-computer-use-win/actions/workflows/ci.yml/badge.svg)](https://github.com/Yu-tao-Li/dsh-computer-use-win/actions/workflows/ci.yml)
-[![license](https://img.shields.io/github/license/Yu-tao-Li/dsh-computer-use-win)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![platform](https://img.shields.io/badge/platform-Windows-0078D6)
 [![stars](https://img.shields.io/github/stars/Yu-tao-Li/dsh-computer-use-win?style=social)](https://github.com/Yu-tao-Li/dsh-computer-use-win)
 
@@ -13,9 +13,9 @@
 
 通过 DSH 内置的 `@deepseek-ai/dsh-mcp-client` 桥接，**不改 DSH 本体**，零运行时依赖。
 
-| 窗口裁剪截图 + UIA 树（`snapshot`） | OCR 回退（中文界面识别 + 屏幕坐标词框） |
-|---|---|
-| ![screenshot 1](assets/screenshot-1.png) | ![screenshot 2](assets/screenshot-2.png) |
+| ① 文件资源管理器：`find` 定位 + 语义 `invoke` 选中文件（状态栏"选中 1 个项目"） | ② `type_text` 写入真实文档（剪贴板路径，`verifyValue` 回读） | ③ UWP 计算器：`find` 定位按钮 + 语义 `Invoke` 点击（25×4=100） |
+|---|---|---|
+| ![1](assets/screenshot-1.png) | ![2](assets/screenshot-2.png) | ![3](assets/screenshot-3.png) |
 
 ## 特性
 
