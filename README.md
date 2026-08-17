@@ -2,6 +2,7 @@
 
 # dsh-computer-use-win
 
+[![version](https://img.shields.io/github/v/release/Yu-tao-Li/dsh-computer-use-win?label=version&color=blue)](https://github.com/Yu-tao-Li/dsh-computer-use-win/releases)
 [![CI](https://github.com/Yu-tao-Li/dsh-computer-use-win/actions/workflows/ci.yml/badge.svg)](https://github.com/Yu-tao-Li/dsh-computer-use-win/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![platform](https://img.shields.io/badge/platform-Windows-0078D6)
