@@ -1,8 +1,8 @@
 # 收录条目 —— 提交到 awesome-dsh-plugin 仓库时，放到：
-#   data/plugins/Yu-tao-Li__computer-use-win.yml
+#   data/plugins/Yu-tao-Li__dsh-computer-use-win.yml
 # 注意：英文描述含 ": "（冒号+空格），按规则必须加引号。
-url: https://github.com/Yu-tao-Li/computer-use-win
-name: Yu-tao-Li/computer-use-win
+url: https://github.com/Yu-tao-Li/dsh-computer-use-win
+name: Yu-tao-Li/dsh-computer-use-win
 category: tools
 description:
   en: 'Windows computer use for DeepSeek Harness: an MCP stdio server over a PowerShell UIA backend exposing 22 desktop tools (UIA tree, screenshots, typed input, OCR, window management, failsafe).'

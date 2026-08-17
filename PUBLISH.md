@@ -41,20 +41,20 @@
 
 ### 第 1 步：推 GitHub（✅ 已完成 2026-08-16）
 
-- 仓库：<https://github.com/Yu-tao-Li/computer-use-win>（public，11 个提交）
+- 仓库：<https://github.com/Yu-tao-Li/dsh-computer-use-win>（public，11 个提交）
 - topic `dsh-plugin` 已添加
 - CI（windows-latest：self-test + MCP 协议测试）已绿
 - 创建/推送命令（留档）：
 
 ```powershell
-gh repo create computer-use-win --public --source . --push
-gh repo edit Yu-tao-Li/computer-use-win --add-topic dsh-plugin
+gh repo create dsh-computer-use-win --public --source . --push
+gh repo edit Yu-tao-Li/dsh-computer-use-win --add-topic dsh-plugin
 ```
 
 ### 第 2 步：给仓库加 topic
 
 ```powershell
-gh repo edit Yu-tao-Li/computer-use-win --add-topic dsh-plugin
+gh repo edit Yu-tao-Li/dsh-computer-use-win --add-topic dsh-plugin
 ```
 
 ### 第 3 步：等够"仓库年龄"
@@ -68,17 +68,17 @@ git clone https://github.com/awesome-dsh-plugin/awesome-dsh-plugin
 cd awesome-dsh-plugin
 # 1) 收录条目（内容见本仓库 publish/awesome-list-entry.yml）
 mkdir -p data/plugins
-cp <本仓库>/publish/awesome-list-entry.yml data/plugins/Yu-tao-Li__computer-use-win.yml
+cp <本仓库>/publish/awesome-list-entry.yml data/plugins/Yu-tao-Li__dsh-computer-use-win.yml
 # 2)（可选）截图：把 publish/screenshots.json 的内容合并进 data/screenshots.json
 # 3) 重新生成 README（必须，CI 会校验）
 npm ci
 node scripts/generate-readme.mjs
 # 4) 提交 + 推送 + 开 PR
-git add data/plugins/Yu-tao-Li__computer-use-win.yml data/screenshots.json README.md README.zh.md
-git commit -m "Add Yu-tao-Li/computer-use-win"
+git add data/plugins/Yu-tao-Li__dsh-computer-use-win.yml data/screenshots.json README.md README.zh.md
+git commit -m "Add Yu-tao-Li/dsh-computer-use-win"
 git push origin HEAD
 gh pr create --repo awesome-dsh-plugin/awesome-dsh-plugin \
-  --title "Add Yu-tao-Li/computer-use-win" \
+  --title "Add Yu-tao-Li/dsh-computer-use-win" \
   --body "Windows computer use for DSH: MCP stdio server + PowerShell UIA backend, 22 desktop tools."
 ```
 
@@ -93,16 +93,16 @@ gh pr create --repo awesome-dsh-plugin/awesome-dsh-plugin \
 网站与 dshmarket 自动重建，插件即上架。用户侧：
 
 ```powershell
-dsh plugin --profile web add github:Yu-tao-Li/computer-use-win
-# 或在 DSH 设置里的插件市场（dshmarket）搜索 "computer-use-win" 一键安装
+dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
+# 或在 DSH 设置里的插件市场（dshmarket）搜索 "dsh-computer-use-win" 一键安装
 ```
 
 ### 可选加分项
 
-- **npm 发布**：`npm publish`（包名 `computer-use-win` 目前未占用，需先
+- **npm 发布**：`npm publish`（包名 `dsh-computer-use-win` 目前未占用，需先
   `npm whoami` 确认账号；发布后条目 `npm:` 字段自动生效，安装免构建授权）。
 - **GitHub Release tarball**：不发布 npm 也可 `npm pack` 出 tgz 挂到 Release，
-  条目里加 `tarball: https://github.com/Yu-tao-Li/computer-use-win/releases/latest/download/computer-use-win-<ver>.tgz`。
+  条目里加 `tarball: https://github.com/Yu-tao-Li/dsh-computer-use-win/releases/latest/download/dsh-computer-use-win-<ver>.tgz`。
 - **徽章**：上架后 README 加
   `[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)`。
 

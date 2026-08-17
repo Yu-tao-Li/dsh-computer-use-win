@@ -1,7 +1,7 @@
 // Debug: homing cache + DwmGetWindowAttribute [ref] behavior.
 import { spawn, execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-const BACKEND = "E:/PythonFiles/computer-use-win/scripts/windows-uia.ps1";
+const BACKEND = "E:/PythonFiles/dsh-computer-use-win/scripts/windows-uia.ps1";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function ps1(script, label) {

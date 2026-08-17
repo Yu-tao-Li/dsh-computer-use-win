@@ -1,4 +1,4 @@
-# computer-use-win — DSH bundle patch layer
+# dsh-computer-use-win — DSH bundle patch layer
 #
 # Mounts the Windows computer-use MCP server through the in-box
 # @deepseek-ai/dsh-mcp-client bridge. After DSH starts, the model sees tools
@@ -10,7 +10,7 @@
 # `process.execPath` is the absolute node binary that is running DSH itself.
 
 - insert:
-    - id: mcp-computer-use-win
+    - id: mcp-dsh-computer-use-win
       name: '@deepseek-ai/dsh-mcp-client'
       config:
         serverName: wincu

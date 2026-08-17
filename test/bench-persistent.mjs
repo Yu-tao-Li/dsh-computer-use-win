@@ -2,7 +2,7 @@
 // over stdin, time each round-trip.
 import { spawn } from "node:child_process";
 
-const BACKEND = "E:/PythonFiles/computer-use-win/scripts/windows-uia.ps1";
+const BACKEND = "E:/PythonFiles/dsh-computer-use-win/scripts/windows-uia.ps1";
 const child = spawn("powershell", ["-NoLogo", "-NoProfile", "-Sta", "-ExecutionPolicy", "Bypass", "-File", BACKEND, "-Persistent"], { stdio: ["pipe", "pipe", "pipe"] });
 
 let buf = "";

@@ -1,6 +1,6 @@
-# computer-use-win — 给 DeepSeek Harness 装上 Windows 电脑操控能力
+# dsh-computer-use-win — 给 DeepSeek Harness 装上 Windows 电脑操控能力
 
-[![CI](https://github.com/Yu-tao-Li/computer-use-win/actions/workflows/ci.yml/badge.svg)](https://github.com/Yu-tao-Li/computer-use-win/actions/workflows/ci.yml)
+[![CI](https://github.com/Yu-tao-Li/dsh-computer-use-win/actions/workflows/ci.yml/badge.svg)](https://github.com/Yu-tao-Li/dsh-computer-use-win/actions/workflows/ci.yml)
 <!-- 上架 awesome-dsh-plugin 后启用：
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 -->
@@ -166,7 +166,7 @@ computer use 在 Windows 上最阴险的失败都是**静默的**——返回 ok
         serverName: wincu
         transport: stdio
         command: node
-        args: ['E:\PythonFiles\computer-use-win\mcp\server.mjs']
+        args: ['E:\PythonFiles\dsh-computer-use-win\mcp\server.mjs']
         toolCallTimeoutMs: 90000
         failOnStartupError: false
 ```
@@ -192,19 +192,19 @@ args:
 
 ```powershell
 # 从 GitHub（上架后的标准装法，--profile 指定装进哪个 profile）
-dsh plugin --profile web add github:Yu-tao-Li/computer-use-win
+dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 # 本地目录 / 相对路径（开发期）
-dsh plugin add file:E:\PythonFiles\computer-use-win
+dsh plugin add file:E:\PythonFiles\dsh-computer-use-win
 # 发布到 npm 后
-dsh plugin add computer-use-win
+dsh plugin add dsh-computer-use-win
 ```
 
-也可在 DSH 设置里的**插件市场（dshmarket）**搜索 `computer-use-win` 一键安装
+也可在 DSH 设置里的**插件市场（dshmarket）**搜索 `dsh-computer-use-win` 一键安装
 （上架后）。
 
 `dsh plugin add` 会把包装进当前 profile 的 `node_modules` 并加入
 `package.json` 的 `dsh.profile.bundles` 列表，下次启动自动加载。
-注意：bundle 行的 id 是 `mcp-computer-use-win`，与上面 dev 用的
+注意：bundle 行的 id 是 `mcp-dsh-computer-use-win`，与上面 dev 用的
 `mcp-windows-computer-use` 不同，但 `serverName` 都是 `wincu`——**同一时刻只留
 一个**（否则第二个因 serverName 命名空间被占用而启动失败）。
 
@@ -212,25 +212,25 @@ dsh plugin add computer-use-win
 
 ```powershell
 # 1) 后端自检（UIA + 截图）
-node E:\PythonFiles\computer-use-win\mcp\server.mjs --self-test
+node E:\PythonFiles\dsh-computer-use-win\mcp\server.mjs --self-test
 
 # 2) MCP 协议测试（initialize → tools/list → tools/call）
-node E:\PythonFiles\computer-use-win\test\mcp-test.mjs
+node E:\PythonFiles\dsh-computer-use-win\test\mcp-test.mjs
 
 # 3) 直接跑后端某个动作（参数 = 一行 JSON 从 stdin 传入）
-node E:\PythonFiles\computer-use-win\mcp\server.mjs --backend list_windows '{"maxWindows":5}'
-node E:\PythonFiles\computer-use-win\mcp\server.mjs --backend tree '{"maxDepth":2}'
+node E:\PythonFiles\dsh-computer-use-win\mcp\server.mjs --backend list_windows '{"maxWindows":5}'
+node E:\PythonFiles\dsh-computer-use-win\mcp\server.mjs --backend tree '{"maxDepth":2}'
 
 # 4) 端到端输入测试：开记事本→激活→输入→读回→关闭（会真的开一个记事本）
-node E:\PythonFiles\computer-use-win\test\notepad-e2e.mjs
+node E:\PythonFiles\dsh-computer-use-win\test\notepad-e2e.mjs
 
 # 5) 延迟基准：persistent 后端（cold 首次含启动 / hot 稳态）
-node E:\PythonFiles\computer-use-win\test\bench-persistent.mjs
+node E:\PythonFiles\dsh-computer-use-win\test\bench-persistent.mjs
 # 6) 窗口裁剪截图验证（PrintWindow 路径）
-node E:\PythonFiles\computer-use-win\test\test-capture.mjs
+node E:\PythonFiles\dsh-computer-use-win\test\test-capture.mjs
 # 7) 鲁棒性特性综合测试（后台 WM_CHAR/PostMessage 点击、homing、failsafe、OCR、
 #    wait_for、close_window；会真的开一个记事本并移动它）
-node E:\PythonFiles\computer-use-win\test\test-features.mjs
+node E:\PythonFiles\dsh-computer-use-win\test\test-features.mjs
 ```
 
 已验证（2026-07，本机 Windows 11）：

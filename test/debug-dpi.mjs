@@ -1,7 +1,7 @@
 // DPI calibration: what does the backend process actually see and where do
 // moves land? Uses the persistent backend.
 import { spawn } from "node:child_process";
-const BACKEND = "E:/PythonFiles/computer-use-win/scripts/windows-uia.ps1";
+const BACKEND = "E:/PythonFiles/dsh-computer-use-win/scripts/windows-uia.ps1";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const child = spawn("powershell", ["-NoLogo", "-NoProfile", "-Sta", "-ExecutionPolicy", "Bypass", "-File", BACKEND, "-Persistent"], { stdio: ["pipe", "pipe", "pipe"] });

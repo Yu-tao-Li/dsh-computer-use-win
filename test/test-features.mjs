@@ -7,7 +7,7 @@
 //  6. wait_for + close_window
 import { spawn, execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-const BACKEND = "E:/PythonFiles/computer-use-win/scripts/windows-uia.ps1";
+const BACKEND = "E:/PythonFiles/dsh-computer-use-win/scripts/windows-uia.ps1";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function spawnApp(exe, args = []) {

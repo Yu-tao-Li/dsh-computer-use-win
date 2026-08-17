@@ -1,7 +1,7 @@
 // Backend latency benchmark: time N consecutive backend actions.
 import { spawn } from "node:child_process";
 
-const BACKEND = "E:/PythonFiles/computer-use-win/scripts/windows-uia.ps1";
+const BACKEND = "E:/PythonFiles/dsh-computer-use-win/scripts/windows-uia.ps1";
 const N = process.argv[2] ? Number(process.argv[2]) : 5;
 
 const actions = [

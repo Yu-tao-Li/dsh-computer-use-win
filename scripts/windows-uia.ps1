@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ============================================================================
-# Win Computer Use — Windows desktop engine for the computer-use-win MCP server
+# Win Computer Use — Windows desktop engine for the dsh-computer-use-win MCP server
 #
 # Modes:
 #   -One-shot:  windows-uia.ps1 -Action <name>        (args: JSON on stdin)
