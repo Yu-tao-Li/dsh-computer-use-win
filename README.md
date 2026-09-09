@@ -42,7 +42,7 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 
 重启 `dsh web`，工具以 `mcp__wincu__windows_computer_use_*` 出现。
 
-> bundle 在安装时自解析路径（`cordis.patch.yml` 用 `!!js` 相对包目录），任何 profile / `$DSH_HOME` 都能装，无硬编码路径。同一 profile 只保留一个 `serverName: wincu` 行。
+> bundle 在启动时自解析路径（`cordis.patch.yml` 的 `!!js` 从所在 profile 解析 `server.mjs`），任何 profile / `$DSH_HOME` 都能装，无硬编码路径。同一 profile 只保留一个 `serverName: wincu` 行。
 
 ## 工具清单（22 个，前缀 `mcp__wincu__`）
 
