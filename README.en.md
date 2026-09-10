@@ -42,7 +42,7 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 
 Restart `dsh web`. The tools appear as `mcp__wincu__windows_computer_use_*`.
 
-> The bundle resolves its own paths at install time (`cordis.patch.yml` uses `!!js` relative to the package dir), so it installs cleanly into any profile / `$DSH_HOME` — no hardcoded paths. Keep only one `serverName: wincu` row per profile.
+> The bundle resolves its own paths at boot (`cordis.patch.yml` uses `!!js` that resolves `server.mjs` from the host profile), so it installs cleanly into any profile / `$DSH_HOME` — no hardcoded paths. Keep only one `serverName: wincu` row per profile.
 
 ## Tools (22, prefix `mcp__wincu__`)
 
