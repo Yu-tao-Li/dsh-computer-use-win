@@ -35,6 +35,9 @@
 ## 安装
 
 ```powershell
+# 从 npm（推荐）
+dsh plugin --profile web add dsh-computer-use-win
+
 # 从 GitHub（--profile 指定装进哪个 profile）
 dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 # 或在 DSH 设置的插件市场（dshmarket）搜索 dsh-computer-use-win
@@ -42,7 +45,7 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 
 重启 `dsh web`，工具以 `mcp__wincu__windows_computer_use_*` 出现。
 
-> bundle 在启动时自解析路径（`cordis.patch.yml` 的 `!!js` 从所在 profile 解析 `server.mjs`），任何 profile / `$DSH_HOME` 都能装，无硬编码路径。同一 profile 只保留一个 `serverName: wincu` 行。
+> bundle 在启动时通过所在 profile 的 `package.json` 解析已安装包中的 `server.mjs`，因此适用于任意 profile / `$DSH_HOME`，也兼容 pnpm 布局，无硬编码路径。同一 profile 只保留一个 `serverName: wincu` 行。
 
 ## 工具清单（22 个，前缀 `mcp__wincu__`）
 
@@ -95,10 +98,11 @@ docs/dev-notes.md       设计原理、踩坑记录、性能数据、测试记�
 ```powershell
 node mcp/server.mjs --self-test     # 全栈自检（仅 Windows）
 node test/mcp-test.mjs              # initialize → tools/list → tools/call
+node test/profile-resolution.mjs    # DSH profile node_modules 路径回归测试
 node test/notepad-e2e.mjs           # 真实输入端到端（会开记事本）
 ```
 
-CI（`.github/workflows/ci.yml`）在每次 push/PR 时于 `windows-latest` 跑自检 + 协议测试。
+`npm test` 运行自检、MCP 协议和 profile 路径回归测试；CI（`.github/workflows/ci.yml`）在每次 push/PR 时于 `windows-latest` 执行这些检查。
 
 ## 许可
 

@@ -35,6 +35,9 @@ Bridges into DSH through the in-box `@deepseek-ai/dsh-mcp-client` — no DSH mod
 ## Install
 
 ```sh
+# from npm (recommended)
+dsh plugin --profile web add dsh-computer-use-win
+
 # from GitHub (choose your profile)
 dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 # or from the dshmarket plugin market: search "dsh-computer-use-win"
@@ -42,7 +45,7 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 
 Restart `dsh web`. The tools appear as `mcp__wincu__windows_computer_use_*`.
 
-> The bundle resolves its own paths at boot (`cordis.patch.yml` uses `!!js` that resolves `server.mjs` from the host profile), so it installs cleanly into any profile / `$DSH_HOME` — no hardcoded paths. Keep only one `serverName: wincu` row per profile.
+> At boot the bundle resolves `server.mjs` from the installed package through the host profile's `package.json`, so it works in any profile / `$DSH_HOME` and with pnpm layouts — no hardcoded paths. Keep only one `serverName: wincu` row per profile.
 
 ## Tools (22, prefix `mcp__wincu__`)
 
@@ -95,10 +98,11 @@ docs/dev-notes.md     design rationale, pitfalls, benchmarks, test log
 ```sh
 node mcp/server.mjs --self-test          # full stack smoke test (Windows only)
 node test/mcp-test.mjs                   # initialize → tools/list → tools/call
+node test/profile-resolution.mjs         # DSH profile node_modules resolution regression
 node test/notepad-e2e.mjs                # real input E2E (opens Notepad)
 ```
 
-CI (`.github/workflows/ci.yml`) runs the self-test + protocol test on `windows-latest` for every push/PR.
+`npm test` runs the smoke, MCP protocol, and profile-resolution regression tests. CI (`.github/workflows/ci.yml`) runs these checks on `windows-latest` for every push/PR.
 
 ## License
 

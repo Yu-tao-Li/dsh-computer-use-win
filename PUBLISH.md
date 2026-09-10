@@ -99,8 +99,8 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 
 ### 可选加分项
 
-- **npm 发布**：`npm publish`（包名 `dsh-computer-use-win` 目前未占用，需先
-  `npm whoami` 确认账号；发布后条目 `npm:` 字段自动生效，安装免构建授权）。
+- **npm 发布**：发布新版本前先用 `npm whoami` 确认账号，再执行 `npm publish`；
+  条目中的 `npm:` 字段会自动使用最新版本，安装免构建授权。
 - **GitHub Release tarball**：不发布 npm 也可 `npm pack` 出 tgz 挂到 Release，
   条目里加 `tarball: https://github.com/Yu-tao-Li/dsh-computer-use-win/releases/latest/download/dsh-computer-use-win-<ver>.tgz`。
 - **徽章**：上架后 README 加

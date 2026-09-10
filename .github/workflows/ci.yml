@@ -29,3 +29,8 @@ jobs:
       - name: MCP protocol test
         run: node test/mcp-test.mjs
         timeout-minutes: 10
+
+      # Regression test for package resolution inside a DSH profile's node_modules.
+      - name: DSH profile package-resolution test
+        run: npm run profile-resolution
+        timeout-minutes: 5
