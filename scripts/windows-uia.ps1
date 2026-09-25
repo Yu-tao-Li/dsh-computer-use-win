@@ -98,6 +98,9 @@ public static class WindowsComputerUseNative {
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
   [DllImport("user32.dll")]
+  public static extern bool IsIconic(IntPtr hWnd);
+
+  [DllImport("user32.dll")]
   public static extern bool SetCursorPos(int X, int Y);
 
   public const int MOUSEEVENTF_MOVE = 0x0001;
@@ -467,8 +470,13 @@ function Set-WindowForeground {
   try {
     [void][WindowsComputerUseNative]::keybd_event([WindowsComputerUseNative]::VK_MENU, 0, 0, [UIntPtr]::Zero)
     [void][WindowsComputerUseNative]::keybd_event([WindowsComputerUseNative]::VK_MENU, 0, [WindowsComputerUseNative]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
-    [WindowsComputerUseNative]::ShowWindow($ptr, 9) | Out-Null
-    Start-Sleep -Milliseconds 80
+    # SW_RESTORE is not a no-op on maximized/snapped windows — it un-maximizes
+    # them. Only restore windows that are actually minimized; otherwise leave
+    # the window state untouched.
+    if ([WindowsComputerUseNative]::IsIconic($ptr)) {
+      [WindowsComputerUseNative]::ShowWindow($ptr, 9) | Out-Null
+      Start-Sleep -Milliseconds 80
+    }
     [WindowsComputerUseNative]::SetForegroundWindow($ptr) | Out-Null
     Start-Sleep -Milliseconds 120
   } finally {
