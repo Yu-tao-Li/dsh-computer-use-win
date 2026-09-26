@@ -1,13 +1,22 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const SERVER_VERSION = "0.2.0";
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(__dirname, "..");
+// Advertised over MCP serverInfo; derived from package.json so the two
+// cannot drift apart between releases.
+const SERVER_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(path.join(pluginRoot, "package.json"), "utf8")).version;
+  } catch {
+    return "0.2.2";
+  }
+})();
 const backendPath = path.join(pluginRoot, "scripts", "windows-uia.ps1");
 const powershell = process.env.WINDOWS_CU_POWERSHELL || "powershell.exe";
 
@@ -68,7 +77,7 @@ const windowTargetProperties = {
   activate: {
     type: "boolean",
     default: false,
-    description: "Bring the targeted window to the foreground before reading it."
+    description: "Bring the targeted window to the foreground before acting. Honoured by: drag, type_text and keypress (input needs the foreground); element-target resolution in snapshot/accessibility_tree/find/element_info/focus/invoke/set_value; the x/y coordinate paths of click/double_click/move/scroll and element_info; window capture in ocr; move_window (activates the moved window). Ignored by close_window (WM_CLOSE works in the background); activate_window always activates regardless of this flag."
   }
 };
 
@@ -77,12 +86,12 @@ const treeViewProperties = {
     type: "string",
     enum: ["control", "content", "raw"],
     default: "control",
-    description: "UI Automation view used for traversal. control is the default compact app-control tree; content returns end-user content nodes; raw returns provider internals for debugging."
+    description: "UI Automation view used for traversal. control is the default compact app-control tree; content returns end-user content nodes; raw returns provider internals for debugging. Applies to scope resolution and tree walking; element ids of the form uia:rt:* are looked up directly by RuntimeId and bypass view filtering (the value is still validated, but not applied)."
   },
   includeOffscreen: {
     type: "boolean",
     default: false,
-    description: "Include UIA elements currently reported as offscreen. Leave false for normal app workflows; set true for debugging or resolving ids from an offscreen-inclusive tree."
+    description: "Include UIA elements currently reported as offscreen. Leave false for normal app workflows; set true for debugging or resolving ids from an offscreen-inclusive tree. Like viewMode, this applies to scope resolution and tree walking; uia:rt:* element ids bypass it."
   }
 };
 
@@ -365,7 +374,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_activate_window",
-    description: "Bring a top-level window to the foreground by title substring, process id, or native HWND.",
+    description: "Bring a top-level window to the foreground by title substring, process id, or native HWND. This tool always activates its target; the shared activate flag cannot suppress it.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -385,14 +394,18 @@ const tools = [
   },
   {
     name: "windows_computer_use_ocr",
-    description: "OCR a window (or the whole desktop) with Windows.Media.Ocr — the fallback for UIA-blind apps (games, self-drawn Tk/Qt, RDP, canvases). Returns the full text plus lines with word boxes in SCREEN coordinates, so you can click on OCR'd text. Slower than the UIA tree (~1-3s); use it after snapshot/find shows a sparse tree, or when the app is known to be UIA-blind.",
+    description: "OCR a window (or the whole desktop) with Windows.Media.Ocr — the fallback for UIA-blind apps (games, self-drawn Tk/Qt, RDP, canvases). Returns the full text plus lines with word boxes in SCREEN coordinates, so you can click on OCR'd text. With query, matched words are upgraded to the underlying UIA control for direct invoke/click. Slower than the UIA tree (~1-3s); use it after snapshot/find shows a sparse tree, or when the app is known to be UIA-blind.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         ...windowTargetProperties,
         scope: { type: "string", enum: ["active_window", "desktop"], default: "active_window" },
-        maxWidth: { type: "integer", minimum: 0, maximum: 7680, default: 1920 }
+        maxWidth: { type: "integer", minimum: 0, maximum: 7680, default: 1920 },
+        query: {
+          type: "string",
+          description: "Optional text to search for in the OCR result (case-insensitive). When set, the response includes query plus matched entries (up to 3) with the hit line, word box, and the UIA control under the hit — enabling invoke/click on real controls in UIA-blind apps."
+        }
       }
     }
   },
@@ -413,7 +426,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_close_window",
-    description: "Close a window gracefully by posting WM_CLOSE (the app can veto with a save dialog). Safer than killing the process; use close_window instead of alt+f4 when the app may have unsaved state you want to handle.",
+    description: "Close a window gracefully by posting WM_CLOSE (the app can veto with a save dialog). Safer than killing the process; use close_window instead of alt+f4 when the app may have unsaved state you want to handle. The shared activate flag is ignored: WM_CLOSE is posted in the background and needs no foreground switch.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

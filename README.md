@@ -55,7 +55,7 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 | 动作 | `click` · `double_click` · `move` · `drag` · `scroll` · `type_text`（clipboard/sendinput/background）· `keypress` · `focus` · `invoke` · `set_value` |
 | 窗口 | `activate_window` · `move_window` · `close_window`（WM_CLOSE，应用可弹保存框否决）· `wait_for` · `wait` |
 
-所有工具都支持可选窗口定位（`windowTitle` 子串 / `processId` / `nativeWindowHandle`）+ `activate: true`；不指定 = 当前前台窗口。
+所有工具都支持可选窗口定位（`windowTitle` 子串 / `processId` / `nativeWindowHandle`）+ `activate: true`；不指定 = 当前前台窗口。`activate` 在影响结果的路径上都会生效（输入类、坐标点击/滚动、`ocr` 截屏、`move_window` 等）；`close_window` 忽略它（WM_CLOSE 后台即可），`activate_window` 恒定激活。各工具的确切语义见 `docs/wiki/mcp-tools.md`。
 
 ## 架构
 
