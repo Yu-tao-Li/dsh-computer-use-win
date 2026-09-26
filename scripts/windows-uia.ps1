@@ -1184,6 +1184,10 @@ function Resolve-Element {
   if ($ElementId -match '^uia:rt:(.+)$') {
     $rtParts = $Matches[1] -split '-'
     if ($rtParts.Count -lt 2) { throw "Malformed runtime element id '$ElementId'." }
+    # RuntimeId lookup bypasses view traversal, but the declared view filters
+    # must still be validated here — an illegal viewMode has to fail exactly
+    # like it does on the legacy path instead of being silently ignored.
+    $null = Get-ViewMode $InputObject "control"
     $rtArr = New-Object 'int[]' $rtParts.Count
     for ($i = 0; $i -lt $rtParts.Count; $i++) { $rtArr[$i] = [int]$rtParts[$i] }
     # Search the target window first, then the whole desktop as a fallback.
@@ -1711,6 +1715,7 @@ function Invoke-Action {
       } else {
         $x = [int](Get-Prop $inputObject "x" 0)
         $y = [int](Get-Prop $inputObject "y" 0)
+        Activate-TargetIfRequested $inputObject
         $point = New-Object System.Windows.Point($x, $y)
         $el = [System.Windows.Automation.AutomationElement]::FromPoint($point)
         return ([ordered]@{ ok = $true; point = [ordered]@{ x = $x; y = $y }; element = (Convert-ElementInfo -Element $el -Id $null -Depth 0) })
@@ -1722,6 +1727,11 @@ function Invoke-Action {
       $button = Get-Prop $inputObject "button" "left"
       $dispatch = [string](Get-Prop $inputObject "dispatch" "auto")
       $result = [ordered]@{ ok = $true; action = "click"; x = $point.x; y = $point.y; button = $button; elementId = $point.elementId }
+
+      # Coordinate input goes to whatever is physically under the point, so
+      # activate:true must bring the target forward BEFORE homing/clicking —
+      # otherwise the click silently lands on the overlapping window.
+      Activate-TargetIfRequested $inputObject
 
       # Homing: if this window was observed before and moved, compensate.
       if ((Has-WindowTarget $inputObject) -and ($null -eq $point.elementId)) {
@@ -1771,6 +1781,7 @@ function Invoke-Action {
       $button = Get-Prop $inputObject "button" "left"
       $dispatch = [string](Get-Prop $inputObject "dispatch" "auto")
       $result = [ordered]@{ ok = $true; action = "double_click"; x = $point.x; y = $point.y; button = $button; elementId = $point.elementId }
+      Activate-TargetIfRequested $inputObject
       if ((Has-WindowTarget $inputObject) -and ($null -eq $point.elementId)) {
         $target = Resolve-TargetWindow $inputObject
         Assert-WindowIdentity $inputObject $target
@@ -1802,6 +1813,7 @@ function Invoke-Action {
       [void](Test-Failsafe)
       $point = Get-PointFromArgs $inputObject
       $result = [ordered]@{ ok = $true; action = "move"; x = $point.x; y = $point.y; elementId = $point.elementId }
+      Activate-TargetIfRequested $inputObject
       if ((Has-WindowTarget $inputObject) -and ($null -eq $point.elementId)) {
         $target = Resolve-TargetWindow $inputObject
         Assert-WindowIdentity $inputObject $target
@@ -1851,6 +1863,7 @@ function Invoke-Action {
       $point = Get-PointFromArgs $inputObject
       $deltaY = [int](Get-Prop $inputObject "deltaY" 480)
       $deltaX = [int](Get-Prop $inputObject "deltaX" 0)
+      Activate-TargetIfRequested $inputObject
       if ((Has-WindowTarget $inputObject) -and ($null -eq $point.elementId)) {
         $target = Resolve-TargetWindow $inputObject
         Assert-WindowIdentity $inputObject $target
@@ -2068,8 +2081,9 @@ function Invoke-Action {
       return ([ordered]@{ ok = $true; action = "close_window"; posted = [bool]$posted })
     }
     "move_window" {
-      # Move (not resize) the target window. SWP_NOACTIVATE: does not steal
-      # foreground. Note: maximized windows are not moved by Windows.
+      # Move (not resize) the target window. Default is SWP_NOACTIVATE (no
+      # focus steal); activate:true hands the foreground to the moved window.
+      # Note: maximized windows are not moved by Windows.
       if (-not (Has-WindowTarget $inputObject)) { throw "Provide windowTitle, processId, or nativeWindowHandle." }
       $x = Get-Prop $inputObject "x" $null
       $y = Get-Prop $inputObject "y" $null
@@ -2077,9 +2091,23 @@ function Invoke-Action {
       $el = Resolve-TargetWindow $inputObject
       $hwnd = Invoke-Safe { [int64]$el.Current.NativeWindowHandle } 0
       if (-not ($hwnd -and $hwnd -ne 0)) { throw "No window handle found for the target." }
-      $flags = [uint32]([WindowsComputerUseNative]::SWP_NOSIZE -bor [WindowsComputerUseNative]::SWP_NOZORDER -bor [WindowsComputerUseNative]::SWP_NOACTIVATE)
+      $flags = [uint32]([WindowsComputerUseNative]::SWP_NOSIZE -bor [WindowsComputerUseNative]::SWP_NOZORDER)
+      if (-not [bool](Get-Prop $inputObject "activate" $false)) {
+        $flags = [uint32]($flags -bor [WindowsComputerUseNative]::SWP_NOACTIVATE)
+      }
       $ok = [WindowsComputerUseNative]::SetWindowPos([IntPtr]$hwnd, [IntPtr]::Zero, [int]$x, [int]$y, 0, 0, $flags)
-      return ([ordered]@{ ok = $true; action = "move_window"; moved = [bool]$ok; x = [int]$x; y = [int]$y; note = if ($ok) { $null } else { "SetWindowPos refused (window may be maximized)." } })
+      $result = [ordered]@{ ok = $true; action = "move_window"; moved = [bool]$ok; x = [int]$x; y = [int]$y; note = if ($ok) { $null } else { "SetWindowPos refused (window may be maximized)." } }
+      if ([bool](Get-Prop $inputObject "activate" $false)) {
+        # SetWindowPos's implicit activation is silently refused by the
+        # Windows foreground lock for background callers, so enforce the
+        # switch with the AttachThreadInput helper and report the outcome.
+        $activated = Set-WindowForeground $el
+        $result["activated"] = [bool]$activated
+        if (-not $activated) {
+          $result["warning"] = "activate:true was requested but the window could not be brought to the foreground (Windows foreground lock); the window was moved but is not foreground."
+        }
+      }
+      return $result
     }
     "ocr" {
       # OCR the target window (or the whole desktop) — the fallback for
@@ -2091,8 +2119,15 @@ function Invoke-Action {
       $maxWidth = [int](Get-Prop $inputObject "maxWidth" 1920)
       $query = [string](Get-Prop $inputObject "query" "")
       $winEl = $null
+      $activationRefused = $false
       if (Has-WindowTarget $inputObject) {
         $winEl = Resolve-TargetWindow $inputObject
+        # Capture happens on screen pixels: an occluded window would OCR the
+        # overlapping content, so honour activate:true before capturing. A
+        # refused activation degrades the capture but is not fatal — warn.
+        if ([bool](Get-Prop $inputObject "activate" $false) -and -not (Set-WindowForeground $winEl)) {
+          $activationRefused = $true
+        }
       } elseif ($scope -ne "desktop") {
         $winEl = Get-ScopeRoot $scope $inputObject
       }
@@ -2165,6 +2200,9 @@ function Invoke-Action {
         $result["query"] = $query
         $result["matched"] = $matched
         if ($matched.Count -eq 0) { $result["note"] = "No OCR line contained the query; the text may be split across words differently. Try a shorter query or read 'lines' directly." }
+      }
+      if ($activationRefused) {
+        $result["warning"] = "activate:true was requested but the window could not be brought to the foreground (Windows foreground lock); the capture may show overlapping content."
       }
       return $result
     }

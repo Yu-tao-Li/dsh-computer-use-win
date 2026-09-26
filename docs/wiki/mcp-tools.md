@@ -28,6 +28,8 @@ Most observation and element-action tools accept optional target fields:
 - `nativeWindowHandle`: HWND returned by `windows_computer_use_list_windows`
 - `activate`: when true, bring the target window forward before reading or acting
 
+`activate` is honoured wherever it changes the outcome: `drag`, `type_text`, `keypress` (input requires the foreground), element-target resolution in `snapshot` / `accessibility_tree` / `find` / `element_info` / `focus` / `invoke` / `set_value`, the x/y coordinate paths of `click` / `double_click` / `move` / `scroll` and `element_info` (coordinates hit whatever is physically under the point, so the target must come forward first), window capture in `ocr`, and `move_window` (the moved window takes the foreground). `close_window` ignores it (WM_CLOSE works in the background), and `activate_window` always activates regardless of the flag.
+
 Use these fields when focus may move during a tool call. A reliable pattern is:
 
 1. Call `windows_computer_use_list_windows`.
@@ -44,7 +46,7 @@ Tree-reading tools accept:
 
 Use `control` for normal actions. Use `content` when reading visible text/content. Use `raw` with `includeOffscreen=true` only when a provider hides useful nodes from the control tree or when debugging a sparse/custom app.
 
-Element ids are view-relative path ids. If an id came from a non-default tree, pass the same `viewMode` and `includeOffscreen` to `element_info`, `move`, `click`, `double_click`, `scroll`, `focus`, `invoke`, or `set_value`.
+These two options apply to scope resolution and tree walking. Legacy element ids (`uia:active.N...`, `uia:root.N...`) are view-relative path ids: if an id came from a non-default tree, pass the same `viewMode` and `includeOffscreen` to `element_info`, `move`, `click`, `double_click`, `scroll`, `focus`, `invoke`, or `set_value`. Ids of the form `uia:rt:*` (the form returned by today's trees) are looked up directly by RuntimeId and bypass view filtering — the values are validated on every path, but they are not applied to a `uia:rt:*` lookup.
 
 `windows_computer_use_health`
 

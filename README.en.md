@@ -55,7 +55,7 @@ Restart `dsh web`. The tools appear as `mcp__wincu__windows_computer_use_*`.
 | Act | `click` · `double_click` · `move` · `drag` · `scroll` · `type_text` (clipboard / sendinput / background) · `keypress` · `focus` · `invoke` · `set_value` |
 | Window | `activate_window` · `move_window` · `close_window` (WM_CLOSE; the app may veto with a save dialog) · `wait_for` · `wait` |
 
-Every tool accepts optional window targeting (`windowTitle` substring / `processId` / `nativeWindowHandle`) plus `activate: true`; untargeted calls act on the foreground window.
+Every tool accepts optional window targeting (`windowTitle` substring / `processId` / `nativeWindowHandle`) plus `activate: true`; untargeted calls act on the foreground window. `activate` is honoured wherever it changes the outcome (input tools, coordinate clicks/scroll, `ocr` capture, `move_window`); `close_window` ignores it (WM_CLOSE works in the background) and `activate_window` always activates. See `docs/wiki/mcp-tools.md` for exact per-tool semantics.
 
 ## Architecture
 
