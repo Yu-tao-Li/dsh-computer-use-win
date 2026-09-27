@@ -470,21 +470,59 @@ function stripImagePayload(result) {
 // killed and respawned lazily on the next call.
 // ----------------------------------------------------------------------------
 let backendProc = null;
-let backendBuf = "";
 let backendNextId = 0;
-const backendWaiters = new Map(); // id -> {resolve, reject, timer}
+const backendWaiters = new Map(); // id -> {resolve, reject, timer, proc}
+const pendingToolCalls = new Map(); // MCP request id -> {proc}
+const retiringBackends = new WeakSet();
+const interruptibleActions = new Set(["health", "snapshot", "tree", "list_windows", "find", "element_info", "wait", "ocr", "wait_for"]);
 
-function failBackendWaiters(error) {
-  for (const [, w] of backendWaiters) {
+function dispatchNextBackend(proc) {
+  if (retiringBackends.has(proc)) return;
+  const pending = [...backendWaiters.entries()].filter(([, w]) => w.proc === proc);
+  if (pending.some(([, w]) => w.sent)) return;
+  const entry = pending[0];
+  if (!entry) return;
+  const [id, w] = entry;
+  w.sent = true;
+  proc.stdin.write(JSON.stringify({ id, action: w.action, args: w.args }) + "\n");
+}
+
+function cancelBackendRequest(request) {
+  const proc = request?.proc;
+  const entry = [...backendWaiters.entries()].find(([, w]) => w.request === request);
+  if (!proc || !entry) return;
+  request.cancelled = true;
+  const [id, w] = entry;
+  const error = new Error("COMPUTER_USE_CANCELLED");
+  if (!w.sent) {
+    backendWaiters.delete(id); clearTimeout(w.timer); w.reject(error);
+    return;
+  }
+  if (interruptibleActions.has(w.action)) {
+    killBackend(error, proc);
+    return;
+  }
+  // Input routines may currently hold a button/key. Let their key-up cleanup finish,
+  // but discard every not-yet-started action and retire this worker immediately after.
+  retiringBackends.add(proc);
+  for (const [queuedId, queued] of backendWaiters) {
+    if (queued.proc !== proc || queued.sent) continue;
+    backendWaiters.delete(queuedId); clearTimeout(queued.timer); queued.reject(error);
+  }
+}
+
+function failBackendWaiters(error, proc) {
+  for (const [id, w] of backendWaiters) {
+    if (w.proc !== proc) continue;
+    backendWaiters.delete(id);
     clearTimeout(w.timer);
     w.reject(error);
   }
-  backendWaiters.clear();
 }
 
 function spawnBackend() {
-  backendBuf = "";
-  backendProc = spawn(
+  let backendBuf = "";
+  const proc = backendProc = spawn(
     powershell,
     [
       "-NoLogo",
@@ -502,13 +540,13 @@ function spawnBackend() {
       windowsHide: true
     }
   );
-  backendProc.stdout.setEncoding("utf8");
+  proc.stdout.setEncoding("utf8");
   // Forward backend diagnostics (parse errors, P/Invoke failures, backend
   // tracebacks) to our stderr so they surface in the MCP client's log and in CI.
-  backendProc.stderr.on("data", (chunk) => {
+  proc.stderr.on("data", (chunk) => {
     process.stderr.write(`[wcu-backend] ${chunk}`);
   });
-  backendProc.stdout.on("data", (chunk) => {
+  proc.stdout.on("data", (chunk) => {
     backendBuf += chunk;
     let idx;
     while ((idx = backendBuf.indexOf("\n")) >= 0) {
@@ -522,7 +560,7 @@ function spawnBackend() {
         continue;
       }
       const w = backendWaiters.get(resp.id);
-      if (!w) continue;
+      if (!w || w.proc !== proc) continue;
       backendWaiters.delete(resp.id);
       clearTimeout(w.timer);
       if (resp.ok === false) {
@@ -530,37 +568,42 @@ function spawnBackend() {
       } else {
         w.resolve(resp);
       }
+      if (retiringBackends.has(proc)) killBackend(new Error("COMPUTER_USE_CANCELLED"), proc);
+      else dispatchNextBackend(proc);
     }
   });
-  backendProc.stdin.on("error", () => { /* EPIPE when the backend dies; the exit handler fails waiters */ });
+  proc.stdin.on("error", () => { /* EPIPE when the backend dies; the exit handler fails waiters */ });
   const onDeath = (err) => {
-    failBackendWaiters(err || new Error("Backend process exited"));
-    backendProc = null;
+    failBackendWaiters(err || new Error("Backend process exited"), proc);
+    if (backendProc === proc) backendProc = null;
   };
-  backendProc.on("error", onDeath);
-  backendProc.on("exit", () => onDeath());
+  proc.on("error", onDeath);
+  proc.on("exit", () => onDeath());
 }
 
 function ensureBackend() {
+  if (backendProc && retiringBackends.has(backendProc)) throw new Error("COMPUTER_USE_STOPPING");
   if (!backendProc || backendProc.exitCode !== null) {
     spawnBackend();
   }
   return backendProc;
 }
 
-function killBackend() {
-  if (backendProc) {
+function killBackend(error = new Error("Backend process stopped"), proc = backendProc) {
+  if (proc) {
+    if (backendProc === proc) backendProc = null;
+    failBackendWaiters(error, proc);
     try {
-      backendProc.kill();
+      proc.kill();
     } catch {
       /* already dead */
     }
-    backendProc = null;
   }
 }
 
-function runBackend(action, args = {}, timeoutMs = 30000) {
+function runBackend(action, args = {}, timeoutMs = 30000, request) {
   const proc = ensureBackend();
+  if (request) request.proc = proc;
   const id = ++backendNextId;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -569,19 +612,19 @@ function runBackend(action, args = {}, timeoutMs = 30000) {
       reject(new Error(`Windows Computer Use backend timed out after ${timeoutMs}ms during ${action}`));
       // The wedged call may have stalled the backend loop: kill it and
       // respawn lazily on the next call.
-      killBackend();
+      killBackend(new Error("Backend stopped after another action timed out"), proc);
     }, timeoutMs);
-    backendWaiters.set(id, { resolve, reject, timer });
-    proc.stdin.write(JSON.stringify({ id, action, args }) + "\n");
+    backendWaiters.set(id, { resolve, reject, timer, proc, request, action, args, sent: false });
+    dispatchNextBackend(proc);
   });
 }
 
-async function callTool(name, args) {
+async function callTool(name, args, request) {
   switch (name) {
     case "windows_computer_use_health":
-      return backendText("health", args);
+      return backendText("health", args, undefined, request);
     case "windows_computer_use_snapshot": {
-      const result = await runBackend("snapshot", args, 45000);
+      const result = await runBackend("snapshot", args, 45000, request);
       const content = [{ type: "text", text: safeJson(stripImagePayload(result)) }];
       if ((args?.includeScreenshot ?? true) && result.screenshot?.base64) {
         content.push({ type: "image", data: result.screenshot.base64, mimeType: "image/png" });
@@ -589,58 +632,64 @@ async function callTool(name, args) {
       return { content };
     }
     case "windows_computer_use_accessibility_tree":
-      return backendText("tree", args, 45000);
+      return backendText("tree", args, 45000, request);
     case "windows_computer_use_list_windows":
-      return backendText("list_windows", args);
+      return backendText("list_windows", args, undefined, request);
     case "windows_computer_use_find":
-      return backendText("find", args, 45000);
+      return backendText("find", args, 45000, request);
     case "windows_computer_use_element_info":
-      return backendText("element_info", args);
+      return backendText("element_info", args, undefined, request);
     case "windows_computer_use_click":
-      return backendText("click", args);
+      return backendText("click", args, undefined, request);
     case "windows_computer_use_double_click":
-      return backendText("double_click", args);
+      return backendText("double_click", args, undefined, request);
     case "windows_computer_use_move":
-      return backendText("move", args);
+      return backendText("move", args, undefined, request);
     case "windows_computer_use_drag":
-      return backendText("drag", args);
+      return backendText("drag", args, undefined, request);
     case "windows_computer_use_scroll":
-      return backendText("scroll", args);
+      return backendText("scroll", args, undefined, request);
     case "windows_computer_use_type_text":
-      return backendText("type_text", args);
+      return backendText("type_text", args, undefined, request);
     case "windows_computer_use_keypress":
-      return backendText("keypress", args);
+      return backendText("keypress", args, undefined, request);
     case "windows_computer_use_focus":
-      return backendText("focus", args);
+      return backendText("focus", args, undefined, request);
     case "windows_computer_use_invoke":
-      return backendText("invoke", args);
+      return backendText("invoke", args, undefined, request);
     case "windows_computer_use_set_value":
-      return backendText("set_value", args);
+      return backendText("set_value", args, undefined, request);
     case "windows_computer_use_activate_window":
-      return backendText("activate_window", args);
+      return backendText("activate_window", args, undefined, request);
     case "windows_computer_use_wait":
-      return backendText("wait", args, Math.max(31000, Number(args?.milliseconds || 500) + 1000));
+      return backendText("wait", args, Math.max(31000, Number(args?.milliseconds || 500) + 1000), request);
     case "windows_computer_use_ocr":
-      return backendText("ocr", args, 60000);
+      return backendText("ocr", args, 60000, request);
     case "windows_computer_use_wait_for":
-      return backendText("wait_for", args, Math.max(31000, Number(args?.timeoutMs || 5000) + 2000));
+      return backendText("wait_for", args, Math.max(31000, Number(args?.timeoutMs || 5000) + 2000), request);
     case "windows_computer_use_close_window":
-      return backendText("close_window", args);
+      return backendText("close_window", args, undefined, request);
     case "windows_computer_use_move_window":
-      return backendText("move_window", args);
+      return backendText("move_window", args, undefined, request);
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
 }
 
-async function backendText(action, args, timeoutMs) {
-  const result = await runBackend(action, args, timeoutMs);
+async function backendText(action, args, timeoutMs, request) {
+  const result = await runBackend(action, args, timeoutMs, request);
   return { content: [{ type: "text", text: safeJson(stripImagePayload(result)) }] };
 }
 
 async function handleRequest(message) {
   const { id, method, params } = message;
   if (method === "notifications/initialized") return null;
+  if (method === "notifications/cancelled") {
+    const request = pendingToolCalls.get(params?.requestId);
+    // Only this MCP process's own request and worker may be affected.
+    if (request) cancelBackendRequest(request);
+    return null;
+  }
   if (method === "initialize") {
     return {
       jsonrpc: "2.0",
@@ -665,8 +714,11 @@ async function handleRequest(message) {
     return { jsonrpc: "2.0", id, result: { tools } };
   }
   if (method === "tools/call") {
+    const request = { proc: null };
+    pendingToolCalls.set(id, request);
     try {
-      const result = await callTool(params?.name, params?.arguments || {});
+      const result = await callTool(params?.name, params?.arguments || {}, request);
+      if (request.cancelled) return { jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: "COMPUTER_USE_CANCELLED_AFTER_CURRENT_ACTION" }] } };
       return { jsonrpc: "2.0", id, result };
     } catch (error) {
       return {
@@ -677,6 +729,8 @@ async function handleRequest(message) {
           content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }]
         }
       };
+    } finally {
+      if (pendingToolCalls.get(id) === request) pendingToolCalls.delete(id);
     }
   }
   if (method === "resources/list") {
