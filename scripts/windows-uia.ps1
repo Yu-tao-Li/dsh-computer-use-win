@@ -1369,23 +1369,28 @@ function Get-ButtonFlags {
 function Click-At {
   param([int]$X, [int]$Y, [string]$Button = "left", [int]$Count = 1)
   $flags = Get-ButtonFlags $Button
-  [void][WindowsComputerUseNative]::SetCursorPos($X, $Y)
+  Move-ToPoint -X $X -Y $Y
   Start-Sleep -Milliseconds 40
   for ($i = 0; $i -lt $Count; $i++) {
-    [void][WindowsComputerUseNative]::SendMouseEvent(0, 0, [uint32]$flags[0], 0)
-    Start-Sleep -Milliseconds 30
-    [void][WindowsComputerUseNative]::SendMouseEvent(0, 0, [uint32]$flags[1], 0)
+    if ([WindowsComputerUseNative]::SendMouseEvent(0, 0, [uint32]$flags[0], 0) -ne 1) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected mouse input.' }
+    try { Start-Sleep -Milliseconds 30 }
+    finally {
+      if ([WindowsComputerUseNative]::SendMouseEvent(0, 0, [uint32]$flags[1], 0) -ne 1) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected mouse release.' }
+    }
     Start-Sleep -Milliseconds 60
   }
 }
 
 function Move-ToPoint {
   param([int]$X, [int]$Y)
-  [void][WindowsComputerUseNative]::SetCursorPos($X, $Y)
+  if (-not [WindowsComputerUseNative]::SetCursorPos($X, $Y)) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected cursor positioning. Restore the interactive desktop before retrying.' }
 }
 
 function Type-Text {
   param([string]$Text, [bool]$RestoreClipboard = $true)
+  $position = New-Object WindowsComputerUseNative+POINT
+  if (-not [WindowsComputerUseNative]::GetCursorPos([ref]$position)) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows input desktop is unavailable.' }
+  Move-ToPoint -X $position.x -Y $position.y
   $hadText = $false
   $oldText = $null
   try {

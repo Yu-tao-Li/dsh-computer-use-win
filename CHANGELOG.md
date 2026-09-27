@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- 修复 MCP 取消后 worker 继续阻塞及旧 worker 退出影响替代进程的问题；带激活行为的读取和已发出的输入完成当前动作后再回收，仍受现有超时限制。
+- 顶层窗口发现改用 EnumWindows；目标解析保留此前观察的坐标缓存，HWND/PID 元素 ID 校验窗口身份和 viewMode。
+- 检查光标定位和点击输入返回值，成功按下后在异常路径中尝试释放；新增 PowerShell 5.1/7 隔离回归测试。
+- 保留后端脚本的 UTF-8 BOM，避免 Windows PowerShell 5.1 在非 UTF-8 系统编码下解析失败，并增加编码回归检查。
+- Fixed worker cancellation and replacement isolation, native window discovery with preserved coordinate observations, and checked click input cleanup. Activation-aware cancellation remains bounded by the existing timeout. Added isolated PowerShell 5.1/7 regressions.
+- 感谢 / Thanks to [@xut1021](https://github.com/xut1021) for the report, patches and tests in [#8](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/8), [#9](https://github.com/Yu-tao-Li/dsh-computer-use-win/pull/9), [#10](https://github.com/Yu-tao-Li/dsh-computer-use-win/pull/10) and [#11](https://github.com/Yu-tao-Li/dsh-computer-use-win/pull/11).
+
 ## 0.2.2 — 2026-09-26
 
 - **修复 `ocr` 的 `query` 参数被 schema 禁止**([#6](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/6)):handler 一直支持并处理 `query`(返回 `query`/`matched`),README 也已宣传,但 `additionalProperties: false` 的 schema 未声明该参数,规范客户端永远无法发送。现已加入 `ocr` 的 inputSchema。感谢 [@TomJerry234](https://github.com/TomJerry234) 的自动化审计。
