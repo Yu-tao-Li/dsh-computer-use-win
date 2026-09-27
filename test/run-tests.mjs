@@ -10,6 +10,7 @@ const checkout = fileURLToPath(new URL('../', import.meta.url));
 const powershell = process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe';
 const root = await mkdtemp(path.join(os.tmpdir(), 'wcu-isolated-tests-'));
 const suites = [
+  ['source-encoding', process.execPath, ['test/source-encoding.mjs']],
   ['selftest', process.execPath, ['mcp/server.mjs', '--self-test']],
   ['mcp-roundtrip', process.execPath, ['test/mcp-test.mjs', 'mcp/server.mjs', 'windows_computer_use_wait', '{"milliseconds":1}']],
   ['profile-resolution', process.execPath, ['test/profile-resolution.mjs']],
@@ -40,6 +41,8 @@ for (const [name, command, args] of suites) {
   await writeFile(path.join(root, 'results.json'), JSON.stringify({ powershell, node: process.version, results }, null, 2) + '\n');
   console.log(`${passed ? 'PASS' : 'FAIL'} ${name} (${Date.now() - start} ms)`);
   if (!passed) {
+    if (result.stderr) console.error(result.stderr);
+    if (result.error) console.error(result.error.message);
     console.error(`Diagnostics retained in ${temp}`);
     process.exitCode = 1;
     break;
