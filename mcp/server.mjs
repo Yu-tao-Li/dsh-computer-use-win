@@ -498,12 +498,15 @@ function cancelBackendRequest(request) {
     backendWaiters.delete(id); clearTimeout(w.timer); w.reject(error);
     return;
   }
-  if (interruptibleActions.has(w.action)) {
+  // Read tools may activate a target, including an Alt press/release in the
+  // foreground helper. Let those calls finish just like explicit input actions.
+  if (interruptibleActions.has(w.action) && !w.args?.activate) {
     killBackend(error, proc);
     return;
   }
   // Input routines may currently hold a button/key. Let their key-up cleanup finish,
   // but discard every not-yet-started action and retire this worker immediately after.
+  // The existing timeout still bounds cleanup; cancellation does not extend it.
   retiringBackends.add(proc);
   for (const [queuedId, queued] of backendWaiters) {
     if (queued.proc !== proc || queued.sent) continue;
