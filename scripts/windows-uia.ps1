@@ -1095,7 +1095,7 @@ function Invoke-WgcCapture {
 
 
 function Get-NativeWindowList {
-  param([bool]$IncludeInvisible = $false, [int]$MaxWindows = 50)
+  param([bool]$IncludeInvisible = $false, [int]$MaxWindows = 50, [switch]$RecordObservation)
   $items = New-Object System.Collections.Generic.List[object]
   $foreground = [WindowsComputerUseNative]::GetForegroundWindow()
   foreach ($handle in [WindowsComputerUseNative]::TopLevelWindows()) {
@@ -1113,7 +1113,11 @@ function Get-NativeWindowList {
     $hwnd = $handle.ToInt64()
     $box = [ordered]@{ x=$rect.left; y=$rect.top; width=$rect.right-$rect.left; height=$rect.bottom-$rect.top; centerX=($rect.left+$rect.right)/2; centerY=($rect.top+$rect.bottom)/2 }
     $items.Add([ordered]@{id="uia:hwnd:${hwnd}:pid:${ownerId}"; depth=1; name=$title.ToString(); className=$class.ToString(); controlType='Window'; processId=$ownerId; nativeWindowHandle=$hwnd; boundingBox=$box; isEnabled=[WindowsComputerUseNative]::IsWindowEnabled($handle); isOffscreen=(-not $visible -or [WindowsComputerUseNative]::IsIconic($handle)); hasKeyboardFocus=($foreground -eq $handle); source='win32'})
-    $script:WindowCache[[string]$hwnd] = @{ x=$rect.left; y=$rect.top; ts=[DateTimeOffset]::Now.ToUnixTimeMilliseconds() }
+    # Target lookup must not replace the coordinates used by Home-Point.
+    # Only explicit observations establish a new coordinate baseline.
+    if ($RecordObservation) {
+      $script:WindowCache[[string]$hwnd] = @{ x=$rect.left; y=$rect.top; ts=[DateTimeOffset]::Now.ToUnixTimeMilliseconds() }
+    }
     if ($items.Count -ge $MaxWindows) { break }
   }
   return ,$items
@@ -1232,6 +1236,7 @@ function Resolve-Element {
   if ($ElementId -match '^uia:hwnd:(\d+):pid:(\d+)$') {
     $handle = [IntPtr]([int64]$Matches[1])
     $expectedOwner = [uint32]$Matches[2]
+    $null = Get-ViewMode $InputObject "control"
     $ownerId = [uint32]0
     [void][WindowsComputerUseNative]::GetWindowThreadProcessId($handle, [ref]$ownerId)
     if (-not [WindowsComputerUseNative]::IsWindow($handle) -or $ownerId -ne $expectedOwner) { throw 'Window identity changed; refresh the window list.' }
@@ -1728,7 +1733,7 @@ function Invoke-Action {
     "list_windows" {
       $includeInvisible = [bool](Get-Prop $inputObject "includeInvisible" $false)
       $maxWindows = [int](Get-Prop $inputObject "maxWindows" 50)
-      $windows = Get-NativeWindowList -IncludeInvisible $includeInvisible -MaxWindows $maxWindows
+      $windows = Get-NativeWindowList -IncludeInvisible $includeInvisible -MaxWindows $maxWindows -RecordObservation
       return ([ordered]@{ ok = $true; windows = @($windows.ToArray()) })
     }
     "find" {
