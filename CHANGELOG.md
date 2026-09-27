@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 — 2026-09-28
 
 - 修复 MCP 取消后 worker 继续阻塞及旧 worker 退出影响替代进程的问题；带激活行为的读取和已发出的输入完成当前动作后再回收，仍受现有超时限制。
 - 顶层窗口发现改用 EnumWindows；目标解析保留此前观察的坐标缓存，HWND/PID 元素 ID 校验窗口身份和 viewMode。
