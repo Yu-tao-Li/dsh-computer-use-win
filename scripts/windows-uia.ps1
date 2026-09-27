@@ -98,9 +98,6 @@ public static class WindowsComputerUseNative {
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
   [DllImport("user32.dll")]
-  public static extern bool IsIconic(IntPtr hWnd);
-
-  [DllImport("user32.dll")]
   public static extern bool SetCursorPos(int X, int Y);
 
   public const int MOUSEEVENTF_MOVE = 0x0001;
@@ -205,6 +202,22 @@ public static class WindowsComputerUseNative {
   [DllImport("user32.dll")]
   public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
+
+  public delegate bool EnumWindowsCallback(IntPtr hwnd, IntPtr data);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr data);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, System.Text.StringBuilder text, int count);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder text, int count);
+  public static IntPtr[] TopLevelWindows() {
+    var result = new System.Collections.Generic.List<IntPtr>();
+    EnumWindows(delegate(IntPtr hwnd, IntPtr data) { result.Add(hwnd); return true; }, IntPtr.Zero);
+    return result.ToArray();
+  }
+
   public const byte VK_MENU = 0x12;
   public const uint KEYEVENTF_KEYUP = 0x0002;
 
@@ -299,6 +312,19 @@ function Load-Assemblies {
 
   Add-Type -AssemblyName UIAutomationClient
   Add-Type -AssemblyName UIAutomationTypes
+  # Standard Win32 controls need the client-side providers. Without these,
+  # controls can silently appear as unnamed Pane nodes with no Value pattern.
+  Add-Type -AssemblyName UIAutomationClientsideProviders
+  # Register the exported table directly: .NET 10 assembly-name casing breaks proxy type lookup.
+  $providers = [UIAutomationClientsideProviders.UIAutomationClientSideProviders]::ClientSideProviderDescriptionTable
+  try {
+    [System.Windows.Automation.ClientSettings]::RegisterClientSideProviders($providers)
+  } catch {
+    # .NET Framework's first registration can initialize its proxy table and
+    # throw NullReferenceException. A single second registration completes it.
+    if ($_.Exception.InnerException -isnot [NullReferenceException]) { throw }
+    [System.Windows.Automation.ClientSettings]::RegisterClientSideProviders($providers)
+  }
   Add-Type -AssemblyName WindowsBase
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName System.Drawing
@@ -1067,6 +1093,36 @@ function Invoke-WgcCapture {
   return [WgcCapture]::CaptureWindow([uint32]$Hwnd, [int]$Width, [int]$Height, $OutPng, [int]$TimeoutMs)
 }
 
+
+function Get-NativeWindowList {
+  param([bool]$IncludeInvisible = $false, [int]$MaxWindows = 50, [switch]$RecordObservation)
+  $items = New-Object System.Collections.Generic.List[object]
+  $foreground = [WindowsComputerUseNative]::GetForegroundWindow()
+  foreach ($handle in [WindowsComputerUseNative]::TopLevelWindows()) {
+    $visible = [WindowsComputerUseNative]::IsWindowVisible($handle)
+    if (-not $IncludeInvisible -and (-not $visible -or [WindowsComputerUseNative]::IsIconic($handle))) { continue }
+    $title = New-Object System.Text.StringBuilder 2048
+    [void][WindowsComputerUseNative]::GetWindowText($handle, $title, $title.Capacity)
+    $class = New-Object System.Text.StringBuilder 256
+    [void][WindowsComputerUseNative]::GetClassName($handle, $class, $class.Capacity)
+    $rect = New-Object WindowsComputerUseNative+RECT
+    if (-not [WindowsComputerUseNative]::GetWindowRect($handle, [ref]$rect)) { continue }
+    $ownerId = [uint32]0
+    [void][WindowsComputerUseNative]::GetWindowThreadProcessId($handle, [ref]$ownerId)
+    if (-not $ownerId) { continue }
+    $hwnd = $handle.ToInt64()
+    $box = [ordered]@{ x=$rect.left; y=$rect.top; width=$rect.right-$rect.left; height=$rect.bottom-$rect.top; centerX=($rect.left+$rect.right)/2; centerY=($rect.top+$rect.bottom)/2 }
+    $items.Add([ordered]@{id="uia:hwnd:${hwnd}:pid:${ownerId}"; depth=1; name=$title.ToString(); className=$class.ToString(); controlType='Window'; processId=$ownerId; nativeWindowHandle=$hwnd; boundingBox=$box; isEnabled=[WindowsComputerUseNative]::IsWindowEnabled($handle); isOffscreen=(-not $visible -or [WindowsComputerUseNative]::IsIconic($handle)); hasKeyboardFocus=($foreground -eq $handle); source='win32'})
+    # Target lookup must not replace the coordinates used by Home-Point.
+    # Only explicit observations establish a new coordinate baseline.
+    if ($RecordObservation) {
+      $script:WindowCache[[string]$hwnd] = @{ x=$rect.left; y=$rect.top; ts=[DateTimeOffset]::Now.ToUnixTimeMilliseconds() }
+    }
+    if ($items.Count -ge $MaxWindows) { break }
+  }
+  return ,$items
+}
+
 function Resolve-TargetWindow {
   param([object]$InputObject)
   if (-not (Has-WindowTarget $InputObject)) { return $null }
@@ -1078,18 +1134,15 @@ function Resolve-TargetWindow {
     return $element
   }
 
-  $root = [System.Windows.Automation.AutomationElement]::RootElement
-  $children = Get-Children -Element $root -ViewMode "control" -IncludeOffscreen $true
   $fallback = $null
-  for ($i = 0; $i -lt $children.Count; $i++) {
-    $el = $children.Item($i)
-    $info = Convert-ElementInfo -Element $el -Id "uia:root.$i" -Depth 1
-    if (Test-TargetMatch -Info $info -InputObject $InputObject) {
-      if (-not $info.isOffscreen) { return $el }
-      if ($null -eq $fallback) { $fallback = $el }
+  foreach ($info in (Get-NativeWindowList -IncludeInvisible $true -MaxWindows 4096)) {
+    if (-not (Test-TargetMatch -Info $info -InputObject $InputObject)) { continue }
+    if (-not $info.isOffscreen) {
+      return [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]([int64]$info.nativeWindowHandle))
     }
+    if ($null -eq $fallback) { $fallback = $info }
   }
-  if ($null -ne $fallback) { return $fallback }
+  if ($null -ne $fallback) { return [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]([int64]$fallback.nativeWindowHandle)) }
   throw "No top-level window matched the requested target."
 }
 
@@ -1177,6 +1230,17 @@ function Resolve-Element {
   param([string]$ElementId, [object]$InputObject = $null)
   if ([string]::IsNullOrWhiteSpace($ElementId)) {
     throw "elementId is required."
+  }
+
+
+  if ($ElementId -match '^uia:hwnd:(\d+):pid:(\d+)$') {
+    $handle = [IntPtr]([int64]$Matches[1])
+    $expectedOwner = [uint32]$Matches[2]
+    $null = Get-ViewMode $InputObject "control"
+    $ownerId = [uint32]0
+    [void][WindowsComputerUseNative]::GetWindowThreadProcessId($handle, [ref]$ownerId)
+    if (-not [WindowsComputerUseNative]::IsWindow($handle) -or $ownerId -ne $expectedOwner) { throw 'Window identity changed; refresh the window list.' }
+    return [System.Windows.Automation.AutomationElement]::FromHandle($handle)
   }
 
   # Preferred form: uia:rt:<n>-<n>-... resolved by RuntimeId (stable for the
@@ -1669,17 +1733,7 @@ function Invoke-Action {
     "list_windows" {
       $includeInvisible = [bool](Get-Prop $inputObject "includeInvisible" $false)
       $maxWindows = [int](Get-Prop $inputObject "maxWindows" 50)
-      $root = [System.Windows.Automation.AutomationElement]::RootElement
-      $children = Get-Children -Element $root -ViewMode "control" -IncludeOffscreen $true
-      $windows = New-Object System.Collections.Generic.List[object]
-      for ($i = 0; $i -lt $children.Count; $i++) {
-        if ($windows.Count -ge $maxWindows) { break }
-        $el = $children.Item($i)
-        $info = Convert-ElementInfo -Element $el -Id "uia:root.$i" -Depth 1
-        Update-WindowCache $el
-        if (-not $includeInvisible -and $info.isOffscreen) { continue }
-        $windows.Add($info)
-      }
+      $windows = Get-NativeWindowList -IncludeInvisible $includeInvisible -MaxWindows $maxWindows -RecordObservation
       return ([ordered]@{ ok = $true; windows = @($windows.ToArray()) })
     }
     "find" {
