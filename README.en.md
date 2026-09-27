@@ -102,7 +102,9 @@ node test/profile-resolution.mjs         # DSH profile node_modules resolution r
 node test/notepad-e2e.mjs                # real input E2E (opens Notepad)
 ```
 
-`npm test` runs the smoke, MCP protocol, and profile-resolution regression tests. CI (`.github/workflows/ci.yml`) runs these checks on `windows-latest` for every push/PR.
+`npm test` runs smoke, MCP protocol, profile-resolution, worker lifecycle, activation cancellation, window discovery/coordinate-cache/argument validation, and input-error regressions. Each suite uses a separate process and temporary directory; logs and smoke-test screenshots remain in the printed artifacts directory. Tests send no physical input and do not change installed DSH profiles. Input and window-movement scenarios use fake APIs; real desktop checks are read-only.
+
+Windows PowerShell 5.1 is the default. Set `$env:WINDOWS_CU_POWERSHELL = (Get-Command pwsh).Source` before `npm test` to use PowerShell 7. CI (`.github/workflows/ci.yml`) tests both runtimes on every push/PR.
 
 ## License
 

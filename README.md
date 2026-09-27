@@ -102,7 +102,9 @@ node test/profile-resolution.mjs    # DSH profile node_modules 路径回归测�
 node test/notepad-e2e.mjs           # 真实输入端到端（会开记事本）
 ```
 
-`npm test` 运行自检、MCP 协议和 profile 路径回归测试；CI（`.github/workflows/ci.yml`）在每次 push/PR 时于 `windows-latest` 执行这些检查。
+`npm test` 运行自检、MCP 协议、profile 路径、worker 生命周期、激活取消、窗口枚举/坐标缓存/参数校验及输入错误回归测试。每项测试使用独立进程和临时目录，日志与自检截图留在输出所示目录；不发送物理输入，也不修改已安装的 DSH profile。输入和窗口移动场景使用模拟接口，真实桌面仅用于只读检查。
+
+默认使用 Windows PowerShell 5.1；可设置 `$env:WINDOWS_CU_POWERSHELL = (Get-Command pwsh).Source` 后运行 `npm test` 验证 PowerShell 7。CI（`.github/workflows/ci.yml`）在每次 push/PR 时分别测试这两种运行时。
 
 ## 许可
 

@@ -27,7 +27,7 @@
     "selftest": "node mcp/server.mjs --self-test",
     "mcp-test": "node test/mcp-test.mjs",
     "profile-resolution": "node test/profile-resolution.mjs",
-    "test": "npm run selftest && npm run mcp-test && npm run profile-resolution",
+    "test": "node test/run-tests.mjs",
     "e2e": "node test/notepad-e2e.mjs"
   },
   "keywords": [
