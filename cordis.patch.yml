@@ -10,7 +10,9 @@
 # package specifier through createRequire anchored at the profile's
 # package.json — this works in any profile under any $DSH_HOME, survives the
 # pnpm store layout, and keeps no hard-coded paths. `process.execPath` is the
-# absolute node binary that is running DSH itself.
+# host executable: node.exe for CLI/Web, or the Electron executable for Desktop.
+# The child-only ELECTRON_RUN_AS_NODE flag makes Electron run this stdio server
+# as Node; ordinary Node ignores it. Electron must enable the runAsNode fuse.
 
 - insert:
     - id: mcp-dsh-computer-use-win
@@ -21,5 +23,7 @@
         command: !!js process.execPath
         args:
           - !!js "process.getBuiltinModule('node:module').createRequire(new URL('package.json', baseUrl)).resolve('dsh-computer-use-win/mcp/server.mjs')"
+        env:
+          ELECTRON_RUN_AS_NODE: '1'
         toolCallTimeoutMs: 60000
         failOnStartupError: false

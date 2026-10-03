@@ -14,6 +14,7 @@ const suites = [
   ['selftest', process.execPath, ['mcp/server.mjs', '--self-test']],
   ['mcp-roundtrip', process.execPath, ['test/mcp-test.mjs', 'mcp/server.mjs', 'windows_computer_use_wait', '{"milliseconds":1}']],
   ['profile-resolution', process.execPath, ['test/profile-resolution.mjs']],
+  ['bundle-startup', process.execPath, ['test/bundle-startup.mjs']],
   ['backend-lifecycle', process.execPath, ['test/backend-lifecycle.mjs']],
   ['activation-cancellation', process.execPath, ['test/activation-cancellation.mjs']],
   ['native-window-discovery', process.execPath, ['test/native-window-discovery.mjs']],

@@ -47,6 +47,8 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 
 > bundle 在启动时通过所在 profile 的 `package.json` 解析已安装包中的 `server.mjs`，因此适用于任意 profile / `$DSH_HOME`，也兼容 pnpm 布局，无硬编码路径。同一 profile 只保留一个 `serverName: wincu` 行。
 
+DSH Desktop 的 `process.execPath` 指向 Electron 可执行程序。自 0.2.4 起，bundle 为 MCP 子进程显式设置 `ELECTRON_RUN_AS_NODE=1`，让服务以 Node 模式运行；普通 Node 启动同样适用。自定义 Electron 构建需启用 `runAsNode` fuse。此前为 #13 添加过完整用户配置覆盖的用户，升级后应移除该专用覆盖，再检查 `health`，使新版默认配置生效。
+
 ## 工具清单（22 个，前缀 `mcp__wincu__`）
 
 | 分组 | 工具 |
@@ -96,13 +98,15 @@ docs/dev-notes.md       设计原理、踩坑记录、性能数据、测试记�
 ```
 
 ```powershell
+npm ci                             # 安装仅用于测试的 Electron / MCP SDK / YAML 依赖
 node mcp/server.mjs --self-test     # 全栈自检（仅 Windows）
 node test/mcp-test.mjs              # initialize → tools/list → tools/call
 node test/profile-resolution.mjs    # DSH profile node_modules 路径回归测试
+node test/bundle-startup.mjs        # 实际 bundle 的 Node / Electron 启动回归
 node test/notepad-e2e.mjs           # 真实输入端到端（会开记事本）
 ```
 
-`npm test` 运行自检、MCP 协议、profile 路径、worker 生命周期、激活取消、窗口枚举/坐标缓存/参数校验及输入错误回归测试。每项测试使用独立进程和临时目录，日志与自检截图留在输出所示目录；不发送物理输入，也不修改已安装的 DSH profile。输入和窗口移动场景使用模拟接口，真实桌面仅用于只读检查。
+`npm test` 运行自检、MCP 协议、profile 路径、Node/Electron bundle 启动、worker 生命周期、激活取消、窗口枚举/坐标缓存/参数校验及输入错误回归测试。每项测试使用独立进程和临时目录，日志与自检截图留在输出所示目录；不发送物理输入，也不修改已安装的 DSH profile。输入和窗口移动场景使用模拟接口，真实桌面仅用于只读检查。
 
 默认使用 Windows PowerShell 5.1；可设置 `$env:WINDOWS_CU_POWERSHELL = (Get-Command pwsh).Source` 后运行 `npm test` 验证 PowerShell 7。CI（`.github/workflows/ci.yml`）在每次 push/PR 时分别测试这两种运行时。
 

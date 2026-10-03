@@ -47,6 +47,8 @@ Restart `dsh web`. The tools appear as `mcp__wincu__windows_computer_use_*`.
 
 > At boot the bundle resolves `server.mjs` from the installed package through the host profile's `package.json`, so it works in any profile / `$DSH_HOME` and with pnpm layouts — no hardcoded paths. Keep only one `serverName: wincu` row per profile.
 
+In DSH Desktop, `process.execPath` points to the Electron executable. Since 0.2.4, the bundle explicitly sets `ELECTRON_RUN_AS_NODE=1` for the MCP child, so Electron runs the server in Node mode; ordinary Node also works with this flag. Custom Electron builds must enable the `runAsNode` fuse. If you added a full user-config override for #13, remove that dedicated override after upgrading and check `health` so the updated bundle defaults take effect.
+
 ## Tools (22, prefix `mcp__wincu__`)
 
 | Group | Tools |
@@ -96,13 +98,15 @@ docs/dev-notes.md     design rationale, pitfalls, benchmarks, test log
 ```
 
 ```sh
+npm ci                                 # test-only Electron / MCP SDK / YAML dependencies
 node mcp/server.mjs --self-test          # full stack smoke test (Windows only)
 node test/mcp-test.mjs                   # initialize → tools/list → tools/call
 node test/profile-resolution.mjs         # DSH profile node_modules resolution regression
+node test/bundle-startup.mjs             # actual bundle startup in Node / Electron
 node test/notepad-e2e.mjs                # real input E2E (opens Notepad)
 ```
 
-`npm test` runs smoke, MCP protocol, profile-resolution, worker lifecycle, activation cancellation, window discovery/coordinate-cache/argument validation, and input-error regressions. Each suite uses a separate process and temporary directory; logs and smoke-test screenshots remain in the printed artifacts directory. Tests send no physical input and do not change installed DSH profiles. Input and window-movement scenarios use fake APIs; real desktop checks are read-only.
+`npm test` runs smoke, MCP protocol, profile-resolution, Node/Electron bundle startup, worker lifecycle, activation cancellation, window discovery/coordinate-cache/argument validation, and input-error regressions. Each suite uses a separate process and temporary directory; logs and smoke-test screenshots remain in the printed artifacts directory. Tests send no physical input and do not change installed DSH profiles. Input and window-movement scenarios use fake APIs; real desktop checks are read-only.
 
 Windows PowerShell 5.1 is the default. Set `$env:WINDOWS_CU_POWERSHELL = (Get-Command pwsh).Source` before `npm test` to use PowerShell 7. CI (`.github/workflows/ci.yml`) tests both runtimes on every push/PR.
 
