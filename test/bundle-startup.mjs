@@ -107,6 +107,22 @@ export async function probe(config, extraEnv = {}) {
   return { ...result, elapsedMs: Date.now() - started, stderr };
 }
 
+function prepareBackendCache(fixture, temp) {
+  // Cold C# compilation is covered by the separate selftest suite. Warm only
+  // this fixture's runtime-specific cache before testing the stdio launch, so
+  // a busy runner's compiler does not consume the MCP backend's 30s deadline.
+  const result = spawnSync(process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe', [
+    '-NoLogo', '-NoProfile', '-Sta', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(fixture.installed, 'scripts', 'windows-uia.ps1'), '-Action', 'health'
+  ], {
+    env: { ...process.env, TEMP: temp, TMP: temp, WCU_INDICATOR: '0' },
+    input: '{}', windowsHide: true, encoding: 'utf8', timeout: 90000
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(JSON.parse(result.stdout.trim()).ok, true, result.stdout);
+}
+
 async function main() {
   const fixture = await makeProfile();
   const expectedVersion = JSON.parse(await readFile(path.join(fixture.installed, 'package.json'), 'utf8')).version;
@@ -120,9 +136,11 @@ async function main() {
     assert.equal(host.config.env?.ELECTRON_RUN_AS_NODE, '1', 'Bundle must explicitly set the child Node-mode flag');
     const temp = path.join(fixture.root, name + '-temp');
     await mkdir(temp);
+    prepareBackendCache(fixture, temp);
     const result = await probe(host.config, { TEMP: temp, TMP: temp });
     results.push({ name, runtime: host.runtime, ...result });
     await writeFile(path.join(fixture.root, 'results.json'), JSON.stringify(results, null, 2) + '\n');
+    assert.equal(result.error, undefined, JSON.stringify(result));
     assert.equal(result.connected, true, result.error || result.stderr);
     assert.equal(result.serverInfo.name, 'windows-computer-use');
     assert.equal(result.serverInfo.version, expectedVersion);
