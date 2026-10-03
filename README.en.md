@@ -106,7 +106,7 @@ node test/bundle-startup.mjs             # actual bundle startup in Node / Elect
 node test/notepad-e2e.mjs                # real input E2E (opens Notepad)
 ```
 
-`npm test` runs smoke, MCP protocol, profile-resolution, Node/Electron bundle startup, worker lifecycle, activation cancellation, window discovery/coordinate-cache/argument validation, and input-error regressions. Each suite uses a separate process and temporary directory; logs and smoke-test screenshots remain in the printed artifacts directory. Tests send no physical input and do not change installed DSH profiles. Input and window-movement scenarios use fake APIs; real desktop checks are read-only.
+`npm test` runs smoke, MCP protocol, profile-resolution, Node/Electron bundle startup, worker lifecycle, activation cancellation, window discovery/coordinate-cache/argument validation, and input-error regressions. Each suite uses a separate process and temporary directory; logs and smoke-test screenshots remain in the printed artifacts directory. Tests send no physical input and do not change installed DSH profiles. Bundle startup uses a deterministic PowerShell protocol fixture; input and window-movement scenarios use fake APIs. Selftest and read-only window checks cover the real desktop backend.
 
 Windows PowerShell 5.1 is the default. Set `$env:WINDOWS_CU_POWERSHELL = (Get-Command pwsh).Source` before `npm test` to use PowerShell 7. CI (`.github/workflows/ci.yml`) tests both runtimes on every push/PR.
 

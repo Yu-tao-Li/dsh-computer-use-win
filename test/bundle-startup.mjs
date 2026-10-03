@@ -1,5 +1,6 @@
 // Parse and evaluate the shipped DSH bundle in real Node/Electron hosts, then
-// launch its configured child through the official MCP SDK. Read-only calls.
+// launch its configured child through the official MCP SDK. A deterministic
+// PowerShell protocol fixture keeps this transport test independent of UIA.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -107,24 +108,18 @@ export async function probe(config, extraEnv = {}) {
   return { ...result, elapsedMs: Date.now() - started, stderr };
 }
 
-function prepareBackendCache(fixture, temp) {
-  // Cold C# compilation is covered by the separate selftest suite. Warm only
-  // this fixture's runtime-specific cache before testing the stdio launch, so
-  // a busy runner's compiler does not consume the MCP backend's 30s deadline.
-  const result = spawnSync(process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe', [
-    '-NoLogo', '-NoProfile', '-Sta', '-ExecutionPolicy', 'Bypass', '-File',
-    path.join(fixture.installed, 'scripts', 'windows-uia.ps1'), '-Action', 'health'
-  ], {
-    env: { ...process.env, TEMP: temp, TMP: temp, WCU_INDICATOR: '0' },
-    input: '{}', windowsHide: true, encoding: 'utf8', timeout: 90000
-  });
-  assert.ifError(result.error);
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.equal(JSON.parse(result.stdout.trim()).ok, true, result.stdout);
-}
-
 async function main() {
   const fixture = await makeProfile();
+  // Only this test-created copy is replaced. Real backend coverage lives in
+  // selftest and native-window-discovery; package smoke uses the shipped file.
+  await writeFile(path.join(fixture.installed, 'scripts', 'windows-uia.ps1'), `param([switch]$Persistent)
+while ($null -ne ($line = [Console]::In.ReadLine())) {
+  $request = $line | ConvertFrom-Json
+  if ($request.action -notin @('health', 'wait')) { throw 'Unexpected fixture action' }
+  if ($request.action -eq 'wait') { Start-Sleep -Milliseconds 1 }
+  [Console]::WriteLine((@{id=$request.id;ok=$true;action=$request.action;testFixture=$true} | ConvertTo-Json -Compress))
+}
+`);
   const expectedVersion = JSON.parse(await readFile(path.join(fixture.installed, 'package.json'), 'utf8')).version;
   const results = [];
   console.log(`Bundle startup artifacts: ${fixture.root}`);
@@ -136,7 +131,6 @@ async function main() {
     assert.equal(host.config.env?.ELECTRON_RUN_AS_NODE, '1', 'Bundle must explicitly set the child Node-mode flag');
     const temp = path.join(fixture.root, name + '-temp');
     await mkdir(temp);
-    prepareBackendCache(fixture, temp);
     const result = await probe(host.config, { TEMP: temp, TMP: temp });
     results.push({ name, runtime: host.runtime, ...result });
     await writeFile(path.join(fixture.root, 'results.json'), JSON.stringify(results, null, 2) + '\n');
@@ -148,7 +142,7 @@ async function main() {
     assert.equal(result.healthOk, true);
     assert.equal(result.waitOk, true);
     assert.equal(result.resourceCount, 6);
-    console.log(`PASS ${name} bundle -> MCP initialize / 22 tools / health / wait / 6 resources`);
+    console.log(`PASS ${name} bundle -> MCP initialize / 22 tools / health / wait / 6 resources (synthetic PowerShell worker)`);
   }
 }
 

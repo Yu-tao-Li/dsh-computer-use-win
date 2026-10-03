@@ -3,7 +3,7 @@
 ## 0.2.4 — 2026-10-03
 
 - 修复 DSH Desktop/Electron 中 MCP 启动时的 `Connection closed`：bundle 为 MCP 子进程显式设置 `ELECTRON_RUN_AS_NODE=1`，同时兼容普通 Node 宿主。
-- 新增实际 bundle 的 Node/Electron 启动回归，使用官方 MCP SDK 验证 initialize、22 个工具、health、wait 和 6 项资源，并接入 PowerShell 5.1/7 CI。Electron、MCP SDK 和 YAML 解析器仅用于测试，运行时继续保持零依赖。
+- 新增实际 bundle 的 Node/Electron 启动回归，使用官方 MCP SDK 和确定性 PowerShell 协议 fixture 验证 initialize、22 个工具、health、wait 和 6 项资源，并接入 PowerShell 5.1/7 CI。原有自检/只读窗口测试继续验证真实后端。Electron、MCP SDK 和 YAML 解析器仅用于测试，运行时继续保持零依赖。
 - Fixed MCP startup in DSH Desktop/Electron by explicitly setting `ELECTRON_RUN_AS_NODE=1` for the server child. Added actual-bundle startup regressions in Node and Electron with the official MCP SDK, included in both PowerShell CI jobs.
 - 感谢 / Thanks to [@KazeLiu](https://github.com/KazeLiu) for the report and launch comparison in [#13](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/13).
 
