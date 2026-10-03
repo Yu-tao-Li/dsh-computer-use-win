@@ -14,7 +14,7 @@ const SERVER_VERSION = (() => {
   try {
     return JSON.parse(readFileSync(path.join(pluginRoot, "package.json"), "utf8")).version;
   } catch {
-    return "0.2.3";
+    return "0.2.4";
   }
 })();
 const backendPath = path.join(pluginRoot, "scripts", "windows-uia.ps1");

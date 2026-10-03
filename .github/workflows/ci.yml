@@ -22,8 +22,14 @@ jobs:
         with:
           node-version: 24
 
-      # No install step: the package has zero runtime dependencies. The MCP
-      # server is plain ESM and the backend is PowerShell 5.1 + csc.
+      # Runtime remains dependency-free. Test-only dependencies parse the DSH
+      # bundle and launch real Node/Electron children through the official SDK.
+      - name: Install regression dependencies
+        run: npm ci
+
+      - name: Download Electron test runtime
+        run: node node_modules/electron/install.js
+        timeout-minutes: 5
 
       # Runtime caches and artifacts are isolated per suite. Read-only smoke
       # checks use the desktop; input/activation/coordinate tests use fake APIs.
