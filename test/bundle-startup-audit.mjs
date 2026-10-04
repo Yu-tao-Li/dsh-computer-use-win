@@ -12,9 +12,10 @@ const powershell = process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe';
 const root = await mkdtemp(path.join(os.tmpdir(), 'wcu-worker-autoload-audit-'));
 const results = [];
 const variants = [
-  ['baseline', '', 'ConvertFrom-Json', 'ConvertTo-Json'],
   ['qualified', '', 'Microsoft.PowerShell.Utility\\ConvertFrom-Json', 'Microsoft.PowerShell.Utility\\ConvertTo-Json'],
-  ['explicit-import', 'Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop', 'ConvertFrom-Json', 'ConvertTo-Json']
+  ['explicit-import', 'Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop', 'ConvertFrom-Json', 'ConvertTo-Json'],
+  ['builtin-path-only', '$env:PSModulePath = "$PSHOME/Modules"', 'ConvertFrom-Json', 'ConvertTo-Json'],
+  ['baseline-last', '', 'ConvertFrom-Json', 'ConvertTo-Json']
 ];
 function workerSource(prelude, decode, encode) {
   return `param([switch]$Persistent)
@@ -62,7 +63,7 @@ for (const [name, prelude, decode, encode] of variants) {
 }
 // Test targeted module loading with the actual shipped bundle and SDK too.
 const fixture = await makeProfile();
-await writeFile(path.join(fixture.installed, 'scripts/windows-uia.ps1'), workerSource(...variants[2].slice(1)));
+await writeFile(path.join(fixture.installed, 'scripts/windows-uia.ps1'), workerSource(...variants[1].slice(1)));
 for (const [name, command, isElectron] of [['node', process.execPath, false], ['electron', electron, true]]) {
   const host = hostConfig(command, fixture, isElectron);
   const temp = path.join(fixture.root, name + '-temp');
