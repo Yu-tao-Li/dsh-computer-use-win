@@ -58,7 +58,18 @@ export function hostConfig(command, fixture, isElectron = false) {
   return JSON.parse(result.stdout);
 }
 
-export async function probe(config, extraEnv = {}) {
+export async function probe(config, extraEnv = {}, onTiming = () => {}) {
+  const started = performance.now();
+  const stagesMs = {};
+  async function timed(name, operation) {
+    const start = performance.now();
+    onTiming({ stage: name, event: 'start' });
+    try { return await operation(); }
+    finally {
+      stagesMs[name] = Math.round((performance.now() - start) * 100) / 100;
+      onTiming({ stage: name, event: 'end', durationMs: stagesMs[name] });
+    }
+  }
   const env = { ...getDefaultEnvironment() };
   // Do not let the host's Node-mode flag mask a missing bundle environment.
   delete env.ELECTRON_RUN_AS_NODE;
@@ -75,24 +86,23 @@ export async function probe(config, extraEnv = {}) {
   });
   let stderr = '';
   transport.stderr.on('data', bytes => { stderr = (stderr + bytes.toString()).slice(-8000); });
-  const started = Date.now();
   let timer;
   const deadline = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error('MCP startup timeout (15000ms)')), 15000);
   });
   let result = { connected: false };
   try {
-    await Promise.race([client.connect(transport), deadline]);
+    await timed('connect', () => Promise.race([client.connect(transport), deadline]));
     clearTimeout(timer);
     result = { connected: true, serverInfo: client.getServerVersion() };
-    const list = await client.listTools();
+    const list = await timed('listTools', () => client.listTools());
     result.toolCount = list.tools.length;
-    const reply = await client.callTool({ name: 'windows_computer_use_health', arguments: {} });
+    const reply = await timed('health', () => client.callTool({ name: 'windows_computer_use_health', arguments: {} }));
     const healthText = reply.content.find(item => item.type === 'text').text;
     if (reply.isError) throw new Error(healthText);
     const health = JSON.parse(healthText);
-    const wait = await client.callTool({ name: 'windows_computer_use_wait', arguments: { milliseconds: 1 } });
-    const resources = await client.listResources();
+    const wait = await timed('wait', () => client.callTool({ name: 'windows_computer_use_wait', arguments: { milliseconds: 1 } }));
+    const resources = await timed('listResources', () => client.listResources());
     result = {
       ...result,
       healthOk: health.ok === true && reply.isError !== true,
@@ -102,37 +112,50 @@ export async function probe(config, extraEnv = {}) {
     result = { ...result, error: String(error) };
   } finally {
     clearTimeout(timer);
-    await client.close().catch(() => {});
-    await transport.close().catch(() => {});
+    await timed('clientClose', () => client.close().catch(() => {}));
+    await timed('transportClose', () => transport.close().catch(() => {}));
   }
-  return { ...result, elapsedMs: Date.now() - started, stderr };
+  return { ...result, elapsedMs: Math.round(performance.now() - started), stagesMs, stderr };
 }
 
 async function main() {
+  const setupStarted = performance.now();
   const fixture = await makeProfile();
   // Only this test-created copy is replaced. Real backend coverage lives in
   // selftest and native-window-discovery; package smoke uses the shipped file.
   await writeFile(path.join(fixture.installed, 'scripts', 'windows-uia.ps1'), `param([switch]$Persistent)
+$clock = [Diagnostics.Stopwatch]::StartNew()
+[Console]::Error.WriteLine('FIXTURE entry ' + $clock.ElapsedMilliseconds)
 while ($null -ne ($line = [Console]::In.ReadLine())) {
+  [Console]::Error.WriteLine('FIXTURE read ' + $clock.ElapsedMilliseconds)
   $request = $line | ConvertFrom-Json
+  [Console]::Error.WriteLine('FIXTURE decoded ' + $clock.ElapsedMilliseconds)
   if ($request.action -notin @('health', 'wait')) { throw 'Unexpected fixture action' }
   if ($request.action -eq 'wait') { Start-Sleep -Milliseconds 1 }
   [Console]::WriteLine((@{id=$request.id;ok=$true;action=$request.action;testFixture=$true} | ConvertTo-Json -Compress))
+  [Console]::Error.WriteLine('FIXTURE replied ' + $request.action + ' ' + $clock.ElapsedMilliseconds)
 }
 `);
   const expectedVersion = JSON.parse(await readFile(path.join(fixture.installed, 'package.json'), 'utf8')).version;
   const results = [];
   console.log(`Bundle startup artifacts: ${fixture.root}`);
+  console.log(`TIMING setup ${Math.round(performance.now() - setupStarted)} ms`);
   for (const [name, command, isElectron] of [['node', process.execPath, false], ['electron', electron, true]]) {
+    const hostStarted = performance.now();
     const host = hostConfig(command, fixture, isElectron);
+    const hostEvaluationMs = Math.round(performance.now() - hostStarted);
+    console.log(`TIMING ${name} hostEvaluation ${hostEvaluationMs} ms`);
     assert.equal(host.config.command, command);
     assert.equal(host.config.transport, 'stdio');
     assert.equal(host.config.serverName, 'wincu');
     assert.equal(host.config.env?.ELECTRON_RUN_AS_NODE, '1', 'Bundle must explicitly set the child Node-mode flag');
     const temp = path.join(fixture.root, name + '-temp');
     await mkdir(temp);
-    const result = await probe(host.config, { TEMP: temp, TMP: temp });
-    results.push({ name, runtime: host.runtime, ...result });
+    const result = await probe(host.config, { TEMP: temp, TMP: temp }, timing => {
+      console.log(`TIMING ${name} ${JSON.stringify(timing)}`);
+    });
+    results.push({ name, runtime: host.runtime, hostEvaluationMs, ...result });
+    console.log(`RESULT ${JSON.stringify(results.at(-1))}`);
     await writeFile(path.join(fixture.root, 'results.json'), JSON.stringify(results, null, 2) + '\n');
     assert.equal(result.error, undefined, JSON.stringify(result));
     assert.equal(result.connected, true, result.error || result.stderr);
