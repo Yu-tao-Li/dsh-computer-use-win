@@ -37,6 +37,8 @@ for (const [name, command, args] of suites) {
   });
   await writeFile(path.join(temp, 'stdout.log'), result.stdout || '');
   await writeFile(path.join(temp, 'stderr.log'), (result.stderr || '') + (result.error ? '\n' + result.error.message : ''));
+  // Keep stage timings visible in successful CI jobs as well as failures.
+  if (name === 'bundle-startup' && result.stdout) console.log(result.stdout.trimEnd());
   const passed = result.status === 0 && !result.error;
   results.push({ name, passed, exitCode: result.status, durationMs: Date.now() - start });
   await writeFile(path.join(root, 'results.json'), JSON.stringify({ powershell, node: process.version, results }, null, 2) + '\n');
