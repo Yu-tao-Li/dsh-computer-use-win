@@ -58,16 +58,14 @@ export function hostConfig(command, fixture, isElectron = false) {
   return JSON.parse(result.stdout);
 }
 
-export async function probe(config, extraEnv = {}, onTiming = () => {}) {
+export async function probe(config, extraEnv = {}) {
   const started = performance.now();
   const stagesMs = {};
   async function timed(name, operation) {
     const start = performance.now();
-    onTiming({ stage: name, event: 'start' });
     try { return await operation(); }
     finally {
       stagesMs[name] = Math.round((performance.now() - start) * 100) / 100;
-      onTiming({ stage: name, event: 'end', durationMs: stagesMs[name] });
     }
   }
   const env = { ...getDefaultEnvironment() };
@@ -119,43 +117,40 @@ export async function probe(config, extraEnv = {}, onTiming = () => {}) {
 }
 
 async function main() {
-  const setupStarted = performance.now();
+  const suiteStarted = performance.now();
   const fixture = await makeProfile();
   // Only this test-created copy is replaced. Real backend coverage lives in
   // selftest and native-window-discovery; package smoke uses the shipped file.
+  // An unqualified first cmdlet can make Windows PowerShell 5.1 discover the
+  // runner's unrelated modules for tens of seconds. Load only the built-in
+  // module used by this fixture; keep the shipped backend and environment intact.
   await writeFile(path.join(fixture.installed, 'scripts', 'windows-uia.ps1'), `param([switch]$Persistent)
-$clock = [Diagnostics.Stopwatch]::StartNew()
-[Console]::Error.WriteLine('FIXTURE entry ' + $clock.ElapsedMilliseconds)
+Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop
 while ($null -ne ($line = [Console]::In.ReadLine())) {
-  [Console]::Error.WriteLine('FIXTURE read ' + $clock.ElapsedMilliseconds)
   $request = $line | ConvertFrom-Json
-  [Console]::Error.WriteLine('FIXTURE decoded ' + $clock.ElapsedMilliseconds)
   if ($request.action -notin @('health', 'wait')) { throw 'Unexpected fixture action' }
   if ($request.action -eq 'wait') { Start-Sleep -Milliseconds 1 }
   [Console]::WriteLine((@{id=$request.id;ok=$true;action=$request.action;testFixture=$true} | ConvertTo-Json -Compress))
-  [Console]::Error.WriteLine('FIXTURE replied ' + $request.action + ' ' + $clock.ElapsedMilliseconds)
 }
 `);
   const expectedVersion = JSON.parse(await readFile(path.join(fixture.installed, 'package.json'), 'utf8')).version;
   const results = [];
   console.log(`Bundle startup artifacts: ${fixture.root}`);
-  console.log(`TIMING setup ${Math.round(performance.now() - setupStarted)} ms`);
+  const setupMs = Math.round(performance.now() - suiteStarted);
+  console.log(`BUNDLE_TIMING ${JSON.stringify({ phase: 'setup', durationMs: setupMs })}`);
   for (const [name, command, isElectron] of [['node', process.execPath, false], ['electron', electron, true]]) {
     const hostStarted = performance.now();
     const host = hostConfig(command, fixture, isElectron);
     const hostEvaluationMs = Math.round(performance.now() - hostStarted);
-    console.log(`TIMING ${name} hostEvaluation ${hostEvaluationMs} ms`);
     assert.equal(host.config.command, command);
     assert.equal(host.config.transport, 'stdio');
     assert.equal(host.config.serverName, 'wincu');
     assert.equal(host.config.env?.ELECTRON_RUN_AS_NODE, '1', 'Bundle must explicitly set the child Node-mode flag');
     const temp = path.join(fixture.root, name + '-temp');
     await mkdir(temp);
-    const result = await probe(host.config, { TEMP: temp, TMP: temp }, timing => {
-      console.log(`TIMING ${name} ${JSON.stringify(timing)}`);
-    });
+    const result = await probe(host.config, { TEMP: temp, TMP: temp });
     results.push({ name, runtime: host.runtime, hostEvaluationMs, ...result });
-    console.log(`RESULT ${JSON.stringify(results.at(-1))}`);
+    console.log(`BUNDLE_TIMING ${JSON.stringify({ powershell: process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe', ...results.at(-1) })}`);
     await writeFile(path.join(fixture.root, 'results.json'), JSON.stringify(results, null, 2) + '\n');
     assert.equal(result.error, undefined, JSON.stringify(result));
     assert.equal(result.connected, true, result.error || result.stderr);
@@ -163,10 +158,14 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
     assert.equal(result.serverInfo.version, expectedVersion);
     assert.equal(result.toolCount, 22);
     assert.equal(result.healthOk, true);
+    // Catch the old 12-30 second synthetic-worker stall even when it succeeds.
+    // This is a test budget with ample runner headroom, not a production timeout.
+    assert.ok(result.stagesMs.health < 10000, `Synthetic health exceeded 10000ms: ${JSON.stringify(result)}`);
     assert.equal(result.waitOk, true);
     assert.equal(result.resourceCount, 6);
     console.log(`PASS ${name} bundle -> MCP initialize / 22 tools / health / wait / 6 resources (synthetic PowerShell worker)`);
   }
+  console.log(`BUNDLE_TIMING ${JSON.stringify({ phase: 'suite', durationMs: Math.round(performance.now() - suiteStarted) })}`);
 }
 
 if (process.argv[2] === '--host') {
