@@ -1,0 +1,23 @@
+name: Bundle timing audit
+on:
+  push:
+    branches: [test/bundle-startup-timing-audit]
+jobs:
+  same-runner-controls:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        powershell: [powershell.exe, pwsh.exe]
+    env:
+      WINDOWS_CU_POWERSHELL: ${{ matrix.powershell }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: node node_modules/electron/install.js
+      - name: Same-runner first-cmdlet and real bundle controls
+        run: node test/bundle-startup-audit.mjs
+        timeout-minutes: 5
