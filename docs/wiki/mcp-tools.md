@@ -141,6 +141,16 @@ Tries UIA patterns in this order: Invoke, Toggle, SelectionItem, ExpandCollapse.
 
 Uses ValuePattern to set editable control values. If ValuePattern is absent and fallback is enabled, it focuses, selects all, and types.
 
+## OCR
+
+`windows_computer_use_ocr`
+
+Recognizes a window or the desktop with Windows.Media.Ocr. `lines[].words[]` retain the engine's word boxes; `lines[].boundingBox` contains their union, in screen coordinates (or `null` when there are no valid word boxes).
+
+`query` matches within each line's word sequence, ignoring case and whitespace in both the recognized words and the query. This supports CJK characters segmented into individual words, as well as multiword Latin text. Punctuation remains significant. A query containing only whitespace has no matches.
+
+The first match in each line is returned, up to three lines. `matched[].boundingBox` covers the words intersecting the match; a partial-word match includes that word's full box. `matched[].word.text` contains the matched word run, and the existing `word.x/y` fields give its center. UIA is queried at that center; `control` is `null` when the lookup is unavailable, but the OCR match and rectangle remain usable.
+
 ## Timing
 
 `windows_computer_use_wait`

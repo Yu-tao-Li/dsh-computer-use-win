@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.5 — 2026-10-09
+
+- 修复 OCR `query` 无法匹配按字符分词的 CJK 文本：忽略大小写和空白，在实际 OCR 词序列中定位命中范围，并在这些词框的联合矩形中心回查 UIA 控件。
+- 新增 `matched[].boundingBox` 和 `lines[].boundingBox` 屏幕坐标矩形；保留 `matched[].word.x/y` 点击坐标、每行首个命中和最多 3 行的限制。
+- 新增 PowerShell 5.1/7 回归，覆盖中日韩文字、英文、跨词与部分词匹配、空白、前缀偏移、DPI 缩放和 UIA 查询失败后的 OCR 结果保留。
+- Fixed OCR query matching for character-segmented CJK text. Matching ignores case and whitespace, maps the matched range to actual OCR words, and looks up UIA at their union-box center. Added screen-coordinate line/match bounding boxes and PowerShell 5.1/7 regressions.
+- 感谢 / Thanks to [@oahnimuy](https://github.com/oahnimuy) for the report and real-run evidence in [#16](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/16).
+
 ## 0.2.4 — 2026-10-03
 
 - 修复 DSH Desktop/Electron 中 MCP 启动时的 `Connection closed`：bundle 为 MCP 子进程显式设置 `ELECTRON_RUN_AS_NODE=1`，同时兼容普通 Node 宿主。
