@@ -23,7 +23,7 @@ Bridges into DSH through the in-box `@deepseek-ai/dsh-mcp-client` — no DSH mod
 - **Text-first observation** — UIA accessibility tree in three views (`control` / `content` / `raw`); find controls by name, automation id, class or value instead of guessing pixels. Element ids use UIA RuntimeIds (stable across UI refresh; stale ids report `stale` instead of mis-clicking).
 - **Three-level screenshot chain** — `PrintWindow` (works on non-foreground windows) → **WGC** (`Windows.Graphics.Capture`, for DirectComposition/occluded windows) → screen-region fallback with an `occludedPossible` flag. Window crop + downscale + `imageScale`/`origin` coordinate mapping; PNGs auto-GC after 30 min.
 - **Three input paths, honestly reported** — semantic (UIA `Invoke`/`Toggle`/`Value` patterns, no mouse), foreground (`SetCursorPos` + SendInput + clipboard paste / `KEYEVENTF_UNICODE`), background (PostMessage into the window queue, no foreground steal; delivery is unverified and reported as `verified:false` — Chromium/Electron/WinUI silently drop synthetic messages, and the tool tells you).
-- **OCR fallback for UIA-blind apps** — `Windows.Media.Ocr` via a csc-compiled C# WinRT helper; returns text plus per-word screen-coordinate boxes, and upgrades a `query` match to the control under the matched word (`ControlFromPoint`).
+- **OCR fallback for UIA-blind apps** — `Windows.Media.Ocr` via a csc-compiled C# WinRT helper; returns text, per-word screen-coordinate boxes, and line bounding boxes. `query` ignores case and whitespace, supports CJK segmented into individual characters, and upgrades a match to the control at the matched word run's union-box center (`ControlFromPoint`).
 - **Safety built in**
   - *Coordinate homing* — window moves after observation are compensated; the click reports `homed:{dx,dy}`.
   - *Failsafe panic brake* — park the physical mouse in the screen corner for 500 ms and all input is refused (`EMERGENCY STOP`); only a human moving the mouse releases it.
@@ -84,7 +84,7 @@ scripts/windows-uia.ps1       ← this repo: desktop engine (PowerShell 5.1)
 - **WinUI / Chromium / Electron** drop PostMessage synthetic input (`verified:false` is honest reporting, not success). Use the foreground/clipboard paths for them.
 - **Elevated windows** (UAC/admin) are not readable or clickable — Windows blocks both UIA and synthetic input.
 - Coordinates are **physical pixels** (explicit Per-Monitor V2 DPI).
-- OCR word boxes for CJK text are per-character (engine behavior) — fine for clicking.
+- OCR word boxes for CJK text are per-character (engine behavior). Since 0.2.5, `query` can match across characters; `matched[].boundingBox` and `lines[].boundingBox` provide screen-coordinate rectangles, while the existing `matched[].word.x/y` fields give the matched run's center.
 - Windows only.
 
 ## Development

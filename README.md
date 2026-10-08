@@ -23,7 +23,7 @@
 - **文本优先的观察**——UIA 无障碍树三视图（`control`/`content`/`raw`）；按 name/automationId/类名/值找控件，不靠猜像素。元素 id 用 UIA RuntimeId（UI 刷新后仍稳定，过期报 `stale` 而非点错地方）。
 - **三级截图链**——`PrintWindow`（非前台窗口也能抓）→ **WGC**（`Windows.Graphics.Capture`，DirectComposition/被遮挡窗口）→ 屏幕区域兜底（带 `occludedPossible` 标记）。窗口裁剪 + 降采样 + `imageScale/origin` 坐标映射，PNG 30 分钟自动清理。
 - **三条输入路径，诚实上报**——语义（UIA pattern，不碰鼠标）/ 前台（`SetCursorPos` + SendInput + 剪贴板 / `KEYEVENTF_UNICODE`）/ 后台（PostMessage 直进窗口消息队列，不抢前台；投递未验证，如实 `verified:false`——Chromium/Electron/WinUI 会静默丢合成消息，工具会明说）。
-- **UIA 盲区 OCR 回退**——`Windows.Media.Ocr`（csc 编译的 C# WinRT 助手）；返回文字 + 逐词屏幕坐标词框，`query` 命中后自动回查匹配词下的控件（`ControlFromPoint`）。
+- **UIA 盲区 OCR 回退**——`Windows.Media.Ocr`（csc 编译的 C# WinRT 助手）；返回文字、逐词屏幕坐标词框和整行矩形。`query` 忽略大小写与空白，支持按字符分词的 CJK 文本；命中后在匹配词序列的联合矩形中心回查控件（`ControlFromPoint`）。
 - **内置安全机制**
   - *坐标 homing*——观察后窗口被移动，点击自动补偿并回报 `homed:{dx,dy}`
   - *急停 failsafe*——物理鼠标停屏幕角落 500ms，所有输入被拒（`EMERGENCY STOP`），只有人把鼠标移开才恢复
@@ -84,7 +84,7 @@ scripts/windows-uia.ps1       ← 本仓库：桌面引擎（PowerShell 5.1 兼�
 - **WinUI / Chromium / Electron** 会丢弃 PostMessage 合成输入（`verified:false` 是诚实上报，不是成功）。这类目标走前台/剪贴板路径。
 - **提权窗口**（UAC/管理员程序）UIA 与合成输入都被 Windows 拦截，读不到也点不了。
 - 坐标以**物理像素**为准（显式 Per-Monitor V2 DPI）。
-- OCR 对 CJK 按**字符**给词框（引擎特性），点选足够用。
+- OCR 对 CJK 按**字符**给词框（引擎特性）；自 0.2.5 起，`query` 可跨字符匹配，`matched[].boundingBox` 和 `lines[].boundingBox` 提供屏幕坐标矩形，原有 `matched[].word.x/y` 提供命中范围的中心坐标。
 - 仅支持 Windows。
 
 ## 开发

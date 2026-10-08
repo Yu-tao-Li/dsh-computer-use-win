@@ -906,6 +906,54 @@ function Invoke-Ocr {
   return [ordered]@{ text = $fullText.Replace("\\n", "`n"); lines = $linesOut; language = $lang }
 }
 
+function Get-OcrWordBounds {
+  # Union of word boxes, in the same coordinate space as the supplied words.
+  param([object[]]$Words)
+  $bounds = $null
+  foreach ($word in $Words) {
+    if ($word.width -le 0 -or $word.height -le 0) { continue }
+    $left = [int]$word.x
+    $top = [int]$word.y
+    $right = $left + [int]$word.width
+    $bottom = $top + [int]$word.height
+    if ($null -eq $bounds) {
+      $bounds = @{left=$left;top=$top;right=$right;bottom=$bottom}
+    } else {
+      $bounds.left = [Math]::Min($bounds.left, $left)
+      $bounds.top = [Math]::Min($bounds.top, $top)
+      $bounds.right = [Math]::Max($bounds.right, $right)
+      $bounds.bottom = [Math]::Max($bounds.bottom, $bottom)
+    }
+  }
+  if ($null -eq $bounds) { return $null }
+  return [ordered]@{x=$bounds.left;y=$bounds.top;width=($bounds.right-$bounds.left);height=($bounds.bottom-$bounds.top)}
+}
+
+function Find-OcrWordRun {
+  # Keep normalized offsets tied to actual words, rather than assuming that
+  # OCR line text inserts exactly one separator between adjacent words.
+  param([object[]]$Words, [string]$Query)
+  $normalizedQuery = [regex]::Replace($Query, '\s+', '')
+  if ($normalizedQuery.Length -eq 0) { return $null }
+  $parts = @($Words | ForEach-Object { [regex]::Replace([string]$_.text, '\s+', '') })
+  $text = $parts -join ''
+  $start = $text.IndexOf($normalizedQuery, [System.StringComparison]::OrdinalIgnoreCase)
+  if ($start -lt 0) { return $null }
+  $end = $start + $normalizedQuery.Length
+  $offset = 0
+  $hitWords = @()
+  for ($index = 0; $index -lt $Words.Count; $index++) {
+    $length = $parts[$index].Length
+    if ($length -gt 0 -and $offset -lt $end -and ($offset + $length) -gt $start) {
+      $hitWords += $Words[$index]
+    }
+    $offset += $length
+  }
+  $bounds = Get-OcrWordBounds -Words $hitWords
+  if ($null -eq $bounds) { return $null }
+  return [ordered]@{text=($hitWords.text -join ' ');boundingBox=$bounds}
+}
+
 # ============================================================================
 # WGC window capture (Windows.Graphics.Capture): the fallback for surfaces
 # that PrintWindow renders pitch black (UWP / WinUI / DirectComposition).
@@ -2209,29 +2257,19 @@ function Invoke-Action {
             height = [int]($w.height / $scale)
           }
         }
-        $lines += [ordered]@{ text = $line.text; words = $words }
+        $lines += [ordered]@{ text = $line.text; words = $words; boundingBox = (Get-OcrWordBounds -Words $words) }
       }
-      # OCR -> control upgrade: for lines containing the query, hit-test the
-      # matched word's center with UIA FromPoint and report the control there.
+      # OCR -> control upgrade: ignore OCR whitespace when matching, then
+      # hit-test the center of the matching word run's union box with UIA.
       $matched = @()
       if ($query.Length -gt 0 -and $lines.Count -gt 0) {
         foreach ($line in $lines) {
           if ($matched.Count -ge 3) { break }
           $lineText = [string]$line.text
-          $idx = $lineText.IndexOf($query, [System.StringComparison]::OrdinalIgnoreCase)
-          if ($idx -lt 0) { continue }
-          $words = @($line.words)
-          if ($words.Count -eq 0) { continue }
-          # Map the match's char offset to a word (words join with one space).
-          $pos = 0
-          $word = $words[0]
-          foreach ($w in $words) {
-            $wlen = ([string]$w.text).Length
-            if ($pos -le $idx -and $idx -lt ($pos + $wlen)) { $word = $w; break }
-            $pos += $wlen + 1
-          }
-          $wx = [int]([int]$word.x + [int]($word.width / 2))
-          $wy = [int]([int]$word.y + [int]($word.height / 2))
+          $hit = Find-OcrWordRun -Words @($line.words) -Query $query
+          if ($null -eq $hit) { continue }
+          $wx = [int]($hit.boundingBox.x + [int]($hit.boundingBox.width / 2))
+          $wy = [int]($hit.boundingBox.y + [int]($hit.boundingBox.height / 2))
           $ctl = $null
           $el = Invoke-Safe { [System.Windows.Automation.AutomationElement]::FromPoint((New-Object System.Windows.Point($wx, $wy))) } $null
           if ($null -ne $el) {
@@ -2243,7 +2281,7 @@ function Invoke-Action {
               boundingBox = Convert-Rect (Invoke-Safe { $el.Current.BoundingRectangle } $null)
             }
           }
-          $matched += [ordered]@{ line = $lineText; word = [ordered]@{ text = $word.text; x = $wx; y = $wy }; control = $ctl }
+          $matched += [ordered]@{ line = $lineText; word = [ordered]@{ text = $hit.text; x = $wx; y = $wy }; boundingBox = $hit.boundingBox; control = $ctl }
         }
       }
       $result = [ordered]@{
@@ -2258,7 +2296,7 @@ function Invoke-Action {
       if ($query.Length -gt 0) {
         $result["query"] = $query
         $result["matched"] = $matched
-        if ($matched.Count -eq 0) { $result["note"] = "No OCR line contained the query; the text may be split across words differently. Try a shorter query or read 'lines' directly." }
+        if ($matched.Count -eq 0) { $result["note"] = "No OCR word sequence matched the query (case-insensitive, ignoring whitespace). Inspect 'lines' for the recognized text and word boxes." }
       }
       if ($activationRefused) {
         $result["warning"] = "activate:true was requested but the window could not be brought to the foreground (Windows foreground lock); the capture may show overlapping content."

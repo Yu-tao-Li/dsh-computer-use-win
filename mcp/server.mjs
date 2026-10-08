@@ -14,7 +14,7 @@ const SERVER_VERSION = (() => {
   try {
     return JSON.parse(readFileSync(path.join(pluginRoot, "package.json"), "utf8")).version;
   } catch {
-    return "0.2.4";
+    return "0.2.5";
   }
 })();
 const backendPath = path.join(pluginRoot, "scripts", "windows-uia.ps1");
@@ -394,7 +394,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_ocr",
-    description: "OCR a window (or the whole desktop) with Windows.Media.Ocr — the fallback for UIA-blind apps (games, self-drawn Tk/Qt, RDP, canvases). Returns the full text plus lines with word boxes in SCREEN coordinates, so you can click on OCR'd text. With query, matched words are upgraded to the underlying UIA control for direct invoke/click. Slower than the UIA tree (~1-3s); use it after snapshot/find shows a sparse tree, or when the app is known to be UIA-blind.",
+    description: "OCR a window (or the whole desktop) with Windows.Media.Ocr — the fallback for UIA-blind apps (games, self-drawn Tk/Qt, RDP, canvases). Returns the full text plus lines with word boxes and line boundingBox values in SCREEN coordinates, so you can click on OCR'd text. With query, matched word runs are upgraded to the underlying UIA control for direct invoke/click. Slower than the UIA tree (~1-3s); use it after snapshot/find shows a sparse tree, or when the app is known to be UIA-blind.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -404,7 +404,7 @@ const tools = [
         maxWidth: { type: "integer", minimum: 0, maximum: 7680, default: 1920 },
         query: {
           type: "string",
-          description: "Optional text to search for in the OCR result (case-insensitive). When set, the response includes query plus matched entries (up to 3) with the hit line, word box, and the UIA control under the hit — enabling invoke/click on real controls in UIA-blind apps."
+          description: "Optional text to search for in the OCR words (case-insensitive, ignoring whitespace in both words and query). When set, the response includes query plus matched entries (up to 3) with the hit line, the word run's boundingBox, its center in word.x/y, and the UIA control under that center. Supports CJK text split into individual characters."
         }
       }
     }

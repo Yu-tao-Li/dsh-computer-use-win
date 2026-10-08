@@ -19,6 +19,7 @@ const suites = [
   ['activation-cancellation', process.execPath, ['test/activation-cancellation.mjs']],
   ['native-window-discovery', process.execPath, ['test/native-window-discovery.mjs']],
   ['native-window-contract', powershell, ['-NoProfile', '-File', 'test/native-window-contract.ps1']],
+  ['ocr-query-contract', powershell, ['-NoProfile', '-File', 'test/ocr-query-contract.ps1']],
   ['native-input-errors', powershell, ['-NoProfile', '-File', 'test/native-input-errors.ps1']]
 ];
 const results = [];
