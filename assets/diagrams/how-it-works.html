@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>How it works</title>
+<link rel="stylesheet" href="diagram.css">
+<style>
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; }
+  .step { display: flex; flex-direction: column; gap: 9px; }
+  .step header { display: flex; align-items: center; gap: 8px; }
+  .step h3 { font-size: 14px; }
+  .num { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--blue); color: #fff; font: 700 12px/1 var(--font); }
+  .hint { color: var(--muted); font-size: 12px; }
+  .term { margin: 0; padding: 9px 11px; border-radius: 8px; background: #0d1117; border: 1px solid #30363d; color: #e6edf3; font: 11px/1.6 var(--mono); white-space: pre; }
+  .term .prompt { color: #7aaaff; }
+  .chat { flex: 1; display: flex; flex-direction: column; gap: 7px; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--chat-line); background: var(--chat); }
+  .bubble { align-self: flex-end; max-width: 92%; padding: 6px 10px; border-radius: 10px 10px 3px 10px; background: var(--bubble); font-size: 12px; }
+  .rows { list-style: none; padding: 0; display: grid; gap: 4px; }
+  .rows li { display: flex; align-items: center; gap: 7px; font-size: 12px; padding-left: 0; }
+  .rows li::before { display: none; }
+  .rows b { font-weight: 600; }
+  .rows span { color: var(--faint); font-size: 11.5px; }
+  .rows svg { flex: none; width: 11px; height: 15px; color: var(--muted); }
+  .details { align-self: flex-start; font-size: 11.5px; padding: 1px 8px; border-radius: 6px; border: 1px solid var(--chat-line); color: var(--fg); }
+  /* The screen mirrors the plugin's own indicator preview (mcp/client.js), enlarged. */
+  .screen { position: relative; height: 136px; border-radius: 9px; overflow: hidden; background: linear-gradient(135deg, #1c2333 0%, #27324d 55%, #373f60 100%); box-shadow: inset 0 0 0 1.5px rgba(86,134,254,.9), inset 0 0 22px rgba(86,134,254,.55); }
+  .window { position: absolute; left: 9%; top: 31%; width: 60%; height: 56%; border-radius: 6px; background: rgba(255,255,255,.07); border: .5px solid rgba(255,255,255,.12); }
+  .window::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 13px; border-bottom: .5px solid rgba(255,255,255,.1); }
+  .pill { position: absolute; left: 50%; top: 9px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; height: 23px; padding: 0 9px; border-radius: 999px; background: rgba(20,22,28,.94); border: .5px solid rgba(255,255,255,.16); box-shadow: 0 3px 10px rgba(0,0,0,.35); color: #f5f7fa; font-size: 11px; white-space: nowrap; }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #5686fe; box-shadow: 0 0 0 2px rgba(86,134,254,.28); }
+  .pill .sep { width: 1px; height: 10px; background: rgba(255,255,255,.22); }
+  .pill kbd { font-size: 9.5px; line-height: 14px; padding: 0 4px; background: rgba(255,255,255,.13); border: .5px solid rgba(255,255,255,.25); color: #f5f7fa; }
+  .pill .hint-stop { opacity: .78; }
+  .pointer { position: absolute; left: 62%; top: 56%; width: 0; height: 0; }
+  .pointer::before { content: ''; position: absolute; left: -17px; top: -17px; width: 34px; height: 34px; border-radius: 50%; background: radial-gradient(circle, rgba(86,134,254,.55), rgba(86,134,254,0) 70%); }
+  .pointer svg { position: absolute; left: -1px; top: -1px; width: 14px; height: 21px; overflow: visible; }
+  .pointer-tag { position: absolute; left: 13px; top: 18px; padding: 0 7px; border-radius: 2px 7px 7px 7px; background: #3964fe; border: 1px solid rgba(255,255,255,.92); box-shadow: 0 2px 6px rgba(0,0,0,.35); color: #fff; font: 700 10.5px/17px 'Segoe UI', sans-serif; letter-spacing: .02em; }
+  .gloss { font-size: 11px; color: var(--faint); margin-top: -4px; }
+  .gloss:empty { display: none; }
+  .stopline { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .loop { margin-top: 30px; }
+  .loop-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 9px; }
+  .loop-head h3 { font-size: 13.5px; font-weight: 600; }
+  .loop-head p { font-size: 11.5px; color: var(--faint); }
+  .nodes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 34px; }
+  .node { border-radius: 10px; padding: 9px 12px 10px; border: 1px solid var(--own-line); background: var(--own); }
+  .node b { display: block; font-size: 13px; }
+  .node p { color: var(--muted); font-size: 12px; margin-top: 1px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+  .tools code { padding: 0 5px; border-radius: 4px; line-height: 17px; font-size: 10.5px; color: var(--own-code); background: color-mix(in srgb, var(--own-code) 11%, transparent); }
+  .nb { white-space: nowrap; }
+  .loop-space { height: 44px; }
+</style>
+</head>
+<body>
+<main class="canvas">
+  <section class="steps">
+    <article class="card step" id="s1" data-solid>
+      <header><span class="num">1</span><h3 data-t="s1Title"></h3></header>
+      <p class="hint" data-t="s1Open"></p>
+      <pre class="term" data-fit><span class="prompt">&gt;</span> dsh plugin --profile desktop
+    add dsh-computer-use-win</pre>
+      <p class="hint" data-t="s1Restart"></p>
+      <p class="hint" data-t="s1Settings"></p>
+    </article>
+    <article class="card step" id="s2" data-solid>
+      <header><span class="num">2</span><h3 data-t="s2Title"></h3></header>
+      <div class="chat">
+        <p class="bubble" data-t="s2Ask"></p>
+        <ul class="rows">
+          <li><svg viewBox="0 0 11 15" aria-hidden="true"><rect x=".75" y=".75" width="9.5" height="13.5" rx="4.75" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 3.2v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><b data-t="rowType"></b><span data-t="done"></span></li>
+          <li><svg viewBox="0 0 11 15" aria-hidden="true"><rect x=".75" y=".75" width="9.5" height="13.5" rx="4.75" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 3.2v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><b data-t="rowKey"></b><span data-t="done"></span></li>
+          <li><svg viewBox="0 0 11 15" aria-hidden="true"><rect x=".75" y=".75" width="9.5" height="13.5" rx="4.75" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 3.2v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><b data-t="rowCheck"></b><span data-t="done"></span></li>
+        </ul>
+        <span class="details" data-t="details"></span>
+      </div>
+    </article>
+    <article class="card step" id="s3" data-solid>
+      <header><span class="num">3</span><h3 data-t="s3Title"></h3></header>
+      <div class="screen">
+        <div class="window"></div>
+        <div class="pill"><span class="dot"></span><span>DSH 正在控制电脑</span><span class="sep"></span><kbd>Esc</kbd><span class="hint-stop">停止</span></div>
+        <span class="pointer"><svg viewBox="0 0 12 18" aria-hidden="true"><path d="M1 1v13.5l3.4-3.1 2.2 5 2.2-1-2.1-4.8H11L1 1Z" fill="#fff" stroke="#111" stroke-width="1" stroke-linejoin="round"/></svg><span class="pointer-tag">DSH</span></span>
+      </div>
+      <p class="gloss" data-t="s3Gloss"></p>
+      <p class="hint" data-t="s3Hint"></p>
+      <p class="stopline"><kbd>Esc</kbd><span data-t="s3Stop"></span></p>
+    </article>
+  </section>
+  <section class="loop">
+    <div class="loop-head"><h3 data-t="loopTitle"></h3><p data-t="loopNote"></p></div>
+    <div class="nodes">
+      <div class="node" id="n1" data-solid><b data-t="n1"></b><p data-t="n1d"></p><p class="tools"><code>list_windows</code><code>snapshot</code><code>screenshot</code><code>ocr</code></p></div>
+      <div class="node" id="n2" data-solid><b data-t="n2"></b><p data-t="n2d"></p><p class="tools"><code>find</code><code>element_info</code></p></div>
+      <div class="node" id="n3" data-solid><b data-t="n3"></b><p data-t="n3d"></p><p class="tools"><code>invoke</code><code>set_value</code><code>click</code><code>type_text</code><code>keypress</code></p></div>
+      <div class="node" id="n4" data-solid><b data-t="n4"></b><p data-t="n4d"></p><p class="tools"><code>wait_for</code></p></div>
+    </div>
+    <div class="loop-space"></div>
+  </section>
+</main>
+<script src="diagram.js"></script>
+<script>
+Diagram.render({
+  zh: {
+    s1Title: '安装一次',
+    s1Open: '托盘图标右键 →“打开 DSH 终端”，运行：',
+    s1Restart: '再右键托盘图标 →“退出”，然后重新打开 DSH Desktop。',
+    s1Settings: '设置 → Computer Use 里可以选工具、调提示，不改也能直接用。',
+    s2Title: '在对话里布置任务',
+    s2Ask: '在浏览器的新窗口中搜索<span class="nb">“晴天”</span>，确认结果页出现<span class="nb">“周杰伦”</span>。',
+    rowType: '输入了文本', rowKey: '发送了按键', rowCheck: '检查了操作结果', done: '已完成',
+    details: '查看步骤和截图',
+    s3Title: '看它操作，随时叫停',
+    s3Gloss: '',
+    s3Hint: '屏幕边缘发亮，提示条和鼠标旁的 DSH 标签说明 agent 正在操作。',
+    s3Stop: '立即停止这一轮',
+    loopTitle: 'agent 每一步都这样做',
+    loopNote: '对话里的每行记录，就是其中一步',
+    n1: '观察', n1d: '看有哪些窗口、控件和文字',
+    n2: '定位', n2d: '找到要操作的目标',
+    n3: '执行', n3d: '直接操作控件，不行再用鼠标键盘',
+    n4: '确认', n4d: '等预期的变化出现',
+    loopBack: '还没达到目标，就再观察一次'
+  },
+  en: {
+    s1Title: 'Install once',
+    s1Open: 'Right-click the tray icon → Open DSH Terminal, then run:',
+    s1Restart: 'Right-click the tray icon → Quit, then open DSH Desktop again.',
+    s1Settings: 'Settings → Computer Use lets you pick tools and indicators. The defaults work as they are.',
+    s2Title: 'Ask in a conversation',
+    s2Ask: 'Open a browser, search for <span class="nb">“Windows UI Automation”</span> and confirm that results appear.',
+    rowType: 'Entered text', rowKey: 'Sent a key press', rowCheck: 'Checked the result', done: 'Completed',
+    details: 'Steps and screenshots',
+    s3Title: 'Watch it work, stop anytime',
+    s3Gloss: '“DSH is controlling the computer · Esc to stop”',
+    s3Hint: 'The glowing edge, the status bar and the DSH tag show that the agent is at work.',
+    s3Stop: 'stops this turn at once',
+    loopTitle: 'Every step the agent takes',
+    loopNote: 'Each row in the conversation is one of these steps',
+    n1: 'Look', n1d: 'See which windows, controls and text are there',
+    n2: 'Locate', n2d: 'Find the target',
+    n3: 'Act', n3d: 'Use the control directly, or the mouse and keyboard',
+    n4: 'Confirm', n4d: 'Wait until the expected change appears',
+    loopBack: 'Not there yet? Look again'
+  }
+}, ({ box, wire, label, text }) => {
+  const s1 = box('#s1'), s2 = box('#s2'), s3 = box('#s3');
+  const y = box('#s1 header').cy;
+  wire([[s1.right, y], [s2.left, y]]);
+  wire([[s2.right, y], [s3.left, y]]);
+  const nodes = ['#n1', '#n2', '#n3', '#n4'].map(box);
+  for (let i = 0; i < 3; i++) wire([[nodes[i].right, nodes[i].cy], [nodes[i + 1].left, nodes[i].cy]]);
+  const bottom = Math.max(...nodes.map(node => node.bottom)) + 20;
+  wire([[nodes[3].cx, nodes[3].bottom], [nodes[3].cx, bottom], [nodes[0].cx, bottom], [nodes[0].cx, nodes[0].bottom]]);
+  label(text.loopBack, (nodes[1].right + nodes[2].left) / 2, bottom + 12, { anchor: 'center' });
+});
+</script>
+</body>
+</html>

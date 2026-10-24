@@ -1,0 +1,167 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Architecture</title>
+<link rel="stylesheet" href="diagram.css">
+<style>
+  .you { position: relative; height: 46px; border-radius: 23px; border: 1px solid var(--ext-line); background: var(--ext); }
+  .you > b { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); font-size: 13px; }
+  .you .chip { position: absolute; top: 8px; height: 28px; }
+  .grid { display: grid; grid-template-columns: 580px 212px; column-gap: 60px; row-gap: 42px; margin-top: 36px; }
+  .zone { position: relative; border: 1.5px dashed var(--zone-line); border-radius: 16px; background: var(--zone); padding: 32px 14px 14px; }
+  .zone-label { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); font-size: 11.5px; font-weight: 600; color: var(--muted); white-space: nowrap; letter-spacing: .02em; }
+  .zone-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .zone-cards ul { font-size: 12px; }
+  .bridge { margin-top: 22px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 9px 14px; }
+  .bridge b { font-weight: 600; font-size: 13px; }
+  .bridge .file { margin: 0; }
+  .bridge span:last-child { color: var(--muted); }
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .presets span { font-size: 11px; line-height: 19px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--own-line); color: var(--own-code); white-space: nowrap; }
+  .wide { grid-column: 1 / -1; }
+  .caps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+  .cap { border-radius: 8px; padding: 6px 10px 7px; border: 1px solid var(--own-line); background: var(--chip); }
+  .cap b { display: block; font-size: 12px; font-weight: 600; }
+  .cap span { display: block; font-size: 11px; color: var(--muted); }
+  .desk { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 11px 14px; }
+  .desk h3 { margin-right: 4px; }
+  .apps { display: flex; gap: 6px; flex-wrap: wrap; }
+  .apps span { font-size: 11.5px; line-height: 22px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ext-line); background: var(--chip); color: var(--muted); }
+  .legend { margin-top: 14px; }
+</style>
+</head>
+<body>
+<main class="canvas">
+  <section class="you" id="you" data-solid>
+    <b data-t="you"></b>
+    <span class="chip" id="askChip" data-t="ask"></span>
+    <span class="chip" id="setChip" data-t="settings"></span>
+    <span class="chip stop" id="escChip" data-t="esc"></span>
+  </section>
+  <div class="grid">
+    <section class="zone" id="dsh">
+      <span class="zone-label" id="dshLabel" data-t="dsh" data-solid></span>
+      <div class="zone-cards">
+        <article class="card" id="agent" data-solid>
+          <h3 data-t="agent"></h3>
+          <ul><li data-t="agent1"></li><li data-t="agent2"></li></ul>
+          <span class="file mono">mcp__wincu__…</span>
+        </article>
+        <article class="card own" id="adapter" data-solid>
+          <h3 data-t="adapter"></h3>
+          <span class="file mono">mcp/dsh-plugin.mjs</span>
+          <ul><li data-t="adapter1"></li><li data-t="adapter2"></li></ul>
+        </article>
+        <article class="card own" id="client" data-solid>
+          <h3 data-t="client"></h3>
+          <span class="file mono">mcp/client.js</span>
+          <ul><li data-t="client1"></li><li data-t="client2"></li></ul>
+        </article>
+      </div>
+      <div class="card bridge" id="bridge" data-solid>
+        <b data-t="bridge"></b><span class="file mono">@deepseek-ai/dsh-mcp-client</span><span data-t="bridge1"></span>
+      </div>
+    </section>
+    <div></div>
+    <article class="card own" id="server" data-solid>
+      <h3><span data-t="server"></span><span class="tag" data-t="serverTag"></span></h3>
+      <span class="file mono">mcp/server.mjs</span>
+      <p class="presets"><span data-t="presetAll"></span><span data-t="presetLite"></span><span data-t="presetLazy"></span><span data-t="presetCustom"></span></p>
+      <ul><li data-t="server1"></li><li data-t="server2"></li><li data-t="server3"></li></ul>
+    </article>
+    <article class="card own" id="helper" data-solid>
+      <h3><span data-t="helper"></span><span class="tag" data-t="helperTag"></span></h3>
+      <span class="file mono">scripts/windows-takeover.ps1</span>
+      <ul><li data-t="helper1"></li><li data-t="helper2"></li><li data-t="helper3"></li></ul>
+    </article>
+    <article class="card own wide" id="backend" data-solid>
+      <h3><span data-t="backend"></span><span class="tag" data-t="backendTag"></span></h3>
+      <span class="file mono">scripts/windows-uia.ps1</span>
+      <div class="caps">
+        <div class="cap" data-fit><b>UI Automation</b><span data-t="capUia"></span></div>
+        <div class="cap" data-fit><b data-t="capInput"></b><span data-t="capInput1"></span></div>
+        <div class="cap" data-fit><b data-t="capWindow"></b><span data-t="capWindow1"></span></div>
+        <div class="cap" data-fit><b data-t="capCapture"></b><span data-t="capCapture1"></span></div>
+        <div class="cap" data-fit><b data-t="capOcr"></b><span>Windows OCR</span></div>
+      </div>
+    </article>
+    <article class="card desk wide" id="desktop" data-solid>
+      <h3 data-t="desktop"></h3>
+      <p class="apps"><span data-t="app1"></span><span data-t="app2"></span><span data-t="app3"></span><span data-t="app4"></span><span data-t="app5"></span></p>
+    </article>
+  </div>
+  <p class="legend"><span><i class="own"></i><span data-t="legendOwn"></span></span><span><i></i><span data-t="legendExt"></span></span></p>
+</main>
+<script src="diagram.js"></script>
+<script>
+Diagram.render({
+  zh: {
+    you: '你', ask: '布置任务', settings: '调整设置', esc: '按 Esc 停止',
+    dsh: 'DSH Desktop / Web',
+    agent: 'agent', agent1: '理解你的任务', agent2: '需要时调用桌面工具',
+    adapter: '插件适配器', adapter1: '把你的设置交给服务', adapter2: '跟踪对话轮次，一次只让一段对话操作桌面',
+    client: '设置页与操作记录', client1: '设置 → Computer Use', client2: '对话里的步骤和截图',
+    bridge: '官方 MCP 桥', bridge1: '启动服务进程，转发工具调用',
+    server: 'MCP 服务', serverTag: 'Node 进程',
+    presetAll: '全部 24', presetLite: '精简 10', presetLazy: '懒启动 1', presetCustom: '自定义',
+    server1: '检查参数，请求排队、一次执行一个', server2: '输入类操作标为“已发送”，再用 wait_for 确认效果', server3: '超时或按 Esc 时取消请求',
+    helper: '接管助手', helperTag: '独立进程',
+    helper1: '屏幕边缘光晕、提示条，<br>鼠标旁的 DSH 标签', helper2: '监听 Esc 和你设的快捷键', helper3: '后端正忙时也能收到 Esc',
+    backend: 'PowerShell 后端', backendTag: '常驻运行，省去每次启动',
+    capUia: '读控件、按按钮、填内容', capInput: '鼠标和键盘', capInput1: '点击、按键、粘贴文字', capWindow: '窗口', capWindow1: '列出、切换、移动、关闭', capCapture: '截图', capCapture1: '整个屏幕或单个窗口', capOcr: '文字识别',
+    desktop: '你的 Windows 桌面', app1: '记事本', app2: '浏览器', app3: '计算器', app4: '网易云音乐', app5: '其他程序',
+    legendOwn: '本插件的代码', legendExt: 'DSH 或 Windows 提供',
+    wireMcp: '<b>MCP</b> · stdio　调用 ↓　结果和截图 ↑', wireJson: '一行一个 JSON 请求，按顺序执行', wireApi: 'Windows 接口：读界面、发输入、截图',
+    wireShow: '显示提示', wireStop: '停止', wireCancel: '中断输入', wireEsc: '直接监听键盘<br>不经过 DSH'
+  },
+  en: {
+    you: 'You', ask: 'Ask for a task', settings: 'Change settings', esc: 'Press Esc',
+    dsh: 'DSH Desktop / Web',
+    agent: 'Agent', agent1: 'Understands your task', agent2: 'Calls desktop tools<br>when needed',
+    adapter: 'Plugin adapter', adapter1: 'Passes your settings on to the server', adapter2: 'Tracks turns: one conversation uses the desktop at a time',
+    client: 'Settings &amp; records', client1: 'The Computer Use settings page', client2: 'Steps and screenshots in conversations',
+    bridge: 'Official MCP bridge', bridge1: 'starts the server, forwards tool calls',
+    server: 'MCP server', serverTag: 'Node process',
+    presetAll: 'All 24', presetLite: 'Lite 10', presetLazy: 'Lazy 1', presetCustom: 'Custom',
+    server1: 'Checks arguments, queues requests and runs one at a time', server2: 'Marks input as “sent”, and wait_for confirms the effect', server3: 'Cancels a request on timeout or Esc',
+    helper: 'Takeover helper', helperTag: 'own process',
+    helper1: 'Edge glow, status bar,<br>pointer tag', helper2: 'Listens for Esc or<br>your own shortcut', helper3: 'Hears Esc even while<br>the backend is busy',
+    backend: 'PowerShell backend', backendTag: 'stays running, so calls skip startup',
+    capUia: 'read, press, fill in', capInput: 'Mouse and keys', capInput1: 'click, press keys, paste', capWindow: 'Windows', capWindow1: 'list, switch, move, close', capCapture: 'Capture', capCapture1: 'screen or one window', capOcr: 'Text recognition',
+    desktop: 'Your Windows desktop', app1: 'Notepad', app2: 'Browser', app3: 'Calculator', app4: 'NetEase Cloud Music', app5: 'Other apps',
+    legendOwn: 'This plugin’s code', legendExt: 'Provided by DSH or Windows',
+    wireMcp: '<b>MCP</b> over stdio: calls ↓  results and screenshots ↑', wireJson: 'One JSON request per line, run in order', wireApi: 'Windows APIs: read the UI, send input, capture',
+    wireShow: 'show', wireStop: 'stop', wireCancel: 'interrupt input', wireEsc: 'Watches the keyboard<br>itself, not through DSH'
+  }
+}, ({ box, wire, label, centerOn, text }) => {
+  centerOn('#askChip', box('#agent').cx);
+  centerOn('#setChip', box('#client').cx);
+  centerOn('#escChip', box('#helper').cx);
+  const agent = box('#agent'), adapter = box('#adapter'), client = box('#client'), bridge = box('#bridge');
+  const server = box('#server'), helper = box('#helper'), backend = box('#backend'), desktop = box('#desktop');
+  const ask = box('#askChip'), set = box('#setChip'), esc = box('#escChip');
+  const x = agent.cx;
+  wire([[x, ask.bottom], [x, agent.top]]);
+  wire([[client.cx, set.bottom], [client.cx, client.top]]);
+  wire([[esc.cx, esc.bottom], [esc.cx, helper.top]], { stop: true });
+  label(text.wireEsc, esc.cx - 10, (box('#dsh').top + helper.top) / 2, { anchor: 'right', className: 'stop left' });
+  wire([[x, agent.bottom], [x, bridge.top]]);
+  wire([[adapter.cx, adapter.bottom], [adapter.cx, bridge.top]]);
+  wire([[x, bridge.bottom], [x, server.top]], { heads: 'both' });
+  label(text.wireMcp, x + 12, (bridge.bottom + server.top) / 2 + 3);
+  wire([[x, server.bottom], [x, backend.top]], { heads: 'both' });
+  label(text.wireJson, x + 12, (server.bottom + backend.top) / 2);
+  wire([[x, backend.bottom], [x, desktop.top]], { heads: 'both' });
+  label(text.wireApi, x + 12, (backend.bottom + desktop.top) / 2);
+  const mid = (server.right + helper.left) / 2, show = helper.top + 34, stop = helper.top + 74;
+  wire([[server.right, show], [helper.left, show]]);
+  label(text.wireShow, mid, show - 11, { anchor: 'center' });
+  wire([[helper.left, stop], [server.right, stop]], { stop: true });
+  label(text.wireStop, mid, stop - 11, { anchor: 'center', className: 'stop' });
+  wire([[helper.cx, helper.bottom], [helper.cx, backend.top]], { stop: true, dashed: true });
+  label(text.wireCancel, helper.cx - 10, (helper.bottom + backend.top) / 2, { anchor: 'right', className: 'stop' });
+});
+</script>
+</body>
+</html>

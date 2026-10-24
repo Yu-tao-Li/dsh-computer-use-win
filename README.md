@@ -14,35 +14,46 @@
 
 ## 简体中文
 
-**0.5.1 新版设置页与接管提示**：设置页按 DSH 原生样式重做；“DSH 正在控制电脑”提示条、屏幕边缘光晕和鼠标旁的 DSH 标签重新设计，标签按你的指针大小（含辅助功能放大）放在指针外侧；设置页顶部的 Star 与 Issue 说明可一键折叠。
+**0.5.1 更新**：设置页换成了和 DSH 一致的样式。“DSH 正在控制电脑”提示条和鼠标旁的 DSH 标签都重新设计了，调大了鼠标指针也不会被标签挡住。用懒启动时，agent 一开始就知道自己能操作这台电脑。
 
-**0.5.0 新增懒启动**：在“设置 → Computer Use”选择“懒启动”，启动只加载 1 项管理工具，桌面工具按需加载，仍允许全部工具。现有默认方案保持“全部”。详见[工具加载](docs/tool-context.md)。
+**0.5.0 起**可以选“懒启动”：开始时只加载 1 个管理工具，需要时再加载桌面工具，更省上下文。详见[工具加载](docs/tool-context.md)。
 
-启动集合只剩管理入口、且至少允许一项桌面工具时（懒启动即属此类），服务随 MCP 握手返回一段说明：这台电脑可被读取和操作，使用前需先 `enable`。启动时一个桌面工具名都没有，模型也能据此知道该能力存在。
+这个插件让 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里的 agent 看到并操作你电脑上真实的 Windows 程序：找到按钮和输入框，读出屏幕上的文字，点击、打字，切换和管理窗口。
 
-让 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 agent 读取并操作真实 Windows 应用：找控件、看截图、识别文字、点击、输入和管理窗口。
+**23 个桌面工具 + 1 个管理入口 · 操作时有明显提示 · 按 Esc 随时停止 · 中英文设置界面**
 
-**23 项桌面能力 + 1 个工具管理入口 · 明确的控制提示 · 按 Esc 停止当前轮 · 中英文设置**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/how-it-works-zh-dark.png">
+  <img alt="使用流程图。第 1 步：右键托盘图标打开 DSH 终端，运行安装命令，再退出并重新打开 DSH Desktop。第 2 步：在对话里布置任务，对话中出现“输入了文本”“发送了按键”“检查了操作结果”等记录。第 3 步：屏幕边缘发亮，出现“DSH 正在控制电脑”提示条和鼠标旁的 DSH 标签，按 Esc 立即停止。下方是 agent 每一步的循环：观察、定位、执行、确认，没达到目标就再观察一次。" src="assets/diagrams/how-it-works-zh-light.png">
+</picture>
 
-[快速开始](#快速开始) · [界面预览](#界面预览) · [能做什么](#能做什么) · [按你的习惯设置](#按你的习惯设置) · [使用示例](#使用示例) · [工具与进阶](#工具与进阶) · [常见问题](#常见问题) · [English](#english)
+**目录**：[1 快速开始](#1-快速开始) · [2 界面预览](#2-界面预览) · [3 能做什么](#3-能做什么) · [4 工作原理](#4-工作原理) · [5 设置](#5-按你的习惯设置) · [6 使用示例](#6-使用示例) · [7 工具与进阶](#7-工具与进阶) · [8 常见问题](#8-常见问题) · [9 数据与隐私](#9-数据与隐私) · [10 文档与开发](#10-文档与开发) · [English](#english)
 
-### 快速开始
+### 1. 快速开始
 
-**需要：** Windows 交互桌面和已安装的 DSH。默认使用系统自带的 Windows PowerShell 5.1；DSH Desktop 使用自带的 Electron 运行时，独立 Node 宿主需要 Node.js ≥ 22。
+#### 1.1 安装
 
-1. 在 **DSH Desktop 自带终端**中执行：
+你需要一台 Windows 电脑，并且已经装好 DSH Desktop。插件用的是 Windows 自带的 PowerShell 5.1，不用另外安装。
+
+1. 右键点击任务栏托盘里的 DSH 图标，选“打开 DSH 终端”，然后运行：
 
    ```powershell
    dsh plugin --profile desktop add dsh-computer-use-win
    ```
 
-2. 完整退出并重新启动 DSH Desktop，打开 **设置 → Computer Use**。也可点击插件列表中的简介进入具体设置。
-3. 默认全部加载，直接开始一个桌面任务；需要减少工具时，在设置里选择“精简”或“自定义”。
+2. 再右键托盘图标，选“退出”，然后重新打开 DSH Desktop。只关掉窗口不够：窗口关了，DSH 还在托盘里运行，不会加载新装的插件。
+3. 打开 **设置 → Computer Use** 看看各项选项。不改也能直接用，默认加载全部工具。然后给 agent 布置一个桌面任务，比如[第 6 节](#6-使用示例)里的例子。
 
-升级已有安装也使用同一条安装命令，随后完整重启 Desktop。安装与升级请核对宿主实际使用的 profile；安装到另一个 profile 不会改变当前宿主的插件。
+#### 1.2 升级
+
+运行同一条安装命令，然后像上面第 2 步那样完全退出、再重新打开 DSH Desktop。
+
+命令里的 `desktop` 是 DSH Desktop 使用的配置（profile）。如果装到了别的 profile，正在用的 DSH 不会有任何变化。
+
+#### 1.3 其他安装方式
 
 <details>
-<summary>Web、GitHub 与独立 MCP 客户端</summary>
+<summary>DSH Web、GitHub 源、单独的 MCP 客户端</summary>
 
 DSH Web：
 
@@ -50,13 +61,13 @@ DSH Web：
 dsh plugin --profile web add dsh-computer-use-win
 ```
 
-安装后重启 `dsh web`。使用其他 profile 时，将 `web` 替换为对应名称。也可在插件市场搜索 **dsh-computer-use-win**，或使用 GitHub 源：
+装好后重启 `dsh web`。用别的 profile 时，把 `web` 换成它的名字。也可以在插件市场搜索 **dsh-computer-use-win**，或者从 GitHub 安装：
 
 ```powershell
 dsh plugin --profile desktop add github:Yu-tao-Li/dsh-computer-use-win
 ```
 
-独立 MCP 客户端可配置 stdio 服务：
+不在 DSH 里，也可以让任何 MCP 客户端启动它：
 
 ```json
 {
@@ -69,79 +80,128 @@ dsh plugin --profile desktop add github:Yu-tao-Li/dsh-computer-use-win
 }
 ```
 
-独立服务默认全部加载；`WCU_TOOL_MODE=lite` 使用精简集合，`WCU_ENABLED_TOOLS` 可指定 JSON 数组。DSH 专属的设置页、对话展示和整轮提示需要 DSH 宿主。更多配置见[工具加载说明](docs/tool-context.md)。
+DSH Web 和单独的 MCP 客户端会用你电脑上的 Node.js 运行插件，需要 22 或更高版本。DSH Desktop 自带运行环境，不用另装 Node.js。
+
+单独运行时默认加载全部工具。设置环境变量 `WCU_TOOL_MODE=lite` 只加载常用工具，`WCU_TOOL_MODE=lazy` 开始时只加载管理入口。也可以在 `WCU_ENABLED_TOOLS` 里写一个 JSON 数组，指定允许哪些工具。设置页、对话里的操作记录和整轮提示只有在 DSH 里才有。详见[工具加载说明](docs/tool-context.md)。
 
 </details>
 
-### 界面预览
+### 2. 界面预览
 
-以下为 **DSH Desktop 2.0.18** 的真实界面：对话截图来自插件 0.4.3，设置页截图来自 0.5.1。演示在独立会话中完成：新开浏览器窗口，搜索“晴天”，并确认结果中出现“周杰伦”。配图重新截取为原始像素的无损 PNG，仅保留相关对话内容或设置面板；点击图片可查看原图。
+下面是 DSH Desktop 2.0.18 里的真实截图（中文界面）。对话截图来自插件 0.4.3，设置页截图来自 0.5.1。演示任务是：新开一个浏览器窗口，搜索“晴天”，确认结果里有“周杰伦”。截图只保留了对话或设置面板，点击图片可以看原图。
 
-**对话中的操作记录。** 展开工具调用后，可看到带鼠标图标的“输入了文本”“发送了按键”“检查了操作结果”等记录，点击操作行可进入“查看步骤和截图”。
+#### 2.1 对话里能看到每一步
+
+每次桌面操作都是一行带鼠标图标的记录，比如“输入了文本”“发送了按键”“检查了操作结果”。点“查看步骤和截图”，可以看到每一步的详情和截图。
 
 ![真实搜索演示：DSH对话中带鼠标图标的输入、按键、结果检查记录，以及查看步骤和截图入口](assets/desktop-search-steps-hd.png)
 
-**工具加载。** 外层先选精简、全部、懒启动或自定义。下图仅截取暗色设置面板，展示默认加载全部 24 项工具的方案；顶部的 Star 与 Issue 说明可点“折叠”收为一个链接。
+#### 2.2 设置页
+
+先选一种工具加载方案：精简、全部、懒启动或自定义，默认是“全部”（24 个工具）。顶部的 Star 和 Issue 说明可以点“折叠”收起来。
 
 ![Computer Use设置面板：可折叠的Star和Issue说明，以及精简、全部、懒启动、自定义四种工具加载方案](assets/desktop-settings-overview-hd.png)
 
-<details>
-<summary>查看搜索总结、自定义工具、接管提示与停止设置</summary>
+#### 2.3 更多截图
 
-**对话中的最终总结。** agent 说明实际执行过程和在结果页中确认的内容。下图的文字由本次任务使用的模型生成。
+<details>
+<summary>任务总结、自定义工具、接管提示、停止设置</summary>
+
+**任务总结。** 一轮操作结束后，agent 会说明自己做了什么、在结果页里确认了什么。图中的文字由这次任务用的模型生成。
 
 ![浏览器搜索晴天后的真实对话总结：新建Edge窗口、输入搜索词，并确认周杰伦出现在结果中](assets/desktop-search-result-hd.png)
 
-**自定义工具。** 选择“自定义”才展开分组清单，可以逐项或按组选择。图中为尚未保存的演示草稿，拍摄后已放弃更改。
+**自定义工具。** 选“自定义”后会展开工具清单，可以一个个勾选，也可以整组勾选。图中是没有保存的演示，截完图就放弃了。
 
 ![自定义方案展开后的部分分组清单，支持全选、全部关闭和按组选择](assets/desktop-settings-tools-custom-hd.png)
 
-**接管提示。** 屏幕提示、鼠标标签和远程可见各自开关，提示条可放在顶部或底部。图中的预览示意接管时的样子：屏幕边缘光晕、“DSH 正在控制电脑”提示条和鼠标旁的 DSH 标签。
+**接管提示。** agent 操作桌面时，屏幕边缘会亮起蓝色光晕，顶部或底部出现“DSH 正在控制电脑”提示条，鼠标旁跟着一个 DSH 标签。这几样可以分别开关，设置页里有预览。
 
 ![接管提示设置：内置预览（屏幕边缘光晕、提示条、鼠标DSH标签）、顶部或底部位置，以及屏幕提示、鼠标提示和远程录屏可见三个开关](assets/desktop-settings-indicators-hd.png)
 
-**停止设置。** Esc 停止当前轮；可录制额外快捷键，也可恢复默认 Esc。
+**停止设置。** 默认按 Esc 停止。你也可以再录一个自己的快捷键，比如 F8。
 
 ![停止操作设置：Esc只停止当前轮、录制自定义快捷键，以及恢复默认Esc](assets/desktop-settings-stop-hd.png)
 
 </details>
 
-### 能做什么
+### 3. 能做什么
 
-| 你想完成的事 | 插件提供的能力 |
+| 你想让 agent 做的事 | 插件怎么做到 |
 |---|---|
-| 找到窗口、按钮和输入框 | 原生窗口枚举、UIA 无障碍树、控件查询 |
-| 读取自绘界面、canvas 或截图中的文字 | Windows OCR、文字坐标、截图；稀疏 UIA 查询可自动补 OCR |
-| 点击、输入和填写表单 | UIA 语义动作、鼠标键盘输入、保留焦点的文本粘贴 |
-| 等待页面变化、确认操作效果 | 等待窗口、控件或可见文字，再读取或截图确认 |
-| 看清 agent 正在做什么 | 屏幕提示、鼠标旁 DSH 标签、对话步骤与结束摘要 |
+| 找到窗口、按钮和输入框 | 列出打开的窗口，再通过 UI Automation（UIA，Windows 给程序读取界面控件的接口）找到控件和它们的名字 |
+| 读出界面上的文字，包括图片和自绘界面里的字 | 截图，用 Windows 自带的文字识别（OCR）找出文字和位置。界面控件很少、又没找到目标时，查找会自动改用 OCR |
+| 点击、输入、填写表单 | 优先直接操作控件，比如“按下按钮”“填入内容”，不行时再模拟鼠标和键盘。粘贴文字时不会挪动你的鼠标 |
+| 等页面变化，确认操作真的生效 | 等某个窗口、控件或文字出现，再读取或截图确认 |
+| 让你看清 agent 在做什么 | 屏幕提示、鼠标旁的 DSH 标签、对话里的步骤记录和结束总结 |
 
-在 DSH 对话中，桌面工具使用鼠标图标和简洁描述，点击可展开步骤及相关截图，结束后汇总这一轮的操作。已发送、已验证、未完成和已停止会区分展示；重开对话可恢复已有记录。浏览器搜索摘要根据实际输入、提交和后续观察生成。
+在 DSH 对话里，每次桌面操作都写成一句好懂的话，比如“点击了目标位置”，后面标出状态：“已完成”“操作已发送，效果待确认”“未完成”或“已停止”。重新打开对话时，这些记录还在。
 
-### 按你的习惯设置
+### 4. 工作原理
 
-在 **设置 → Computer Use** 中调整，点击“保存更改”后生效。界面适配明暗主题，保存结果会向宿主确认并回读；无法读取配置时会明确提示。
+#### 4.1 一次桌面任务怎么进行
 
-| 设置 | 你可以选择什么 |
+agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开头那张图的下半部分画的就是这个循环：
+
+1. **观察**：列出打开的窗口，读取界面控件，或者截图并识别文字。
+2. **定位**：找到要操作的按钮、输入框或文字的位置。
+3. **执行**：能直接操作控件就直接操作，比如按下按钮、填入内容，不行再用鼠标和键盘。
+4. **确认**：等预期的变化出现，再读一次界面。没达到目标，就回到第 1 步。
+
+插件会区分两种结果。输入类操作只返回“已发送”（`verification: "sent"`），因为程序收到了输入，不等于任务完成了。只有 `wait_for` 看到预期的窗口、控件或文字出现时，才返回“已确认”（`verification: "observed"`）。所以布置任务时，最好写明要确认什么。
+
+#### 4.2 整体架构
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/architecture-zh-dark.png">
+  <img alt="整体架构图。你在 DSH 里布置任务、调整设置，按 Esc 停止。DSH 里有 agent、插件适配器 mcp/dsh-plugin.mjs、设置页与操作记录 mcp/client.js，以及官方 MCP 桥。MCP 桥通过 stdio 连到 MCP 服务 mcp/server.mjs，服务按方案提供工具，并把请求一个一个交给常驻的 PowerShell 后端 scripts/windows-uia.ps1。后端通过 UI Automation、鼠标键盘、窗口、截图和文字识别操作你的 Windows 桌面。接管助手 scripts/windows-takeover.ps1 是独立进程，负责屏幕提示，并直接监听 Esc，不经过 DSH。" src="assets/diagrams/architecture-zh-light.png">
+</picture>
+
+图里蓝色的部分是本插件的代码，灰色的部分由 DSH 或 Windows 提供。各部分的分工如下：
+
+- **插件适配器**（`mcp/dsh-plugin.mjs`）运行在 DSH 里。它把你的设置交给 MCP 服务，并跟踪对话的轮次，保证同一时间只有一段对话在操作桌面。
+- **设置页与操作记录**（`mcp/client.js`）就是“设置 → Computer Use”这一页。它也负责把对话里的工具调用显示成好懂的步骤。
+- **MCP 服务**（`mcp/server.mjs`）由 DSH 的官方 MCP 桥启动。它按你选的方案提供工具，检查参数后把请求交给后端。
+- **PowerShell 后端**（`scripts/windows-uia.ps1`）负责读取界面、发送输入和截图。它一直运行，所以后续调用不用每次重新启动 PowerShell。请求排队，一次只执行一个，两个操作不会同时抢鼠标和键盘。
+- **接管助手**（`scripts/windows-takeover.ps1`）是单独的进程，负责屏幕提示，并直接监听 Esc。因为它不经过 DSH 和后端，后端正忙时也能收到 Esc：还没开始的操作会被取消，正在进行的输入会尽快停下。
+
+更多细节见[架构说明](docs/wiki/architecture.md)。
+
+### 5. 按你的习惯设置
+
+在 **设置 → Computer Use** 里调整，点“保存更改”后生效。界面跟随 DSH 的明暗主题。如果读不到设置，页面会直接说明，而不是显示一份看起来正常的默认值。
+
+#### 5.1 设置项
+
+| 设置 | 可以怎么选 |
 |---|---|
-| 工具加载 | **全部 24 项**（默认）、**精简 10 项**、**懒启动初始 1 项（允许全部）**，或展开“自定义”逐项／分组选取；支持全选和全部关闭 |
-| 屏幕提示 | 开关屏幕边缘与提示条，设置文字、顶部／底部位置及结束后 200–3000 毫秒的隐藏延时 |
-| 鼠标提示 | 相对屏幕提示独立开关，显示鼠标光斑和 DSH 标签；通过叠加层显示，保留系统光标主题 |
-| 远程与录屏可见 | 默认开启，支持 UU 虚拟屏幕；随活动显示器、布局和 DPI 变化刷新 |
-| 自定义停止方式 | 点击“录制快捷键”，按 F8、Ctrl + Alt + K 等按键或组合键并保存；“恢复默认（Esc）”清除额外快捷键 |
-| 预览 | 保存后点击“预览接管提示”，检查当前屏幕和鼠标提示的效果 |
+| 工具加载 | **全部**（24 个，默认）；**精简**（10 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
+| 屏幕提示 | 开关屏幕边缘光晕和提示条；可以改提示文字，放在顶部或底部，并设置结束后多久收起（0.2–3 秒） |
+| 鼠标提示 | 单独开关鼠标旁的光斑和 DSH 标签。不会改你的系统鼠标样式，调大了的指针也会自动避开 |
+| 远程与录屏可见 | 默认打开，让 UU 远程、屏幕共享和录屏也能看到提示。换显示器、调整布局或缩放后会自动跟上 |
+| 停止快捷键 | 点“录制快捷键”，按下想用的键（比如 F8 或 Ctrl + Alt + K），再保存。“恢复默认（Esc）”会清掉额外的快捷键 |
+| 预览 | 保存后点“预览接管提示”，看看提示在你屏幕上的样子 |
 
-**按 Esc 停止当前轮。** 物理 Esc 和自定义快捷键会停止这一轮及排队的桌面操作，同一轮不会自动重试。下一次发起任务或发送“继续”即可再次操作，无需去设置里恢复。普通鼠标移动和其他按键不会触发停止；关闭提示仍保留停止监听。
+#### 5.2 随时按 Esc 停止
 
-**提示覆盖连续操作，也会及时收起。** 从首次桌面工具调用开始，提示覆盖截图、读取和短暂思考间隔；轮次完成、取消或失败后按隐藏延时收起。最后一次桌面调用完成后若空闲 **30 秒**，也会收起提示并释放占用，下一次调用重新显示；正在执行的工具不计为空闲。独立 stdio 客户端按单次调用显示，因为它没有 DSH 的轮次边界。
+按下 Esc 或你设的快捷键，这一轮的桌面操作和排队中的操作会立即停止，这一轮也不会自动重试。想继续时，直接发新任务或说“继续”就行，不用去设置里恢复。普通的鼠标移动和其他按键不会触发停止。即使关掉了屏幕提示，Esc 照样有效。
 
-支持的控件动作优先使用 UIA，文本粘贴不额外移动鼠标。坐标点击和前台输入仍共享当前 Windows 桌面；另一段对话占用桌面时会返回忙碌状态。已送达应用的动作无法撤回，阻塞的应用调用需要先返回。
+#### 5.3 提示什么时候出现、什么时候收起
 
-自定义清单在切换方案时保留，保存后在当前动作结束时应用，并在重启后保留。agent 无法启用用户关闭的工具。完整行为见[设置与停止说明](docs/computer-use-settings.md)。
+第一次桌面操作开始时出现，之后截图、读取和短暂思考期间一直显示。这一轮结束、取消或出错后，按你设的时间收起。如果最后一次桌面操作后 30 秒都没有新操作，提示也会收起，下次操作时再出现。单独运行的 MCP 服务没有“轮”的概念，所以每次调用单独显示。
 
-### 使用示例
+#### 5.4 使用须知
 
-装好后，可以把这样的任务交给 agent：
+- 能直接操作控件时，插件会优先这样做，因为这样不用移动鼠标。但按坐标点击和键盘输入还是会用到你的鼠标和键盘，所以 agent 操作时最好别同时动它们。
+- 同一时间只有一段对话能操作桌面，其他对话会收到“忙碌”的结果。
+- 已经发给程序的操作无法撤回。如果程序卡住了，要等它响应后才能停下来。
+- 切换方案时，你的自定义清单会保留。保存的改动在当前这一步操作结束后生效，重启后也还在。agent 不能打开你关掉的工具。
+
+完整说明见[设置与停止](docs/computer-use-settings.md)。
+
+### 6. 使用示例
+
+#### 6.1 可以这样布置任务
 
 > 在记事本中输入“会议纪要”，再读取文本确认写入成功。
 
@@ -151,102 +211,96 @@ dsh plugin --profile desktop add github:Yu-tao-Li/dsh-computer-use-win
 
 > 打开网易云音乐，搜索“晴天”，确认结果页出现“周杰伦”。如果无障碍树看不到搜索框，用 OCR 定位可见文字。
 
-一次可靠的操作是 **观察 → 定位 → 执行 → 确认结果**。`verification: "sent"` 表示输入已发送；`wait_for` 返回 `verification: "observed"` 表示观察到了指定条件。确认应针对任务真正产生的效果。目标应用、模型能力和当前页面都会影响结果。
+任务里写清楚要确认什么，agent 就会去检查结果，而不是把输入发出去就结束（见 [4.1](#41-一次桌面任务怎么进行)）。结果也取决于目标程序、所用的模型和当前页面。
+
+#### 6.2 历史演示：网易云音乐（0.3.1）
 
 <details>
-<summary>历史实际演示：网易云音乐搜索《晴天》（0.3.1）</summary>
+<summary>在网易云音乐里搜索《晴天》</summary>
 
-在独立 Windows 11 虚拟机中，两次冷启动完成 **打开应用 → OCR 定位 → 输入“晴天” → 确认“单曲”和“周杰伦”**。截图中的应用未登录。
+在一台单独的 Windows 11 虚拟机里，从冷启动开始做了两次：**打开网易云 → 用 OCR 找到搜索框 → 输入“晴天” → 确认出现“单曲”和“周杰伦”**。截图里的软件没有登录。
 
 ![历史实测：未登录的网易云音乐中显示晴天搜索结果与歌手周杰伦](assets/netease-qingtian-search.png)
 
-这是 0.3.1 通过官方 Cordis / ToolRuntime / MCP bridge 程序化执行的历史验证，没有模型参与，未验证播放。测试环境为 Windows 11 22621.4112、PowerShell 5.1、2560×1600、150% DPI 和网易云 3.1.41.205529。详情见 [0.3.1 发布说明](https://github.com/Yu-tao-Li/dsh-computer-use-win/releases/tag/v0.3.1) 与[测试记录](docs/dev-notes.md)。
+这次测试由程序直接调用工具完成，没有模型参与，也没有测试播放。环境是 Windows 11 22621.4112、PowerShell 5.1、2560×1600、150% 缩放和网易云 3.1.41.205529。详见 [0.3.1 发布说明](https://github.com/Yu-tao-Li/dsh-computer-use-win/releases/tag/v0.3.1) 和[测试记录](docs/dev-notes.md)。
 
 </details>
 
-### 工具与进阶
+### 7. 工具与进阶
 
-共 **23 项桌面工具 + 1 个管理入口**。下表使用短名，完整名称为 `windows_computer_use_<短名>`，在 DSH 中通常再加 `mcp__wincu__` 前缀。
+#### 7.1 工具清单
 
-<details>
-<summary>查看完整工具清单与使用建议</summary>
+一共 **23 个桌面工具和 1 个管理入口**。下表用的是短名；完整名字是 `windows_computer_use_<短名>`，在 DSH 里通常还会加上 `mcp__wincu__` 前缀。
 
 | 用途 | 工具 |
 |---|---|
-| 连接与窗口定位 | `health` · `list_windows` |
-| UIA 观察 | `snapshot` · `accessibility_tree` · `find` · `element_info` |
-| 可见画面与文字 | `screenshot` · `ocr` |
+| 检查连接、找窗口 | `health` · `list_windows` |
+| 读取界面控件（UIA） | `snapshot` · `accessibility_tree` · `find` · `element_info` |
+| 截图和文字识别 | `screenshot` · `ocr` |
 | 鼠标 | `click` · `double_click` · `move` · `drag` · `scroll` |
-| 文本与控件 | `type_text` · `keypress` · `focus` · `invoke` · `set_value` |
-| 窗口管理 | `activate_window` · `move_window` · `close_window` |
-| 等待与验证 | `wait_for` · `wait` |
-| 工具管理 | `tools` |
+| 输入文字、操作控件 | `type_text` · `keypress` · `focus` · `invoke` · `set_value` |
+| 管理窗口 | `activate_window` · `move_window` · `close_window` |
+| 等待和确认 | `wait_for` · `wait` |
+| 管理工具 | `tools` |
 
-精简方案为 `list_windows`、`find`、`click`、`scroll`、`type_text`、`keypress`、`ocr`、`screenshot`、`wait_for` 和 `tools`。保留管理入口时，agent 可查询工具说明、临时卸载或重新加载用户已允许的工具；`reset` 恢复用户保存的启动集合。卸载工具不会消除已有对话中的说明或结果。
+#### 7.2 精简方案与管理入口
 
-优先使用 UIA 定位控件并执行 `invoke` / `set_value`。树稀疏或没有匹配时查看 OCR；图标或布局交给具备视觉能力的调用方读取截图。OCR 候选是文字和物理屏幕坐标，不会伪造 UIA 控件 ID。窗口移动、控件失效后应重新观察。
+精简方案包含 `list_windows`、`find`、`click`、`scroll`、`type_text`、`keypress`、`ocr`、`screenshot`、`wait_for` 和 `tools`。
+
+有了管理入口 `tools`，agent 可以查看某个工具的说明，也可以临时卸载或重新加载你允许的工具；`reset` 会恢复你保存的启动方案。卸载工具不会删掉对话里已有的说明和结果。
+
+#### 7.3 使用建议
+
+能用 UIA 找到控件时，用 `invoke` / `set_value` 直接操作。UIA 找不到，或者只找到很少的控件时，用 OCR 读屏幕上的文字；图标和布局交给能看图的模型读截图。OCR 只返回文字和屏幕坐标，不会编造控件 ID。窗口移动或控件变化后，要重新观察。
 
 [完整参数与返回值](docs/wiki/mcp-tools.md) · [按需加载与客户端兼容性](docs/tool-context.md) · [不同应用的技术差异](docs/wiki/app-technology-matrix.md)
 
-</details>
+### 8. 常见问题
 
-### 常见问题
+#### 8.1 装好了，却看不到工具或设置页，或者还是旧版本？
 
-<details>
-<summary>装了却没有工具、设置页，或还在运行旧版本？</summary>
+最常见的原因是 DSH Desktop 没有完全重启：只关窗口时，DSH 还在托盘里运行旧版插件。请右键托盘图标选“退出”，再重新打开。
 
-核对当前 profile、工具方案和安装位置，完整退出并重启宿主。版本可从 MCP `initialize.serverInfo.version` 核对；全部方案下也可调用 `health` 检查连接。同一 profile 应保留一个 `serverName: wincu` 服务；旧版临时添加的重复覆盖请先备份，再按[升级说明](docs/computer-use-settings.md)处理。
+也要确认插件装到了 DSH 正在用的 profile。版本号可以在 MCP 返回的 `initialize.serverInfo.version` 里看；选“全部”方案时，也可以让 agent 调用 `health` 检查连接。同一个 profile 里只应有一个 `serverName: wincu` 服务。如果旧版本留下过重复的手动配置，先备份，再按[升级说明](docs/computer-use-settings.md)处理。
 
-0.4.3 修复了混合版本 Desktop 的设置读取、保存和预览通道。读取失败时界面会说明状态。反馈问题请提供 Desktop、dsh 内核、插件版本和脱敏后的错误文字。
+提交问题时，请附上 DSH Desktop、dsh 内核和插件的版本号，以及去掉隐私后的报错文字。
 
-</details>
+#### 8.2 为什么点击或输入没有反应？
 
-<details>
-<summary>为什么点击或输入没有效果？</summary>
+先看目标窗口是不是在最前面、有没有被挡住、程序是不是卡住了。Chromium、Electron 和部分 WinUI 程序会忽略后台输入，所以优先用 UIA 操作，或者先把目标窗口切到前台再输入，然后看看实际效果。以管理员身份运行的窗口和 UAC 确认界面受 Windows 权限保护，插件无法操作。插件还需要一个正常可用的桌面会话。
 
-检查目标是否为前台、是否被遮挡，以及应用是否已无响应。Chromium、Electron 和部分 WinUI 控件可能忽略后台输入；优先使用 UIA 或明确目标的前台输入，再观察实际效果。Windows 权限隔离可能阻止操作提权窗口或 UAC 安全桌面。插件需要可访问的交互桌面。
+#### 8.3 支持 PowerShell 7、其他系统，或者自带看图模型吗？
 
-</details>
+只支持 Windows。默认用 PowerShell 5.1，它的文字识别（WinRT OCR）经过了真实测试。自动测试同时覆盖 PowerShell 5.1 和 7：在 7 上，界面读取和截图有真实测试，但文字识别只测了协议，所以还不能保证 7 上的文字识别可用。
 
-<details>
-<summary>支持 PowerShell 7、其他系统或内置视觉模型吗？</summary>
+插件只提供桌面工具，不带模型、API key，也不带 OmniParser、UI-TARS 这类看图解析工具。能看图的模型或单独的解析服务可以读截图，再把位置交给插件去操作。
 
-仅支持 Windows。PowerShell 5.1 是默认并已验证的真实 WinRT OCR 路径。CI 覆盖 PowerShell 5.1 / 7；PowerShell 7 的真实测试覆盖 UIA 和截图，OCR 使用确定性协议测试，不代表已验证其真实 WinRT OCR。
+### 9. 数据与隐私
 
-插件提供桌面工具，不附带模型、API key、OmniParser 或 UI-TARS。具备视觉能力的模型或独立解析服务可消费截图，再将定位结果交给工具。
+界面读取、文字识别、截图和输入都在你的电脑上完成，结果交给 DSH 或其他调用方。这些内容会不会再发给远程模型，取决于你的 DSH 和模型设置。截图和读出的文字可能包含窗口里的敏感信息，所以分享日志或提 Issue 之前，请先遮住账号、路径、密码和私人对话。
 
-</details>
+### 10. 文档与开发
 
-### 数据与隐私
-
-UIA、OCR、截图和输入在本机执行，结果交给 DSH 或其他 MCP 调用方。桌面内容是否进一步发送给远端模型，取决于宿主、模型和服务配置。截图及可见文字可能包含当前窗口里的敏感内容，请在分享日志或 Issue 前遮盖账号、路径、凭证和私人对话。
-
-### 文档与开发
+#### 10.1 文档
 
 [设置与停止](docs/computer-use-settings.md) · [工具加载](docs/tool-context.md) · [工具参数](docs/wiki/mcp-tools.md) · [架构](docs/wiki/architecture.md) · [测试记录](docs/dev-notes.md) · [更新日志](CHANGELOG.md)
 
-<details>
-<summary>开发环境与验证</summary>
+#### 10.2 开发与测试
 
-```text
-DSH agent → 官方 MCP bridge → Node MCP server → 常驻 PowerShell 后端
-                                             ├ UI Automation
-                                             ├ 鼠标 / 键盘 / 窗口
-                                             └ 截图 / Windows OCR
-```
+各部分怎么配合，见 [4.2 整体架构](#42-整体架构)。
 
 ```powershell
 npm ci
 npm test
 ```
 
-独立 MCP 服务无第三方运行时依赖；DSH 适配器使用宿主的 Schemastery 和官方 MCP 桥。开发依赖仅用于测试。**27 套隔离回归**覆盖设置兼容、控制生命周期、取消、UIA、截图、OCR 协议和输入边界。`npm test` 不发送物理输入，不修改已安装的 DSH profile；真实 UIA 测试仅操作专属夹具窗口，日志保存在命令输出的临时目录。
+单独运行的 MCP 服务不依赖任何第三方包；接入 DSH 时，用的是 DSH 自带的 Schemastery 和官方 MCP 桥。开发依赖只用于测试。`npm test` 会运行 **27 套互相隔离的回归测试**，覆盖设置兼容、接管与停止、界面读取、截图、文字识别协议和输入边界。它不会发出真实的键盘鼠标输入，也不会改动你装好的 DSH 配置；需要真实界面的测试只操作专用的测试窗口，日志写在命令输出的临时目录里。
 
-`node test/notepad-e2e.mjs` 是单独的真实输入测试，会打开记事本，应在专属测试桌面运行。两种 PowerShell 的验证范围见上方兼容性说明。
+`node test/notepad-e2e.mjs` 是另一项会真实打字的测试，它会打开记事本，请在专门的测试桌面上运行。
 
-</details>
+README 里的两张图由 `assets/diagrams/` 里的网页生成。改了图里的文字后，运行 `node assets/diagrams/render.mjs`，它会用本机的 Chrome 或 Edge 重新导出中英文、浅色和深色共 8 张图。
 
-MIT 许可。基于 [cgissing/windows-computer-use](https://github.com/cgissing/windows-computer-use) 的衍生作品，来源与版权见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+MIT 许可。本项目基于 [cgissing/windows-computer-use](https://github.com/cgissing/windows-computer-use) 衍生，来源与版权见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 [插件市场](https://awesome-dsh-plugin.com) · [发布记录](https://github.com/Yu-tao-Li/dsh-computer-use-win/releases) · [反馈问题](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues) · [返回中文顶部 ↑](#简体中文)
 
@@ -254,35 +308,46 @@ MIT 许可。基于 [cgissing/windows-computer-use](https://github.com/cgissing/
 
 ## English
 
-**New in 0.5.1: redesigned settings and control indicator.** The settings page follows DSH's native style. The “DSH 正在控制电脑” status pill, the screen-edge glow and the DSH tag at the pointer are redesigned, and the tag sits past the pointer at your pointer size, including the accessibility size. The Star and Issue note at the top of the settings page folds into one link.
+**New in 0.5.1:** the settings page now matches DSH's own style. The “DSH 正在控制电脑” (“DSH is controlling the computer”) bar and the DSH tag next to the pointer were redesigned, and the tag stays clear of enlarged pointers. With Lazy startup, the agent now knows from the start that it can operate this computer.
 
-**New in 0.5.0: Lazy startup.** Select Lazy in Settings → Computer Use to start with one management tool and load desktop tools on demand. All tools remain allowed, and All remains the default preset. See [tool loading](docs/tool-context.md).
+**Since 0.5.0** you can choose Lazy startup: DSH starts with one management tool and loads desktop tools only when a task needs them, which saves context. See [tool loading](docs/tool-context.md).
 
-When the startup set is the management entry alone and at least one desktop tool is allowed — which is what Lazy startup does — the server returns an MCP handshake note that this machine can be read and operated and that tools must be enabled first. With no desktop tool name advertised at startup, the model still learns the capability exists.
+This plugin lets a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) agent see and use the real Windows apps on your computer. It can find buttons and text fields, read text on the screen, click, type, and switch or manage windows.
 
-Give a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) agent access to real Windows apps: find controls, inspect screenshots, read visible text, click, type and manage windows.
+**23 desktop tools + 1 management entry · Clear on-screen indicators · Press Esc to stop at any time · Chinese and English settings**
 
-**23 desktop tools + 1 management entry · Visible control status · Esc stops the current turn · Chinese and English settings**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/how-it-works-en-dark.png">
+  <img alt="How to use it. Step 1: right-click the tray icon, open DSH Terminal, run the install command, then quit and reopen DSH Desktop. Step 2: ask for a task in a conversation; rows such as Entered text, Sent a key press and Checked the result appear. Step 3: the screen edge glows, a status bar and a DSH tag at the pointer appear, and Esc stops the turn at once. Below: every step the agent takes is look, locate, act, confirm, and it looks again until the goal is met." src="assets/diagrams/how-it-works-en-light.png">
+</picture>
 
-[Quick start](#quick-start) · [Interface tour](#interface-tour) · [What it can do](#what-it-can-do) · [Make it yours](#make-it-yours) · [Try a task](#try-a-task) · [Tools and options](#tools-and-options) · [FAQ](#faq) · [简体中文](#简体中文)
+**Contents:** [1 Quick start](#1-quick-start) · [2 Interface tour](#2-interface-tour) · [3 What it can do](#3-what-it-can-do) · [4 How it works](#4-how-it-works) · [5 Settings](#5-make-it-yours) · [6 Try a task](#6-try-a-task) · [7 Tools](#7-tools-and-options) · [8 FAQ](#8-faq) · [9 Privacy](#9-data-and-privacy) · [10 Development](#10-documentation-and-development) · [简体中文](#简体中文)
 
-### Quick start
+### 1. Quick start
 
-**Requires:** an interactive Windows desktop and DSH. Windows PowerShell 5.1, included with Windows, is the default backend. DSH Desktop uses its bundled Electron runtime; standalone Node hosts require Node.js ≥ 22.
+#### 1.1 Install
 
-1. Run this in **DSH Desktop's built-in terminal**:
+You need a Windows computer with DSH Desktop installed. The plugin uses Windows PowerShell 5.1, which comes with Windows, so there is nothing else to install.
+
+1. Right-click the DSH icon in the taskbar tray, choose **Open DSH Terminal**, and run:
 
    ```powershell
    dsh plugin --profile desktop add dsh-computer-use-win
    ```
 
-2. Fully quit and restart DSH Desktop, then open **Settings → Computer Use**. The introduction in the plugin list also opens the complete settings page.
-3. All tools are loaded by default. Start a desktop task, or choose Lite, Lazy or Custom in settings to load fewer tools.
+2. Right-click the tray icon again, choose **Quit**, then open DSH Desktop again. Closing the window is not enough: DSH keeps running in the tray and does not load the new plugin.
+3. Open **Settings → Computer Use** to look around. You don't have to change anything: all tools are loaded by default. Then give the agent a desktop task, such as one from [section 6](#6-try-a-task).
 
-Use the same install command to upgrade, then fully restart Desktop. Check which profile your host actually uses: installing into another profile does not update the active host's plugin.
+#### 1.2 Upgrade
+
+Run the same install command, then fully quit and reopen DSH Desktop as in step 2 above.
+
+The `desktop` in the command is the profile that DSH Desktop uses. If you install into another profile, the DSH you are using does not change.
+
+#### 1.3 Other ways to install
 
 <details>
-<summary>Web, GitHub and standalone MCP clients</summary>
+<summary>DSH Web, GitHub, standalone MCP clients</summary>
 
 For DSH Web:
 
@@ -290,13 +355,13 @@ For DSH Web:
 dsh plugin --profile web add dsh-computer-use-win
 ```
 
-Restart `dsh web` after installation. Replace `web` with your profile name when using another profile. You can also search the plugin marketplace for **dsh-computer-use-win**, or install from GitHub:
+Restart `dsh web` after installing. If you use another profile, replace `web` with its name. You can also search the plugin marketplace for **dsh-computer-use-win**, or install from GitHub:
 
 ```powershell
 dsh plugin --profile desktop add github:Yu-tao-Li/dsh-computer-use-win
 ```
 
-A standalone MCP client can launch the stdio server:
+Outside DSH, any MCP client can launch it:
 
 ```json
 {
@@ -309,79 +374,128 @@ A standalone MCP client can launch the stdio server:
 }
 ```
 
-Standalone MCP loads all tools by default. Set `WCU_TOOL_MODE=lazy` for management-only startup, `WCU_TOOL_MODE=lite` for the Lite set, or provide a JSON array in `WCU_ENABLED_TOOLS`. The settings page, conversation display and turn-wide indicators require DSH. See [tool loading](docs/tool-context.md) for configuration details.
+DSH Web and standalone MCP clients run the plugin with the Node.js on your computer, which must be version 22 or later. DSH Desktop brings its own runtime, so it needs no separate Node.js.
+
+Run on its own, the server loads all tools by default. Set `WCU_TOOL_MODE=lite` to load only the common tools, or `WCU_TOOL_MODE=lazy` to start with just the management entry. You can also list the allowed tools as a JSON array in `WCU_ENABLED_TOOLS`. The settings page, the action records in conversations and the turn-wide indicators exist only inside DSH. See [tool loading](docs/tool-context.md) for details.
 
 </details>
 
-### Interface tour
+### 2. Interface tour
 
-These are real screenshots from **DSH Desktop 2.0.18**, using the Chinese interface: the conversation images come from plugin 0.4.3 and the settings images from 0.5.1. In a separate demonstration conversation, the agent opened a new browser window, searched for “晴天” and confirmed “周杰伦” in the results. The images were recaptured as lossless PNGs at native pixel resolution, showing only the relevant conversation content or settings panel. Click an image to view the original.
+These are real screenshots from DSH Desktop 2.0.18 with the Chinese interface. The conversation images come from plugin 0.4.3 and the settings images from 0.5.1. In the demo task, the agent opened a new browser window, searched for “晴天” and confirmed that “周杰伦” appeared in the results. Each image shows only the conversation or the settings panel. Click an image to see it at full size.
 
-**Actions in the conversation.** Expand tool calls to see mouse-icon rows for typing, key presses and result checks. Expand an action row for its Steps and screenshots entry.
+#### 2.1 Every step shows up in the conversation
+
+Each desktop action is a row with a mouse icon, such as “Entered text”, “Sent a key press” or “Checked the result” (the screenshot shows the Chinese labels). Click **Steps and screenshots** to see the details and screenshots of each step.
 
 ![Real search demonstration: mouse-icon conversation rows for text input, key presses and result checks, with a steps and screenshots entry](assets/desktop-search-steps-hd.png)
 
-**Tool loading.** Choose Lite, All, Lazy or Custom first. This image shows only the dark settings panel, with the default All preset and its 24 tools; Collapse folds the Star and Issue note at the top into one link.
+#### 2.2 Settings page
+
+First pick how tools are loaded: Lite, All, Lazy or Custom. All (24 tools) is the default. You can fold the Star and Issue note at the top with Collapse.
 
 ![Computer Use settings panel: the collapsible Star and Issue note, plus Lite, All, Lazy and Custom tool presets](assets/desktop-settings-overview-hd.png)
 
-<details>
-<summary>See the search summary, custom tools, control indicators and stop settings</summary>
+#### 2.3 More screenshots
 
-**Final conversation summary.** The agent describes the actions it took and the content it confirmed on the results page. The text below was generated by the model used for this task.
+<details>
+<summary>Task summary, custom tools, control indicators, stop settings</summary>
+
+**Task summary.** When a turn ends, the agent explains what it did and what it confirmed on the results page. The text in this image was written by the model used for the task.
 
 ![Actual conversation summary after searching for 晴天: a new Edge window, the search query and confirmation that 周杰伦 appeared in the results](assets/desktop-search-result-hd.png)
 
-**Custom tools.** Custom reveals the grouped checklist with individual and group selection. The screenshot shows an unsaved demonstration draft, discarded after capture.
+**Custom tools.** Choosing Custom opens the tool list. Tick tools one by one, or a whole group at once. This is an unsaved demo that was discarded after the screenshot.
 
 ![Part of the expanded Custom checklist, with groups, select-all, disable-all and group selection](assets/desktop-settings-tools-custom-hd.png)
 
-**Control indicators.** The screen indicator, pointer tag and remote visibility each have a switch, and the pill goes at the top or bottom. The built-in preview shows what control looks like: the screen-edge glow, the “DSH 正在控制电脑” pill and the DSH tag at the pointer.
+**Control indicators.** While the agent uses the desktop, a blue glow lines the screen edges, a “DSH 正在控制电脑” bar appears at the top or bottom, and a DSH tag follows the pointer. Each one has its own switch, and the settings page shows a preview.
 
 ![Control indicator settings: the built-in preview with edge glow, status pill and pointer tag, top or bottom placement, and switches for the screen indicator, pointer indicator and remote visibility](assets/desktop-settings-indicators-hd.png)
 
-**Stop settings.** Esc stops the current turn. Record an additional shortcut or restore the Esc default.
+**Stop settings.** Esc stops the agent by default. You can also record your own shortcut, such as F8.
 
 ![Stop settings: Esc for the current turn, custom shortcut recording and restore default Esc](assets/desktop-settings-stop-hd.png)
 
 </details>
 
-### What it can do
+### 3. What it can do
 
-| Your task | Available capabilities |
+| What you want the agent to do | How the plugin does it |
 |---|---|
-| Find windows, buttons and text fields | Native window discovery, UIA accessibility trees and control queries |
-| Read custom interfaces, canvas content or screenshots | Windows OCR, text coordinates and screenshots; sparse UIA searches can fall back to OCR |
-| Click, type and fill forms | UIA semantic actions, mouse/keyboard input and text pasting that preserves focus |
-| Wait for changes and confirm results | Wait for a window, control or visible text, then read or capture the result |
-| See what the agent is doing | Screen indicators, a DSH pointer badge, conversation steps and a final summary |
+| Find windows, buttons and text fields | It lists open windows, then uses UI Automation (UIA, the Windows interface that lets programs read on-screen controls) to find controls and their names |
+| Read text on screen, including text in images and custom-drawn apps | It takes a screenshot and uses the built-in Windows text recognition (OCR) to find words and their positions. When an app exposes few controls and a search finds nothing, the search switches to OCR by itself |
+| Click, type and fill in forms | It operates controls directly when it can, for example “press this button” or “fill in this field”, and falls back to mouse and keyboard input. Pasting text does not move your mouse |
+| Wait for changes and check that an action worked | It waits for a window, control or piece of text to appear, then reads or captures the screen to confirm |
+| Show you what the agent is doing | Screen indicators, the DSH tag next to the pointer, step records in the conversation and a summary at the end |
 
-In DSH conversations, desktop calls use a mouse icon and readable descriptions. Expand them for steps and related screenshots; a summary collects the turn's actions. Sent input, verified effects, incomplete tasks and stopped operations are distinguished, and existing records are restored when reopening a conversation. Browser search summaries use actual input, submission and subsequent observations.
+In a DSH conversation, each desktop action reads as a short sentence, such as “Clicked the target”, followed by its status: “Completed”, “Input sent; effect unconfirmed”, “Incomplete” or “Stopped”. The records are still there when you reopen the conversation.
 
-### Make it yours
+### 4. How it works
 
-Open **Settings → Computer Use**, make your choices and click Save changes. The interface supports light and dark themes. Saved values are confirmed and read back from the host; unavailable configuration is shown explicitly.
+#### 4.1 How a desktop task runs
+
+The agent takes every step as **look → locate → act → confirm**. The lower half of the first figure shows this loop:
+
+1. **Look**: list the open windows, read the controls, or take a screenshot and recognize the text.
+2. **Locate**: find the button, text field or piece of text to work on.
+3. **Act**: operate the control directly when possible, such as pressing a button or filling in a field, and otherwise use the mouse and keyboard.
+4. **Confirm**: wait for the expected change and read the screen again. If the goal is not met yet, go back to step 1.
+
+The plugin keeps two kinds of result apart. Input actions only report “sent” (`verification: "sent"`), because an app receiving input does not mean the task is done. Only `wait_for` reports “observed” (`verification: "observed"`), when the expected window, control or text actually appears. So when you give a task, say what should be checked.
+
+#### 4.2 Architecture
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/architecture-en-dark.png">
+  <img alt="Architecture. You ask for tasks and change settings in DSH, and press Esc to stop. Inside DSH are the agent, the plugin adapter mcp/dsh-plugin.mjs, the settings page and step records mcp/client.js, and the official MCP bridge. The bridge talks MCP over stdio to the MCP server mcp/server.mjs, which offers tools by preset and passes requests one at a time to the persistent PowerShell backend scripts/windows-uia.ps1. The backend operates your Windows desktop through UI Automation, mouse and keyboard input, window management, capture and OCR. The takeover helper scripts/windows-takeover.ps1 runs as its own process, draws the indicators and listens for Esc itself, not through DSH." src="assets/diagrams/architecture-en-light.png">
+</picture>
+
+The blue parts are this plugin's code, and the grey parts come from DSH or Windows. Here is what each part does:
+
+- The **plugin adapter** (`mcp/dsh-plugin.mjs`) runs inside DSH. It passes your settings to the MCP server and tracks conversation turns, so only one conversation uses the desktop at a time.
+- The **settings page and step records** (`mcp/client.js`) are the Settings → Computer Use page. The same file turns the tool calls in a conversation into readable steps.
+- The **MCP server** (`mcp/server.mjs`) is started by DSH's official MCP bridge. It offers the tools of your preset, checks the arguments and passes each request to the backend.
+- The **PowerShell backend** (`scripts/windows-uia.ps1`) reads the screen, sends input and takes screenshots. It stays running, so later calls skip PowerShell startup. Requests wait in a queue and run one at a time, so two actions never fight over the mouse and keyboard.
+- The **takeover helper** (`scripts/windows-takeover.ps1`) is a separate process that draws the indicators and listens for Esc itself. Because it goes through neither DSH nor the backend, it hears Esc even while the backend is busy: actions that have not started are cancelled, and input in progress stops as soon as it can.
+
+See the [architecture notes](docs/wiki/architecture.md) for more detail.
+
+### 5. Make it yours
+
+Change these in **Settings → Computer Use**, then click Save changes. The page follows DSH's light or dark theme. If the settings cannot be read, the page says so instead of showing defaults that look valid.
+
+#### 5.1 Settings
 
 | Setting | Your choices |
 |---|---|
-| Tool loading | **All: 24** (default), **Lite: 10**, **Lazy: 1 at startup with all allowed**, or an expandable Custom checklist with individual/group selection, select-all and disable-all |
-| Screen indicators | Toggle the screen edges/banner; customize text, top/bottom placement and a 200–3000ms delay before hiding after completion |
-| Pointer indicator | Toggle the pointer glow/DSH tag independently of the screen indicator; overlays preserve your Windows cursor theme |
-| Visible in remote sessions and recordings | On by default, including UU virtual displays; refreshes as active monitors, layout and DPI change |
-| Custom stop shortcut | Click Record shortcut, press a key or combination such as F8 or Ctrl + Alt + K, and save; Restore default (Esc) clears the additional shortcut |
-| Preview | Save, then preview the current screen and pointer indicators |
+| Tool loading | **All** (24 tools, the default); **Lite** (10 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
+| Screen indicator | Turn the edge glow and the status bar on or off. Change the text, put the bar at the top or bottom, and choose how long it stays after a turn ends (0.2–3 seconds) |
+| Pointer indicator | Turn the glow and DSH tag at the pointer on or off on their own. Your Windows pointer style is not changed, and the tag stays clear of enlarged pointers |
+| Visible in remote sessions and recordings | On by default, so UU Remote, screen sharing and recordings can show the indicators too. It keeps up when you change monitors, layout or scaling |
+| Stop shortcut | Click Record shortcut, press the key you want (such as F8 or Ctrl + Alt + K), then save. Restore default (Esc) removes the extra shortcut |
+| Preview | After saving, click Preview indicator to see how it looks on your screen |
 
-**Press Esc to stop the current turn.** Physical Esc or your custom shortcut stops that turn and its queued desktop actions. It cannot automatically retry in the same turn. A new task or a request to continue can use the desktop again without visiting settings. Ordinary mouse movement and other keys do not stop control. Hiding the indicators keeps the stop listener active.
+#### 5.2 Press Esc to stop at any time
 
-**Indicators span a series of operations and clear when idle.** They appear with the first desktop call and stay through screenshots, reads and short reasoning gaps. They hide after the configured delay when the turn finishes, is cancelled or fails. After **30 idle seconds** following the last completed desktop call, they also hide and release ownership; the next call shows them again. Running tools do not count as idle. Standalone stdio clients use per-call indicators because they provide no DSH turn boundary.
+Esc, or your own shortcut, stops this turn's desktop actions right away, including queued ones, and the agent will not retry them in the same turn. To carry on, send a new task or say “continue”. There is no need to visit settings. Normal mouse movement and other keys do not stop anything. Esc still works even if you turn the indicators off.
 
-Supported control actions prefer UIA, and pasting text does not reposition the mouse. Coordinate clicks and foreground input still share the Windows desktop. Another conversation receives a busy result while it is owned. Delivered actions cannot be undone, and a blocking application call must return before cancellation can finish.
+#### 5.3 When the indicators appear and disappear
 
-Switching presets preserves your custom checklist. Saving applies changes after the current action finishes and persists them across restart. Agents cannot enable tools you disabled. See [settings and stopping](docs/computer-use-settings.md) for the complete behavior.
+They appear with the first desktop action and stay on through screenshots, reading and short pauses for thinking. When the turn ends, is cancelled or fails, they fade out after the delay you set. If 30 seconds pass after the last desktop action with nothing new, they also hide, and they come back with the next action. A standalone MCP server has no notion of turns, so it shows them for each call.
 
-### Try a task
+#### 5.4 Good to know
 
-After installation, ask the agent to do something like:
+- The plugin operates controls directly when it can, because that does not move the mouse. Clicks at screen positions and keyboard input still use your mouse and keyboard, so avoid using them while the agent works.
+- Only one conversation can use the desktop at a time. Others get a “busy” result.
+- An action already delivered to an app cannot be undone. If the app is stuck, stopping waits until it responds.
+- Switching presets keeps your custom list. Saved changes take effect after the current step finishes and survive a restart. The agent cannot turn on tools you have turned off.
+
+See [settings and stopping](docs/computer-use-settings.md) for the full details.
+
+### 6. Try a task
+
+#### 6.1 Example tasks
 
 > Type “Meeting notes” into Notepad, then read the text back to confirm it was entered.
 
@@ -391,100 +505,94 @@ After installation, ask the agent to do something like:
 
 > Open NetEase Cloud Music, search for “晴天”, and confirm that “周杰伦” appears in the results. If UIA cannot find the search box, use OCR to locate visible text.
 
-A reliable sequence is **observe → locate → act → confirm**. `verification: "sent"` means input was dispatched; `wait_for` returning `verification: "observed"` means the specified condition was observed. Check the actual effect required by the task. Results depend on the target app, model and current page state.
+When the task says what to confirm, the agent checks the result instead of stopping once the input is sent (see [4.1](#41-how-a-desktop-task-runs)). Results also depend on the app, the model and the page you are on.
+
+#### 6.2 Earlier demo: NetEase Cloud Music (0.3.1)
 
 <details>
-<summary>Historical real-world demo: searching NetEase Cloud Music (0.3.1)</summary>
+<summary>Searching NetEase Cloud Music for 晴天</summary>
 
-Two cold-start runs in an isolated Windows 11 VM completed **open app → locate with OCR → enter “晴天” → confirm “单曲” and “周杰伦”**. The app in the screenshot is signed out.
+On a separate Windows 11 virtual machine, two runs from a cold start completed **open the app → find the search box with OCR → type “晴天” → confirm “单曲” and “周杰伦”**. The app in the screenshot is signed out.
 
 ![Historical test: signed-out NetEase Cloud Music showing search results for 晴天 and artist 周杰伦](assets/netease-qingtian-search.png)
 
-This was a programmatic 0.3.1 test through the official Cordis / ToolRuntime / MCP bridge. No model participated and playback was not tested. The environment was Windows 11 22621.4112, PowerShell 5.1, 2560×1600 at 150% DPI, and NetEase Cloud Music 3.1.41.205529. See the [0.3.1 release](https://github.com/Yu-tao-Li/dsh-computer-use-win/releases/tag/v0.3.1) and [test notes](docs/dev-notes.md).
+A program called the tools directly in this test. No model was involved, and playback was not tested. The setup was Windows 11 22621.4112, PowerShell 5.1, 2560×1600 at 150% scaling, and NetEase Cloud Music 3.1.41.205529. See the [0.3.1 release](https://github.com/Yu-tao-Li/dsh-computer-use-win/releases/tag/v0.3.1) and the [test notes](docs/dev-notes.md).
 
 </details>
 
-### Tools and options
+### 7. Tools and options
 
-There are **23 desktop tools + 1 management entry**. Short names appear below; complete names use `windows_computer_use_<name>`, usually prefixed with `mcp__wincu__` in DSH.
+#### 7.1 Tool list
 
-<details>
-<summary>Full tool list and usage tips</summary>
+There are **23 desktop tools and 1 management entry**. The table uses short names. The full name is `windows_computer_use_<name>`, and DSH usually adds a `mcp__wincu__` prefix.
 
 | Purpose | Tools |
 |---|---|
-| Connection and window discovery | `health` · `list_windows` |
-| UIA observation | `snapshot` · `accessibility_tree` · `find` · `element_info` |
-| Visible content | `screenshot` · `ocr` |
+| Check the connection, find windows | `health` · `list_windows` |
+| Read on-screen controls (UIA) | `snapshot` · `accessibility_tree` · `find` · `element_info` |
+| Screenshots and text recognition | `screenshot` · `ocr` |
 | Mouse | `click` · `double_click` · `move` · `drag` · `scroll` |
-| Text and controls | `type_text` · `keypress` · `focus` · `invoke` · `set_value` |
-| Window management | `activate_window` · `move_window` · `close_window` |
-| Waiting and verification | `wait_for` · `wait` |
-| Tool management | `tools` |
+| Type and operate controls | `type_text` · `keypress` · `focus` · `invoke` · `set_value` |
+| Manage windows | `activate_window` · `move_window` · `close_window` |
+| Wait and confirm | `wait_for` · `wait` |
+| Manage tools | `tools` |
 
-Lite includes `list_windows`, `find`, `click`, `scroll`, `type_text`, `keypress`, `ocr`, `screenshot`, `wait_for` and `tools`. With management enabled, agents can inspect tool descriptions and temporarily unload or reload tools you have allowed. `reset` restores your saved startup set. Unloading does not erase definitions or results already in conversation history.
+#### 7.2 Lite preset and the management entry
 
-Prefer UIA and `invoke` / `set_value` when controls are accessible. Use OCR when the tree is sparse or finds no match, and let a vision-capable caller inspect screenshots for icons or layout. OCR candidates contain text and physical screen coordinates, not fabricated UIA IDs. Observe again after windows move or controls become stale.
+Lite includes `list_windows`, `find`, `click`, `scroll`, `type_text`, `keypress`, `ocr`, `screenshot`, `wait_for` and `tools`.
 
-[Parameters and results](docs/wiki/mcp-tools.md) · [On-demand loading and client compatibility](docs/tool-context.md) · [App technology differences](docs/wiki/app-technology-matrix.md)
+Through the `tools` entry, the agent can read a tool's description, and unload or reload tools you have allowed. `reset` returns to your saved startup set. Unloading a tool does not remove its description or results from the conversation.
 
-</details>
+#### 7.3 Tips
 
-### FAQ
+When UIA can find a control, operate it directly with `invoke` or `set_value`. When UIA finds nothing, or very little, read the screen text with OCR, and let a model that can see images read the screenshot for icons and layout. OCR returns only text and screen positions; it never makes up control IDs. Look again after a window moves or a control changes.
 
-<details>
-<summary>Installed, but no tools/settings or still running an old version?</summary>
+[Parameters and results](docs/wiki/mcp-tools.md) · [On-demand loading and client compatibility](docs/tool-context.md) · [How apps differ](docs/wiki/app-technology-matrix.md)
 
-Check the active profile, tool preset and install location, then fully restart the host. Verify the version through MCP `initialize.serverInfo.version`; with All selected, `health` can also check the connection. Keep one `serverName: wincu` service per profile. Back up any temporary duplicate overrides from older versions before following the [upgrade notes](docs/computer-use-settings.md).
+### 8. FAQ
 
-Version 0.4.3 fixes settings reads, saves and previews on mixed-version Desktop hosts. An unavailable form shows its state. For an issue report, include the Desktop, dsh core and plugin versions, plus sanitized error text.
+#### 8.1 It's installed, but I see no tools or settings, or an old version is still running
 
-</details>
+Most often, DSH Desktop was not fully restarted. Closing the window leaves DSH running in the tray with the old plugin, so right-click the tray icon, choose Quit, and open DSH Desktop again.
 
-<details>
-<summary>Why did a click or input have no effect?</summary>
+Also check that the plugin went into the profile DSH is actually using. The version appears in the MCP `initialize.serverInfo.version`; with All selected, the agent can also call `health` to check the connection. Each profile should have only one `serverName: wincu` service. If an older version left a duplicate manual entry, back it up first, then follow the [upgrade notes](docs/computer-use-settings.md).
 
-Check that the intended target is in the foreground, unobstructed and responsive. Chromium, Electron and some WinUI controls may ignore background input. Prefer UIA or foreground input with an explicit target, then observe the result. Windows privilege isolation can block elevated windows or the UAC secure desktop. An accessible interactive desktop is required.
+When you report an issue, include the DSH Desktop, dsh core and plugin versions, plus the error text with private details removed.
 
-</details>
+#### 8.2 Why did a click or typed text have no effect?
 
-<details>
-<summary>What about PowerShell 7, other operating systems or bundled vision models?</summary>
+Check that the target window is in front, not covered, and still responding. Chromium, Electron and some WinUI apps ignore input sent to background windows, so prefer UIA, or bring the window to the front before typing, and then look at the result. Windows protects apps running as administrator and the UAC prompt, so the plugin cannot operate them. The plugin also needs a normal, unlocked desktop session.
 
-Windows only. PowerShell 5.1 is the default and verified path for real WinRT OCR. CI covers PowerShell 5.1 / 7; real PowerShell 7 tests cover UIA and screenshots, while OCR uses deterministic protocol tests. That does not establish real WinRT OCR support under PowerShell 7.
+#### 8.3 What about PowerShell 7, other systems or a built-in vision model?
 
-The plugin supplies desktop tools, without a model, API key, OmniParser or UI-TARS. A vision-capable model or separate parser can consume screenshots and pass locations to the tools.
+It works on Windows only. PowerShell 5.1 is the default, and its text recognition (WinRT OCR) has been tested on real screens. The automated tests cover both PowerShell 5.1 and 7. Under 7, reading controls and taking screenshots are tested for real, but text recognition is only tested at the protocol level, so OCR under PowerShell 7 is not guaranteed.
 
-</details>
+The plugin provides desktop tools only. It does not include a model, an API key, or image parsers such as OmniParser or UI-TARS. A model that can see images, or a separate parsing service, can read the screenshots and pass positions back to the tools.
 
-### Data and privacy
+### 9. Data and privacy
 
-UIA, OCR, capture and input execute locally. Results are passed to DSH or the MCP caller; whether desktop content is then sent to a remote model depends on the host, model and service configuration. Screenshots and visible text may include sensitive window contents. Redact accounts, paths, credentials and private conversations before sharing logs or issues.
+Reading controls, text recognition, screenshots and input all run on your computer. The results go to DSH or another caller, and whether they are then sent to a remote model depends on your DSH and model settings. Screenshots and recognized text can include sensitive content from your windows, so hide accounts, paths, passwords and private chats before you share logs or open an issue.
 
-### Documentation and development
+### 10. Documentation and development
+
+#### 10.1 Documentation
 
 [Settings and stopping](docs/computer-use-settings.md) · [Tool loading](docs/tool-context.md) · [Tool reference](docs/wiki/mcp-tools.md) · [Architecture](docs/wiki/architecture.md) · [Test notes](docs/dev-notes.md) · [Changelog](CHANGELOG.md)
 
-<details>
-<summary>Development and validation</summary>
+#### 10.2 Development and testing
 
-```text
-DSH agent → official MCP bridge → Node MCP server → persistent PowerShell backend
-                                                  ├ UI Automation
-                                                  ├ mouse / keyboard / windows
-                                                  └ capture / Windows OCR
-```
+See [4.2 Architecture](#42-architecture) for how the parts fit together.
 
 ```powershell
 npm ci
 npm test
 ```
 
-The standalone MCP server has no third-party runtime dependencies. The DSH adapter uses the host's Schemastery and official MCP bridge; development dependencies are for testing. **27 isolated regression suites** cover settings compatibility, control lifecycle, cancellation, UIA, capture, OCR protocols and input boundaries. `npm test` sends no physical input and does not change installed DSH profiles. Live UIA tests operate only on dedicated fixture windows; logs go to the temporary directory printed by the command.
+The standalone MCP server needs no third-party packages at runtime. Inside DSH, it uses DSH's own Schemastery and the official MCP bridge. Development dependencies are only for testing. `npm test` runs **27 isolated regression suites** covering settings compatibility, takeover and stopping, reading controls, capture, OCR protocols and input edge cases. It sends no real keyboard or mouse input and does not touch your installed DSH profiles. Tests that need a real interface use only their own test windows, and logs go to the temporary folder the command prints.
 
-`node test/notepad-e2e.mjs` is a separate real-input test that opens Notepad. Run it on a dedicated test desktop. See the compatibility note above for what each PowerShell version validates.
+`node test/notepad-e2e.mjs` is a separate test that really types. It opens Notepad, so run it on a dedicated test desktop.
 
-</details>
+The two figures in this README are generated from the pages in `assets/diagrams/`. After changing their text, run `node assets/diagrams/render.mjs`; it uses your local Chrome or Edge to export all 8 images again, in Chinese and English, light and dark.
 
 MIT licensed. Derived from [cgissing/windows-computer-use](https://github.com/cgissing/windows-computer-use); see [THIRD_PARTY.md](THIRD_PARTY.md) for attribution and copyright.
 
