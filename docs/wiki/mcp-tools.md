@@ -368,3 +368,59 @@ Move (not resize) a window to screen coordinates without activating it. Useful f
 | activate | boolean | default: false |
 | x | integer | required |
 | y | integer | required |
+
+## Browser lane
+
+Chromium pages (Chrome, Edge, Brave) can be read and operated over the Chrome DevTools Protocol (CDP) instead of UI Automation. Everything happens inside the browser: no desktop pointer, keyboard focus, clipboard or window activation, so background tabs work. The lane adds no tool; it adds the `browserTab` argument and page element ids. `mcp/browser.mjs` implements it inside the Node server; the PowerShell backend is not involved.
+
+### Where pages come from
+
+| Source | How it connects | What its tabs can see |
+|---|---|---|
+| agent | The first `set_value` on `new-tab` starts Chrome (Edge if Chrome is missing) headless on a fresh profile under `%LOCALAPPDATA%\dsh-computer-use-win\agent-browser`, with `--disable-sync` and `--mute-audio`. The browser is a child of the server process, exits with it, and closes after 10 idle minutes; leftover profiles are removed at the next launch. | Tabs run in an isolated browser context (`Target.createBrowserContext`): none of the profile's cookies, sign-ins or history. Edge signs a new profile in to the Windows Microsoft account on its own; that sign-in stays outside the isolated context. |
+| remote-debugging | A `DevToolsActivePort` file in the default user data directory of Chrome, Edge, Brave or Chromium (all channels), present once the user allows remote debugging (Chrome 144+: `chrome://inspect/#remote-debugging`). The connection starts in the background, so a browser waiting for the user's consent never delays `list_windows`; a failed endpoint is retried after a minute. Not yet tested with a real browser. | The user's own state: sign-ins, cookies, open tabs. Browser pages such as settings are not listed or operated. |
+| configured | `WCU_BROWSER_CDP_URL` (a `ws://` DevTools URL, or `http://host:port`). | That browser's own state. |
+
+### Ids
+
+| Id | Meaning |
+|---|---|
+| `t1a2b` | A tab, from `list_windows` → `browserLane.browsers[].tabs[].id`. Derived from the browser's target id, so it stays the same after a server restart. |
+| `t1a2b:57` | An element in that tab (its DOM backend node id). Valid until the element leaves the page; a stale id fails with `BROWSER_ELEMENT_STALE`. `web:t1a2b:57` is accepted too. |
+| `t1a2b:address` | The tab's address. `set_value` with a web address navigates; text without a scheme that looks like a host gets `https://`. A search needs the site's own search URL. |
+| `new-tab`, `b1c2d:new-tab` | `set_value` with a web address opens a background tab in the agent browser, or in that connected browser. |
+
+### Tools
+
+| Tool | With `browserTab` or a page element id |
+|---|---|
+| `snapshot`, `accessibility_tree` | The page as an accessibility outline: one line per element, `[id] role "name" value="…" (states)`, with unnamed wrappers dropped and adjacent text merged; `maxNodes` caps the lines. `snapshot` adds the viewport image unless `includeScreenshot` is false. |
+| `find` | Elements whose name or value contains the query (case and whitespace ignored); `controlType` maps UIA names such as `Button`, `Edit` or `Hyperlink` to page roles. No OCR. |
+| `element_info` | Tag, type, link, placeholder, value, checked, text and the element's box in page pixels. |
+| `click`, `double_click`, `invoke` | Mouse events at the element's center inside the page, after scrolling it into view. If another element would receive the click, the call fails with `BROWSER_ELEMENT_COVERED` and names it. |
+| `move` | Hover inside the page. |
+| `focus` | DOM focus. |
+| `set_value` | Text fields and editable content: select all, then insert the text. `<select>`: the option whose value or text matches. Checkbox and radio: `true` / `false`. |
+| `type_text` | Insert the text at the page's focused field; fails with `BROWSER_NO_FOCUSED_FIELD` when nothing editable has focus. |
+| `keypress` | Key events inside the page. Alt+Left / Alt+Right / F5 / Ctrl+R go back, forward and reload. Enter accepts and Escape dismisses an open JavaScript dialog. Shortcuts of the browser window (Ctrl+L, Ctrl+T, Ctrl+W, …) fail with `BROWSER_UI_SHORTCUT`. |
+| `scroll` | A wheel event at the element, or at the viewport center for `browserTab` alone; the result reports the page offset before and after. |
+| `screenshot` | The tab's viewport, captured inside the browser; pixels are page pixels, not screen coordinates. |
+| `wait_for` | `element` and `text` conditions poll the page outline. |
+| `activate_window` | Bring the tab to the front of its window. |
+| `close_window` | Close the tab; the page's beforeunload handler may still ask. |
+
+`browserTab` cannot be combined with `windowTitle`, `processId`, `nativeWindowHandle` or `x`/`y`. After an action the server waits for a started navigation to load (up to 15 s) and for the DOM to stay quiet for 250 ms (up to 1.5 s), then returns what changed: `pageChange` is `diff` (added, changed and removed lines), `full` (after a navigation or a mostly new page) or `unchanged`. Results carry `verification: "sent"`: the page state after the action is evidence to check, not a judgement that the goal was met. An open alert, confirm or prompt blocks the page, so every call except `keypress` Enter/Escape fails fast with `BROWSER_DIALOG_OPEN`.
+
+The outline header reminds the model that page content is untrusted. Content inside iframes is not part of the outline yet; the result reports how many iframes were skipped.
+
+### Environment
+
+| Variable | Effect |
+|---|---|
+| `WCU_BROWSER_LANE=off` | Turn the lane off; `browserTab` and page ids fail with `BROWSER_LANE_UNAVAILABLE`. |
+| `WCU_BROWSER_EXE` | The browser the agent browser runs, instead of Chrome or Edge. |
+| `WCU_BROWSER_HEADLESS=0` | Show the agent browser's window. |
+| `WCU_BROWSER_PROFILE` | Where agent profiles are created. |
+| `WCU_BROWSER_CDP_URL` | Connect to this DevTools endpoint as well. |
+
+`health` reports the lane: whether it is enabled, the agent browser executable, the endpoints found and the browsers connected.
