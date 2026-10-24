@@ -596,7 +596,7 @@ function manageTools(args) {
   } else {
     if (args.operation === 'reset' && names.length) throw new Error('INVALID_ARGUMENTS: reset takes no names');
     if (args.operation !== 'reset' && !requested.length) throw new Error('INVALID_ARGUMENTS: enable/disable requires names');
-    if (args.operation === 'enable' && names.some(name=>!allowedTools.has(name))) throw new Error('TOOL_DISABLED_IN_SETTINGS: Change the user-selected tools in Settings > Computer Use before enabling this tool.');
+    if (args.operation === 'enable' && names.some(name=>!allowedTools.has(name))) throw new Error('TOOL_DISABLED_IN_SETTINGS: Change the user-selected tools in Settings > Computer Use (设置 > 电脑操控 in the Chinese interface) before enabling this tool.');
     const before = [...enabledTools].sort().join(',');
     if (args.operation === 'reset') {
       enabledTools.clear(); for (const name of initialNames) enabledTools.add(name);
@@ -838,7 +838,7 @@ function dispatchBackend(action, args = {}, timeoutMs = 30000, request) {
 }
 
 async function callTool(name, args, request) {
-  if (!allowedTools.has(name) && TOOL_NAMES.includes(name.slice(prefix.length))) throw new Error('TOOL_DISABLED_IN_SETTINGS: This tool is disabled by the user in Settings > Computer Use.');
+  if (!allowedTools.has(name) && TOOL_NAMES.includes(name.slice(prefix.length))) throw new Error('TOOL_DISABLED_IN_SETTINGS: This tool is disabled by the user in Settings > Computer Use (设置 > 电脑操控 in the Chinese interface).');
   if (name === discoveryName) return manageTools(args);
   const definition = tools.find(tool => tool.name === name);
   if (!definition) throw new Error(`Unknown tool: ${name}`);

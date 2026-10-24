@@ -14,7 +14,7 @@
 
 ## 简体中文
 
-**0.5.1 更新**：设置页换成了和 DSH 一致的样式。“DSH 正在控制电脑”提示条和鼠标旁的 DSH 标签都重新设计了，调大了鼠标指针也不会被标签挡住。用懒启动时，agent 一开始就知道自己能操作这台电脑。
+**0.5.1 更新**：设置页换成了和 DSH 一致的样式，选项卡改名为“电脑操控”，配上了鼠标图标。“DSH 正在控制电脑”提示条和鼠标旁的 DSH 标签都重新设计了，调大了鼠标指针也不会被标签挡住。用懒启动时，agent 一开始就知道自己能操作这台电脑。
 
 **0.5.0 起**可以选“懒启动”：开始时只加载 1 个管理工具，需要时再加载桌面工具，更省上下文。详见[工具加载](docs/tool-context.md)。
 
@@ -42,7 +42,7 @@
    ```
 
 2. 再右键托盘图标，选“退出”，然后重新打开 DSH Desktop。只关掉窗口不够：窗口关了，DSH 还在托盘里运行，不会加载新装的插件。
-3. 打开 **设置 → Computer Use** 看看各项选项。不改也能直接用，默认加载全部工具。然后给 agent 布置一个桌面任务，比如[第 6 节](#6-使用示例)里的例子。
+3. 打开 **设置 → 电脑操控**（鼠标图标）看看各项选项。不改也能直接用，默认加载全部工具。然后给 agent 布置一个桌面任务，比如[第 6 节](#6-使用示例)里的例子。
 
 #### 1.2 升级
 
@@ -98,9 +98,9 @@ DSH Web 和单独的 MCP 客户端会用你电脑上的 Node.js 运行插件，�
 
 #### 2.2 设置页
 
-先选一种工具加载方案：精简、全部、懒启动或自定义，默认是“全部”（24 个工具）。顶部的 Star 和 Issue 说明可以点“折叠”收起来。
+设置在左侧的“电脑操控”（鼠标图标）里。先选一种工具加载方案：精简、全部、懒启动或自定义，默认是“全部”（24 个工具）。顶部的 Star 和 Issue 说明可以点“折叠”收成一个链接，下图就是折叠后的样子，点“展开”就能恢复。
 
-![Computer Use设置面板：可折叠的Star和Issue说明，以及精简、全部、懒启动、自定义四种工具加载方案](assets/desktop-settings-overview-hd.png)
+![电脑操控设置页：左侧是带鼠标图标的电脑操控选项卡，顶部是折叠后的项目链接，下面是精简、全部、懒启动、自定义四种工具加载方案](assets/desktop-settings-overview-hd.png)
 
 #### 2.3 更多截图
 
@@ -160,7 +160,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 图里蓝色的部分是本插件的代码，灰色的部分由 DSH 或 Windows 提供。各部分的分工如下：
 
 - **插件适配器**（`mcp/dsh-plugin.mjs`）运行在 DSH 里。它把你的设置交给 MCP 服务，并跟踪对话的轮次，保证同一时间只有一段对话在操作桌面。
-- **设置页与操作记录**（`mcp/client.js`）就是“设置 → Computer Use”这一页。它也负责把对话里的工具调用显示成好懂的步骤。
+- **设置页与操作记录**（`mcp/client.js`）就是“设置 → 电脑操控”这一页。它也负责把对话里的工具调用显示成好懂的步骤。
 - **MCP 服务**（`mcp/server.mjs`）由 DSH 的官方 MCP 桥启动。它按你选的方案提供工具，检查参数后把请求交给后端。
 - **PowerShell 后端**（`scripts/windows-uia.ps1`）负责读取界面、发送输入和截图。它一直运行，所以后续调用不用每次重新启动 PowerShell。请求排队，一次只执行一个，两个操作不会同时抢鼠标和键盘。
 - **接管助手**（`scripts/windows-takeover.ps1`）是单独的进程，负责屏幕提示，并直接监听 Esc。因为它不经过 DSH 和后端，后端正忙时也能收到 Esc：还没开始的操作会被取消，正在进行的输入会尽快停下。
@@ -169,7 +169,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 
 ### 5. 按你的习惯设置
 
-在 **设置 → Computer Use** 里调整，点“保存更改”后生效。界面跟随 DSH 的明暗主题。如果读不到设置，页面会直接说明，而不是显示一份看起来正常的默认值。
+在 **设置 → 电脑操控** 里调整，点“保存更改”后生效。界面跟随 DSH 的明暗主题。如果读不到设置，页面会直接说明，而不是显示一份看起来正常的默认值。
 
 #### 5.1 设置项
 
@@ -308,7 +308,7 @@ MIT 许可。本项目基于 [cgissing/windows-computer-use](https://github.com/
 
 ## English
 
-**New in 0.5.1:** the settings page now matches DSH's own style. The “DSH 正在控制电脑” (“DSH is controlling the computer”) bar and the DSH tag next to the pointer were redesigned, and the tag stays clear of enlarged pointers. With Lazy startup, the agent now knows from the start that it can operate this computer.
+**New in 0.5.1:** the settings page now matches DSH's own style, and its tab has a mouse icon (in the Chinese interface the tab is now called 电脑操控). The “DSH 正在控制电脑” (“DSH is controlling the computer”) bar and the DSH tag next to the pointer were redesigned, and the tag stays clear of enlarged pointers. With Lazy startup, the agent now knows from the start that it can operate this computer.
 
 **Since 0.5.0** you can choose Lazy startup: DSH starts with one management tool and loads desktop tools only when a task needs them, which saves context. See [tool loading](docs/tool-context.md).
 
@@ -336,7 +336,7 @@ You need a Windows computer with DSH Desktop installed. The plugin uses Windows 
    ```
 
 2. Right-click the tray icon again, choose **Quit**, then open DSH Desktop again. Closing the window is not enough: DSH keeps running in the tray and does not load the new plugin.
-3. Open **Settings → Computer Use** to look around. You don't have to change anything: all tools are loaded by default. Then give the agent a desktop task, such as one from [section 6](#6-try-a-task).
+3. Open **Settings → Computer Use** (the mouse icon; 电脑操控 in the Chinese interface) to look around. You don't have to change anything: all tools are loaded by default. Then give the agent a desktop task, such as one from [section 6](#6-try-a-task).
 
 #### 1.2 Upgrade
 
@@ -392,9 +392,9 @@ Each desktop action is a row with a mouse icon, such as “Entered text”, “S
 
 #### 2.2 Settings page
 
-First pick how tools are loaded: Lite, All, Lazy or Custom. All (24 tools) is the default. You can fold the Star and Issue note at the top with Collapse.
+The settings are under Computer Use, the tab with the mouse icon on the left (电脑操控 in the Chinese interface). First pick how tools are loaded: Lite, All, Lazy or Custom. All (24 tools) is the default. Collapse folds the Star and Issue note at the top into a single link, as in the screenshot, and Expand brings it back.
 
-![Computer Use settings panel: the collapsible Star and Issue note, plus Lite, All, Lazy and Custom tool presets](assets/desktop-settings-overview-hd.png)
+![The settings page: the mouse-icon tab on the left (电脑操控 in the Chinese interface), the folded project link at the top, and the Lite, All, Lazy and Custom tool presets](assets/desktop-settings-overview-hd.png)
 
 #### 2.3 More screenshots
 

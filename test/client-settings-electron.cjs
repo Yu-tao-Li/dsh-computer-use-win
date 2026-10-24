@@ -46,7 +46,21 @@ app.whenReady().then(async()=>{
   assert.ok(community.text.includes('自定义停止方式')&&!community.text.includes('急停')&&!community.text.includes('用鼠标停止操作'));
   assert.equal(await evaluate('window.namespace'),process.env.WCU_SETTINGS_TEST_API==='legacy'?'windows-computer-use':'mcp-dsh-computer-use-win');
   assert.equal(await evaluate('window.page.entry.id'),'computer-use');
-  assert.equal(await evaluate('window.page.entry.label()'),'Computer Use');
+  assert.equal(await evaluate('window.page.entry.label()'),'电脑操控');
+  assert.equal(await evaluate('window.dictionary.en.nav'),'Computer Use','The English tab keeps its name');
+  // DSH draws a gear for plugin sections. Only this section's nav button swaps it for the mouse.
+  const nav=await evaluate(`new Promise(resolve=>{
+    const layer=document.createElement('div');
+    layer.innerHTML='<div role="dialog"><button class="x_navCell"><svg></svg><span>电脑操控</span></button><button class="x_navCell"><svg></svg><span>模型</span></button></div>';
+    document.body.append(layer);
+    setTimeout(()=>{
+      const [mine,other]=layer.querySelectorAll('button'),mouse=getComputedStyle(mine,'::before');
+      resolve({mine:mine.hasAttribute('data-wincu-nav'),other:other.hasAttribute('data-wincu-nav'),gear:getComputedStyle(mine.firstElementChild).display,width:mouse.width,mask:mouse.maskImage||mouse.webkitMaskImage});
+      layer.remove();
+    },0);
+  })`);
+  assert.deepEqual({mine:nav.mine,other:nav.other,gear:nav.gear,width:nav.width},{mine:true,other:false,gear:'none',width:'16px'});
+  assert.match(nav.mask,/^url\("data:image\/svg\+xml,/);
   assert.equal(await evaluate("window.entries.some(x=>x.entry.name==='settings.plugin.item')"),true);
   await evaluate("document.getElementById('wincu-page-indicatorEnabled').click()");
   await until("!document.getElementById('wincu-page-indicatorEnabled').checked");
