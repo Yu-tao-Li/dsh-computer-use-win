@@ -217,7 +217,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_click",
-    description: "Click a screen coordinate or the center of a UI Automation element. dispatch:'auto' (default) = element clicks use the UIA Invoke/Toggle pattern in the background (no foreground steal), coordinate clicks use foreground SendInput; dispatch:'background' = PostMessage into the target window's queue (no foreground steal, delivery unverified — Chromium/Electron/UWP may drop it, then retry with foreground); dispatch:'foreground' = always foreground SendInput. Raw-coordinate clicks home-correct if the target window moved since it was observed (reported as 'homed').",
+    description: "Click a screen coordinate or the center of a UI Automation element. dispatch:'auto' (default) = element clicks use the UIA Invoke/Toggle pattern in the background (no foreground steal), a coordinate click first resolves the UI Automation element under the point and uses its pattern when it has one (semantic click: the pointer does not move and the foreground window does not change), otherwise foreground SendInput; dispatch:'background' = PostMessage into the target window's queue (no foreground steal, delivery unverified — Chromium/Electron/UWP may drop it, then retry with foreground); dispatch:'foreground' = always foreground SendInput. Raw-coordinate clicks home-correct if the target window moved since it was observed (reported as 'homed').",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -491,7 +491,7 @@ const conciseDescriptions = {
   list_windows: 'List native top-level windows, HWND/PID and responsiveness.',
   find: 'Find UIA controls; empty sparse searches add OCR. OCR hits use SCREEN coordinates, not element IDs.',
   element_info: 'Inspect a UIA element ID or physical SCREEN point.',
-  click: 'Click elementId or physical SCREEN x/y. auto prefers UIA for elements; background delivery is unverified.',
+  click: 'Click elementId or physical SCREEN x/y. auto prefers a UIA action (the element itself, or the element under the point); background delivery is unverified.',
   double_click: 'Double-click elementId or physical SCREEN x/y; background delivery is unverified.',
   move: 'Move pointer to elementId or physical SCREEN x/y.',
   drag: 'Drag a path of physical SCREEN coordinates; target must be foreground.',

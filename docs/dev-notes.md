@@ -32,7 +32,7 @@ Windows 上比"截图像素"更可靠的是 **UI Automation** 树：每个控件
 ### 3. 动作：三条路径
 | 路径 | 用什么 | 何时用 |
 |---|---|---|
-| 语义 | UIA patterns：`Invoke`/`Toggle`/`SelectionItem`/`ExpandCollapse`/`Value` | 优先！不碰鼠标、更稳 |
+| 语义 | UIA patterns：`Invoke`/`Toggle`/`SelectionItem`/`ExpandCollapse`/`Value` | 优先！不碰鼠标、更稳；`click` 的坐标路径在 `dispatch:'auto'` 下也先解析点下元素，能取到模式就走这一层 |
 | 前台 | `SetCursorPos` + SendInput 状态事件；剪贴板写入 + `Ctrl+V`；`SendKeys` 键组合 | 常规操作 |
 | 后台 | PostMessage（鼠标消息 / WM_CHAR）直进目标窗口消息队列 | 不抢前台；投递未验证（诚实 `verified:false`） |
 

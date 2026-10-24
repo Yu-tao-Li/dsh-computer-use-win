@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+
+- `click` 的坐标路径在 `dispatch:'auto'` 下先解析该点下的 UI Automation 元素：能取到 `Invoke`/`Toggle`/`SelectionItem` 就用语义点击，目标应用照常收到点击，而用户的鼠标指针与前台窗口都不动；点下没有可操作模式（画布、自绘界面、纯文本）时仍回落到前台 SendInput，被其他窗口遮挡的点仍按原逻辑失败关闭，`dispatch:'foreground'` 仍是强制真实鼠标点击的出口。 / With `dispatch:'auto'`, a coordinate `click` now resolves the UI Automation element under the point and prefers its `Invoke`/`Toggle`/`SelectionItem` pattern: the target app receives the click while the user's pointer and foreground window stay put. A point with no actionable pattern (canvas, self-drawn UI, plain text) still falls back to foreground SendInput; an occluded point still fails closed; `dispatch:'foreground'` still forces a literal mouse click.
 ## 0.5.1 — 2026-10-24
 
 - 启动集合只剩管理入口且至少允许一项桌面工具时（即懒启动），`initialize` 返回 `instructions`，说明该服务能读取并操作真实 Windows 应用，并须先 `enable` 再使用；该条目的说明也改为先讲能力。此前这一状态下没有任何桌面工具名可据以推断能力，模型容易把管理入口当成普通的工具开关。其他启动集合不返回该字段；不允许任何桌面工具的自定义清单同样不返回，那里启用会被拒绝，声明该能力与用户设置相反。 / Return MCP `initialize` `instructions` when the startup set is the management entry alone with at least one desktop tool allowed (which is what Lazy startup does), stating that this server reads and operates real Windows applications and requires enabling tools first; the entry's own description now leads with the capability. Previously no desktop tool name remained in that state from which a model could infer capability. Other startup sets omit the field, including a Custom checklist that allows no desktop tool, where enabling one is refused and claiming the capability would contradict the user's setting.

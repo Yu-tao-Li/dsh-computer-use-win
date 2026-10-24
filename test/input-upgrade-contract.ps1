@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 $tokens=$null; $parseErrors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/windows-uia.ps1'),[ref]$tokens,[ref]$parseErrors)
 if($parseErrors.Count){throw ($parseErrors | Out-String)}
-foreach($name in @('Get-Prop','Get-ViewMode','Invoke-Safe','Test-TargetMatch','Get-ButtonFlags','Move-ToPoint','Type-Text','Convert-KeyChord','Get-OcrWordBounds','Find-OcrWordRun','Invoke-Action')) {
+foreach($name in @('Get-Prop','Get-ViewMode','Invoke-Safe','Test-TargetMatch','Get-ButtonFlags','Move-ToPoint','Click-At','Type-Text','Convert-KeyChord','Get-OcrWordBounds','Find-OcrWordRun','Invoke-Action')) {
   $f=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
   . ([scriptblock]::Create($f.Extent.Text.Replace('System.Windows.Forms','Fixture.Forms')))
 }
@@ -91,4 +91,37 @@ Assert-Equal $result.verification 'observed'
 $script:Truncated=$true;$script:ElementFound=$true
 $result=Invoke-Action 'wait_for' ([pscustomobject]@{condition='element';query='present';timeoutMs=100})
 Assert-Equal $result.verification 'observed';Assert-Equal $result.found $true
-Write-Output 'PASS native dictionaries, literal key escaping, all-format clipboard restore on success/failure, drag cleanup, scroll rejection and OCR wait verification (fake APIs only)'
+# dispatch:'auto' coordinate clicks prefer the element under the point. The hit
+# test needs a real window, so the helper is stubbed here and exercised by the
+# live suites; this contract pins the call and fallback matrix.
+$script:SemanticCalls=0;$script:SemanticReturn=$null
+function Invoke-SemanticClickAtPoint {param($InputObject,$Point) $script:SemanticCalls++;return $script:SemanticReturn}
+[WindowsComputerUseNative]::Reset();$script:GuardCalls=0;$script:SemanticReturn='Invoke'
+$result=Invoke-Action 'click' ([pscustomobject]@{x=10;y=20})
+Assert-Equal $script:SemanticCalls 1
+Assert-Equal $result.method 'background:Invoke@point'
+Assert-Equal $result.Contains('verified') $false
+Assert-Equal $script:GuardCalls 0
+Assert-Equal ([WindowsComputerUseNative]::Moves) 0;Assert-Equal ([WindowsComputerUseNative]::Press) 0
+[WindowsComputerUseNative]::Reset();$script:GuardCalls=0;$script:SemanticCalls=0;$script:SemanticReturn=$null
+$result=Invoke-Action 'click' ([pscustomobject]@{x=10;y=20})
+Assert-Equal $script:SemanticCalls 1
+Assert-Equal $result.method 'sendinput'
+Assert-Equal $script:GuardCalls 1
+Assert-Equal ([WindowsComputerUseNative]::Press) 1
+[WindowsComputerUseNative]::Reset();$script:GuardCalls=0;$script:SemanticCalls=0;$script:SemanticReturn='Invoke'
+$result=Invoke-Action 'click' ([pscustomobject]@{x=10;y=20;button='right'})
+Assert-Equal $script:SemanticCalls 0
+Assert-Equal $result.method 'sendinput'
+Assert-Equal $script:GuardCalls 1
+[WindowsComputerUseNative]::Reset();$script:GuardCalls=0;$script:SemanticCalls=0
+$result=Invoke-Action 'click' ([pscustomobject]@{x=10;y=20;dispatch='foreground'})
+Assert-Equal $script:SemanticCalls 0
+Assert-Equal $result.method 'sendinput'
+Assert-Equal $script:GuardCalls 1
+[WindowsComputerUseNative]::Reset();$script:GuardCalls=0;$script:SemanticCalls=0
+$result=Invoke-Action 'double_click' ([pscustomobject]@{x=10;y=20})
+Assert-Equal $script:SemanticCalls 0
+Assert-Equal $result.method 'sendinput'
+Assert-Equal ([WindowsComputerUseNative]::Press) 2
+Write-Output 'PASS native dictionaries, literal key escaping, all-format clipboard restore on success/failure, drag cleanup, scroll rejection, OCR wait verification and semantic coordinate clicks (fake APIs only)'

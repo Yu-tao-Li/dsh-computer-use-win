@@ -1662,6 +1662,29 @@ function Set-ElementValue {
   return $null
 }
 
+# A coordinate click can resolve to the element under the point: invoking its
+# UIA pattern is the same click for the target app, while the shared pointer
+# and the foreground window stay where the user left them. Returns $null when
+# the caller must fall back to the pointer path - either no actionable element
+# under the point, or the point belongs to another window.
+function Invoke-SemanticClickAtPoint {
+  param([object]$InputObject, [object]$Point)
+  if (Has-WindowTarget $InputObject) {
+    $requested = Get-ObservationWindow $InputObject
+    if ($null -eq $requested) { return $null }
+    # An occluded point sits over another window: let the pointer path fail
+    # closed instead of acting on whatever happens to be on top.
+    $nativePoint = New-Object WindowsComputerUseNative+POINT
+    $nativePoint.x = [int]$Point.x
+    $nativePoint.y = [int]$Point.y
+    $pointRoot = [WindowsComputerUseNative]::GetAncestor([WindowsComputerUseNative]::WindowFromPoint($nativePoint), 2).ToInt64()
+    if ($pointRoot -ne [int64]$requested.nativeWindowHandle) { return $null }
+  }
+  $element = Invoke-Safe { [System.Windows.Automation.AutomationElement]::FromPoint((New-Object System.Windows.Point([int]$Point.x, [int]$Point.y))) } $null
+  if ($null -eq $element) { return $null }
+  return (Invoke-ElementPattern $element)
+}
+
 # ============================================================================
 # Screenshot: unobstructed foreground screen crop, otherwise window capture.
 # ============================================================================
@@ -2115,9 +2138,20 @@ function Invoke-Action {
       }
 
       # Dispatch layering (cua-style): element clicks try the UIA pattern
-      # first (background, verified semantic action); raw coordinates need
-      # the system input queue (foreground SendInput) unless the caller
-      # explicitly asks for background PostMessage.
+      # first (background, verified semantic action). Under auto a raw
+      # coordinate click resolves the element under the point first, so the
+      # click reaches the app as a semantic action and the shared pointer and
+      # foreground window stay where the user left them. Points without an
+      # actionable element (canvas, self-drawn UI, plain text), other mouse
+      # buttons and dispatch:'foreground' keep the system input queue.
+      if (($dispatch -eq "auto") -and ($null -eq $point.elementId) -and ($button -eq "left")) {
+        $semanticMethod = Invoke-SemanticClickAtPoint -InputObject $inputObject -Point $point
+        if ($null -ne $semanticMethod) {
+          $result["method"] = "background:$semanticMethod@point"
+          $result["note"] = "Coordinate click resolved to the UI Automation element under the point, so the pointer did not move and the foreground window did not change. Pass dispatch:'foreground' for a literal mouse click."
+          return $result
+        }
+      }
       $useBackground = ($dispatch -eq "background") -or (($dispatch -eq "auto") -and ($null -ne $point.elementId))
       if ($useBackground) {
         if ($null -ne $point.elementId) {
