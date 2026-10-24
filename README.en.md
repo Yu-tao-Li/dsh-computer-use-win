@@ -14,10 +14,6 @@ Your [**Star ⭐ ↗**](https://github.com/Yu-tao-Li/dsh-computer-use-win) keeps
 
 ## English
 
-**New in 0.5.1:** the settings page now matches DSH's own style, and its tab has a mouse icon (in the Chinese interface the tab is now called 电脑操控). The “DSH 正在控制电脑” (“DSH is controlling the computer”) bar and the DSH tag next to the pointer were redesigned, and the tag stays clear of enlarged pointers. With Lazy startup, the agent now knows from the start that it can operate this computer.
-
-**Since 0.5.0** you can choose Lazy startup: DSH starts with one management tool and loads desktop tools only when a task needs them, which saves context. See [tool loading](docs/tool-context.md).
-
 This plugin lets a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) agent see and use the real Windows apps on your computer. It can find buttons and text fields, read text on the screen, click, type, and switch or manage windows.
 
 **23 desktop tools + 1 management entry · Clear on-screen indicators · Press Esc to stop at any time · Chinese and English settings**
@@ -88,7 +84,7 @@ Run on its own, the server loads all tools by default. Set `WCU_TOOL_MODE=lite` 
 
 ### 2. Interface tour
 
-These are real screenshots from DSH Desktop 2.0.18 with the Chinese interface. The conversation images come from plugin 0.4.3 and the settings images from 0.5.1. In the demo task, the agent opened a new browser window, searched for “晴天” and confirmed that “周杰伦” appeared in the results. Each image shows only the conversation or the settings panel. Click an image to see it at full size.
+These are real screenshots from DSH Desktop 2.0.18 and plugin 0.5.1, with the Chinese interface. In the demo task, the agent opened a new browser window, searched for “晴天” and confirmed that “周杰伦” appeared in the results. Each image shows only the conversation or the settings panel. Click an image to see it at full size.
 
 #### 2.1 Every step shows up in the conversation
 
@@ -213,19 +209,6 @@ See [settings and stopping](docs/computer-use-settings.md) for the full details.
 
 When the task says what to confirm, the agent checks the result instead of stopping once the input is sent (see [4.1](#41-how-a-desktop-task-runs)). Results also depend on the app, the model and the page you are on.
 
-#### 6.2 Earlier demo: NetEase Cloud Music (0.3.1)
-
-<details>
-<summary>Searching NetEase Cloud Music for 晴天</summary>
-
-On a separate Windows 11 virtual machine, two runs from a cold start completed **open the app → find the search box with OCR → type “晴天” → confirm “单曲” and “周杰伦”**. The app in the screenshot is signed out.
-
-![Historical test: signed-out NetEase Cloud Music showing search results for 晴天 and artist 周杰伦](assets/netease-qingtian-search.png)
-
-A program called the tools directly in this test. No model was involved, and playback was not tested. The setup was Windows 11 22621.4112, PowerShell 5.1, 2560×1600 at 150% scaling, and NetEase Cloud Music 3.1.41.205529. See the [0.3.1 release](https://github.com/Yu-tao-Li/dsh-computer-use-win/releases/tag/v0.3.1) and the [test notes](docs/dev-notes.md).
-
-</details>
-
 ### 7. Tools and options
 
 #### 7.1 Tool list
@@ -308,10 +291,6 @@ MIT licensed. Derived from [cgissing/windows-computer-use](https://github.com/cg
 
 ## 简体中文
 
-**0.5.1 更新**：设置页换成了和 DSH 一致的样式，选项卡改名为“电脑操控”，配上了鼠标图标。“DSH 正在控制电脑”提示条和鼠标旁的 DSH 标签都重新设计了，调大了鼠标指针也不会被标签挡住。用懒启动时，agent 一开始就知道自己能操作这台电脑。
-
-**0.5.0 起**可以选“懒启动”：开始时只加载 1 个管理工具，需要时再加载桌面工具，更省上下文。详见[工具加载](docs/tool-context.md)。
-
 这个插件让 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里的 agent 看到并操作你电脑上真实的 Windows 程序：找到按钮和输入框，读出屏幕上的文字，点击、打字，切换和管理窗口。
 
 **23 个桌面工具 + 1 个管理入口 · 操作时有明显提示 · 按 Esc 随时停止 · 中英文设置界面**
@@ -382,7 +361,7 @@ DSH Web 和单独的 MCP 客户端会用你电脑上的 Node.js 运行插件，�
 
 ### 2. 界面预览
 
-下面是 DSH Desktop 2.0.18 里的真实截图（中文界面）。对话截图来自插件 0.4.3，设置页截图来自 0.5.1。演示任务是：新开一个浏览器窗口，搜索“晴天”，确认结果里有“周杰伦”。截图只保留了对话或设置面板，点击图片可以看原图。
+下面是 DSH Desktop 2.0.18 和插件 0.5.1 的真实截图（中文界面）。演示任务是：新开一个浏览器窗口，搜索“晴天”，确认结果里有“周杰伦”。截图只保留了对话或设置面板，点击图片可以看原图。
 
 #### 2.1 对话里能看到每一步
 
@@ -506,19 +485,6 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 > 打开网易云音乐，搜索“晴天”，确认结果页出现“周杰伦”。如果无障碍树看不到搜索框，用 OCR 定位可见文字。
 
 任务里写清楚要确认什么，agent 就会去检查结果，而不是把输入发出去就结束（见 [4.1](#41-一次桌面任务怎么进行)）。结果也取决于目标程序、所用的模型和当前页面。
-
-#### 6.2 历史演示：网易云音乐（0.3.1）
-
-<details>
-<summary>在网易云音乐里搜索《晴天》</summary>
-
-在一台单独的 Windows 11 虚拟机里，从冷启动开始做了两次：**打开网易云 → 用 OCR 找到搜索框 → 输入“晴天” → 确认出现“单曲”和“周杰伦”**。截图里的软件没有登录。
-
-![历史实测：未登录的网易云音乐中显示晴天搜索结果与歌手周杰伦](assets/netease-qingtian-search.png)
-
-这次测试由程序直接调用工具完成，没有模型参与，也没有测试播放。环境是 Windows 11 22621.4112、PowerShell 5.1、2560×1600、150% 缩放和网易云 3.1.41.205529。详见 [0.3.1 发布说明](https://github.com/Yu-tao-Li/dsh-computer-use-win/releases/tag/v0.3.1) 和[测试记录](docs/dev-notes.md)。
-
-</details>
 
 ### 7. 工具与进阶
 
