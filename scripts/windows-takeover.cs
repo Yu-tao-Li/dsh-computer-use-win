@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -351,20 +352,35 @@ namespace DshTakeover {
     internal static Bitmap Draw(float zoom,bool left,bool up) {
       var image=new Bitmap((int)Math.Ceiling(120*zoom),(int)Math.Ceiling(84*zoom),PixelFormat.Format32bppPArgb);
       using(var g=Graphics.FromImage(image)) {
-        g.Clear(Color.Transparent);g.SmoothingMode=SmoothingMode.AntiAlias;g.ScaleTransform(zoom,zoom);
+        g.Clear(Color.Transparent);g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=TextRenderingHint.AntiAliasGridFit;g.ScaleTransform(zoom,zoom);
         float x=left?96:24,y=up?60:24;
-        using(var fill=new SolidBrush(Color.FromArgb(30,70,160,255)))g.FillEllipse(fill,x-20,y-20,40,40);
-        using(var outline=new Pen(Color.FromArgb(240,100,190,255),2))g.DrawEllipse(outline,x-15,y-15,30,30);
-        float bx=left?x-72:x+18,by=up?y-35:y+13;
-        using(var shape=Frame.Rounded(new RectangleF(bx,by,54,22),7)) {
-          using(var fill=new SolidBrush(Color.FromArgb(244,20,55,91)))g.FillPath(fill,shape);
-          using(var outline=new Pen(Color.FromArgb(240,110,195,255),1))g.DrawPath(outline,shape);
+        // A soft spotlight under the tip instead of a hard ring.
+        using(var spot=new GraphicsPath()) {
+          spot.AddEllipse(x-16,y-16,32,32);
+          using(var glow=new PathGradientBrush(spot) { CenterColor=Color.FromArgb(120,86,134,254), SurroundColors=new[] { Color.FromArgb(0,86,134,254) } }) g.FillPath(glow,spot);
         }
-        using(var font=new Font("Segoe UI",9,FontStyle.Bold,GraphicsUnit.Pixel))
-        using(var brush=new SolidBrush(Color.FromArgb(255,237,247,255)))
-        using(var format=new StringFormat {Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center})g.DrawString("DSH",font,brush,new RectangleF(bx,by,54,22),format);
+        // A solid name tag just past the arrow, like collaborative cursors.
+        using(var font=new Font("Segoe UI",10,FontStyle.Bold,GraphicsUnit.Pixel))
+        using(var format=new StringFormat(StringFormat.GenericTypographic) { Alignment=StringAlignment.Center, LineAlignment=StringAlignment.Center }) {
+          float w=(float)Math.Ceiling(g.MeasureString("DSH",font,PointF.Empty,format).Width)+14,h=19;
+          float bx=left?x-8-w:x+13,by=up?y-10-h:y+17;
+          using(var shadow=Frame.Rounded(new RectangleF(bx,by+1.5f,w,h),6)) using(var brush=new SolidBrush(Color.FromArgb(60,0,0,0))) g.FillPath(brush,shadow);
+          using(var shape=TagShape(new RectangleF(bx,by,w,h),left,up)) {
+            using(var fill=new SolidBrush(Color.FromArgb(255,57,100,254)))g.FillPath(fill,shape);
+            using(var outline=new Pen(Color.FromArgb(240,255,255,255),1.25f))g.DrawPath(outline,shape);
+          }
+          using(var brush=new SolidBrush(Color.White))g.DrawString("DSH",font,brush,new RectangleF(bx,by+.5f,w,h),format);
+        }
       }
       return image;
+    }
+    // The corner nearest the pointer stays tight, so the tag reads as attached.
+    static GraphicsPath TagShape(RectangleF r,bool left,bool up) {
+      float topLeft=!left&&!up?2:6,topRight=left&&!up?2:6,bottomRight=left&&up?2:6,bottomLeft=!left&&up?2:6;
+      var p=new GraphicsPath();
+      p.AddArc(r.X,r.Y,topLeft*2,topLeft*2,180,90);p.AddArc(r.Right-topRight*2,r.Y,topRight*2,topRight*2,270,90);
+      p.AddArc(r.Right-bottomRight*2,r.Bottom-bottomRight*2,bottomRight*2,bottomRight*2,0,90);p.AddArc(r.X,r.Bottom-bottomLeft*2,bottomLeft*2,bottomLeft*2,90,90);
+      p.CloseFigure();return p;
     }
     protected override void Dispose(bool disposing) {
       if(dc!=IntPtr.Zero) { if(bitmap!=IntPtr.Zero){Native.SelectObject(dc,previous);Native.DeleteObject(bitmap);}Native.DeleteDC(dc);dc=IntPtr.Zero; }
@@ -403,27 +419,60 @@ namespace DshTakeover {
       var image = new Bitmap(width,height,PixelFormat.Format32bppPArgb);
       using (var g = Graphics.FromImage(image)) {
         g.SmoothingMode = SmoothingMode.AntiAlias;
+        // ClearType needs an opaque surface; layered windows need grayscale text.
+        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         g.Clear(Color.Transparent);
+        float scale = Math.Max(1f, Math.Min(2f, width/1920f));
+        // Edge glow in DeepSeek blue: a soft falloff without a hard outline.
         g.CompositingMode = CompositingMode.SourceCopy;
-        for (int i=0;i<12;i++) {
-          int alpha=(int)(110*Math.Pow(1-i/12.0,2));
-          using (var pen = new Pen(Color.FromArgb(alpha,114,199,255),1)) g.DrawRectangle(pen,i,i,width-2*i-1,height-2*i-1);
+        int glow = (int)Math.Round(14*scale);
+        for (int i=0;i<glow;i++) {
+          int alpha=(int)(140*Math.Pow(1-i/(double)glow,2.4));
+          using (var pen = new Pen(Color.FromArgb(alpha,86,134,254),1)) g.DrawRectangle(pen,i,i,width-2*i-1,height-2*i-1);
         }
         g.CompositingMode = CompositingMode.SourceOver;
-        using (var pen = new Pen(Color.FromArgb(160,150,215,255),1)) g.DrawRectangle(pen,0,0,width-1,height-1);
-        float scale = Math.Max(1f, Math.Min(2f, width/1920f));
-        using (var font = new Font("Microsoft YaHei UI",10f*scale,FontStyle.Regular,GraphicsUnit.Point)) {
-          string label = text + "  ·  Esc 停止";
-          var measured = g.MeasureString(label,font);
-          float boxWidth = Math.Min(width-48,measured.Width+42*scale),boxHeight=42*scale;
-          float x=(width-boxWidth)/2, y=position=="bottom"?height-boxHeight-22*scale:22*scale;
-          using(var shape = Rounded(new RectangleF(x,y,boxWidth,boxHeight),12*scale)) {
-            using(var fill = new SolidBrush(Color.FromArgb(238,21,38,59))) g.FillPath(fill,shape);
-            using(var outline = new Pen(Color.FromArgb(190,101,188,255),1)) g.DrawPath(outline,shape);
+        // Status pill: live dot, the user's text, then an Esc keycap.
+        using (var font = new Font("Microsoft YaHei UI",10.5f*scale,FontStyle.Regular,GraphicsUnit.Point))
+        using (var keyFont = new Font("Segoe UI",8.5f*scale,FontStyle.Bold,GraphicsUnit.Point))
+        using (var hintFont = new Font("Microsoft YaHei UI",9.5f*scale,FontStyle.Regular,GraphicsUnit.Point))
+        using (var measure = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces }) {
+          const string hint = "停止";
+          float pillHeight=40*scale, padding=16*scale, dot=8*scale, gap=10*scale, keyHeight=20*scale;
+          float keyWidth=g.MeasureString("Esc",keyFont,PointF.Empty,measure).Width+12*scale;
+          float hintWidth=g.MeasureString(hint,hintFont,PointF.Empty,measure).Width;
+          float fixedWidth=padding*2+dot+gap*3+1+keyWidth+6*scale+hintWidth;
+          float textWidth=Math.Min(g.MeasureString(text,font,PointF.Empty,measure).Width,Math.Max(48*scale,width-48*scale-fixedWidth));
+          float pillWidth=fixedWidth+textWidth;
+          float x=(float)Math.Round((width-pillWidth)/2), y=position=="bottom"?height-pillHeight-24*scale:24*scale, middle=y+pillHeight/2;
+          for (int i=1;i<=6;i++)
+            using (var shadow=Rounded(new RectangleF(x-i,y-i+2*scale,pillWidth+2*i,pillHeight+2*i),pillHeight/2+i))
+            using (var brush=new SolidBrush(Color.FromArgb(9,0,0,0))) g.FillPath(brush,shadow);
+          using (var shape=Rounded(new RectangleF(x,y,pillWidth,pillHeight),pillHeight/2)) {
+            using (var fill=new SolidBrush(Color.FromArgb(238,20,22,28))) g.FillPath(fill,shape);
+            using (var outline=new Pen(Color.FromArgb(40,255,255,255),1)) g.DrawPath(outline,shape);
           }
-          using(var brush=new SolidBrush(Color.FromArgb(255,234,246,255)))
-          using(var format=new StringFormat {Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center,Trimming=StringTrimming.EllipsisCharacter,FormatFlags=StringFormatFlags.NoWrap})
-            g.DrawString(label,font,brush,new RectangleF(x+12,y,boxWidth-24,boxHeight),format);
+          float cursor=x+padding;
+          using (var halo=new SolidBrush(Color.FromArgb(64,86,134,254))) g.FillEllipse(halo,cursor-3*scale,middle-dot/2-3*scale,dot+6*scale,dot+6*scale);
+          using (var fill=new SolidBrush(Color.FromArgb(255,86,134,254))) g.FillEllipse(fill,cursor,middle-dot/2,dot,dot);
+          cursor+=dot+gap;
+          using (var brush=new SolidBrush(Color.FromArgb(255,245,247,250)))
+          using (var format=new StringFormat(StringFormat.GenericTypographic) { LineAlignment=StringAlignment.Center, Trimming=StringTrimming.EllipsisCharacter, FormatFlags=StringFormatFlags.NoWrap })
+            g.DrawString(text,font,brush,new RectangleF(cursor,y,textWidth+1,pillHeight),format);
+          cursor+=textWidth+gap;
+          using (var line=new Pen(Color.FromArgb(56,255,255,255),1)) g.DrawLine(line,cursor,middle-8*scale,cursor,middle+8*scale);
+          cursor+=1+gap;
+          var key=new RectangleF(cursor,middle-keyHeight/2,keyWidth,keyHeight);
+          using (var shape=Rounded(key,5*scale)) {
+            using (var fill=new SolidBrush(Color.FromArgb(34,255,255,255))) g.FillPath(fill,shape);
+            using (var outline=new Pen(Color.FromArgb(64,255,255,255),1)) g.DrawPath(outline,shape);
+          }
+          using (var brush=new SolidBrush(Color.FromArgb(255,245,247,250)))
+          using (var format=new StringFormat(StringFormat.GenericTypographic) { Alignment=StringAlignment.Center, LineAlignment=StringAlignment.Center })
+            g.DrawString("Esc",keyFont,brush,key,format);
+          cursor+=keyWidth+6*scale;
+          using (var brush=new SolidBrush(Color.FromArgb(200,245,247,250)))
+          using (var format=new StringFormat(StringFormat.GenericTypographic) { LineAlignment=StringAlignment.Center, FormatFlags=StringFormatFlags.NoWrap })
+            g.DrawString(hint,hintFont,brush,new RectangleF(cursor,y,hintWidth+2,pillHeight),format);
         }
       }
       return image;

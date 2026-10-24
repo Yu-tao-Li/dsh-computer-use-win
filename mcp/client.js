@@ -59,10 +59,10 @@ window.__ModuleLoader__.load({
     Object.assign(dictionaries.en,{extraStop:'Custom stop shortcut',stopHint:'Control stays paused until you resume. Ordinary mouse movement does not stop it.',shortcutHint:'Click Record shortcut, then press a key or combination, such as F8 or Ctrl + Alt + K. Save to apply. Esc always remains available.',record:'Record shortcut',rerecord:'Record again',cancelRecord:'Cancel recording',clearShortcut:'Clear',noShortcut:'Not set',listening:'Press your shortcut… (Esc to cancel)',unsupportedKey:'Use a letter, number, function key or common key, optionally with Ctrl, Alt, Shift or Win.',recordCancelled:'Recording cancelled',recordTimedOut:'Recording timed out. Click the button to try again.'});
     Object.assign(dictionaries.zh,{clearShortcut:'恢复默认（Esc）',noShortcut:'Esc（默认）',shortcutHint:'点击“录制快捷键”，再按下想用的按键或组合键，例如 F8 或 Ctrl + Alt + K。保存后生效；恢复默认后仅保留 Esc。',starTitle:'在 GitHub 上给项目 Star（在新窗口打开）',issueTitle:'在 GitHub 上提 Issue（在新窗口打开）'});
     Object.assign(dictionaries.en,{clearShortcut:'Restore default (Esc)',noShortcut:'Esc (default)',shortcutHint:'Click Record shortcut, then press a key or combination, such as F8 or Ctrl + Alt + K. Save to apply. Restoring the default keeps only Esc.',starTitle:'Star this project on GitHub (opens in a new window)',issueTitle:'Open a GitHub issue (opens in a new window)'});
-    Object.assign(dictionaries.zh,{compactNote:'精简显示',fullNote:'完整显示',compactNoteTitle:'只保留 dsh-computer-use-win 链接，可随时恢复',fullNoteTitle:'恢复完整的 Star 与 Issue 说明',projectLink:'dsh-computer-use-win',projectTitle:'在 GitHub 上打开 dsh-computer-use-win（在新窗口打开）'});
-    Object.assign(dictionaries.en,{compactNote:'Compact',fullNote:'Show full note',compactNoteTitle:'Keep only the dsh-computer-use-win link; switch back anytime',fullNoteTitle:'Show the full Star and Issue note again',projectLink:'dsh-computer-use-win',projectTitle:'Open dsh-computer-use-win on GitHub (opens in a new window)'});
-    Object.assign(dictionaries.zh,{cursorIndicator:'突出显示鼠标',cursorIndicatorHint:'接管时在鼠标旁显示蓝色光环和 DSH 标识，便于看清操作位置。停止或接管结束后自动消失。'});
-    Object.assign(dictionaries.en,{cursorIndicator:'Highlight the pointer',cursorIndicatorHint:'Show a blue halo and DSH badge beside the pointer during control. They disappear when control stops or ends.'});
+    Object.assign(dictionaries.zh,{compactNote:'折叠',fullNote:'展开',compactNoteTitle:'折叠为 dsh-computer-use-win 链接，之后一直保持',fullNoteTitle:'展开完整的 Star 与 Issue 说明',indicatorIntro:'DSH 操作桌面时，用屏幕边缘、提示条和鼠标标签提醒你。',stopIntro:'随时中断当前这一轮桌面操作。',projectLink:'dsh-computer-use-win',projectTitle:'在 GitHub 上打开 dsh-computer-use-win（在新窗口打开）'});
+    Object.assign(dictionaries.en,{compactNote:'Collapse',fullNote:'Expand',compactNoteTitle:'Collapse to the dsh-computer-use-win link; it stays collapsed',fullNoteTitle:'Expand the full Star and Issue note',indicatorIntro:'Screen edges, a status pill and a pointer tag show when DSH is using the desktop.',stopIntro:'Interrupt the current operation series at any time.',projectLink:'dsh-computer-use-win',projectTitle:'Open dsh-computer-use-win on GitHub (opens in a new window)'});
+    Object.assign(dictionaries.zh,{cursorIndicator:'突出显示鼠标',cursorIndicatorHint:'接管时在鼠标下方显示柔和光斑和 DSH 标签，便于看清操作位置。停止或接管结束后自动消失。'});
+    Object.assign(dictionaries.en,{cursorIndicator:'Highlight the pointer',cursorIndicatorHint:'Show a soft glow and a DSH tag at the pointer during control. They disappear when control stops or ends.'});
     Object.assign(dictionaries.zh,{toolsTitle:'工具加载',toolsHint:'默认加载全部工具。需要调整时，展开下方设置，选择 agent 可以使用的工具。',customTools:'自定义工具',toolsSelected:'已启用',toolsUnit:'个工具',allTools:'恢复默认（全部启用）',noTools:'全部关闭',toolAfter:'保存后，会在当前动作结束时更新可用工具。',toolGroup_observe:'屏幕与内容',toolGroup_input:'鼠标与键盘',toolGroup_windows:'窗口与控件',toolGroup_other:'等待与工具管理'});
     Object.assign(dictionaries.en,{toolsTitle:'Tool loading',toolsHint:'All tools are loaded by default. Expand the options below to choose which tools the agent can use.',customTools:'Customize tools',toolsSelected:'Enabled',toolsUnit:'tools',allTools:'Restore defaults (enable all)',noTools:'Disable all',toolAfter:'Saved tool changes take effect after the current action finishes.',toolGroup_observe:'Screen and content',toolGroup_input:'Mouse and keyboard',toolGroup_windows:'Windows and controls',toolGroup_other:'Waiting and tool management'});
     for(const entries of toolGroups.map(group=>group[1]))for(const [name,zh,en,zhHint,enHint]of entries){dictionaries.zh['tool_'+name]=zh;dictionaries.en['tool_'+name]=en;dictionaries.zh['toolHint_'+name]=zhHint;dictionaries.en['toolHint_'+name]=enHint;}
@@ -79,85 +79,122 @@ window.__ModuleLoader__.load({
       return key?[event.ctrlKey&&'Ctrl',event.altKey&&'Alt',event.shiftKey&&'Shift',event.metaKey&&'Win',key].filter(Boolean).join('+'):null;
     }
     const css=`
-      [data-wincu-settings]{--wcu-bg:var(--dsw-alias-bg-layer-2,Canvas);--wcu-control:var(--dsw-alias-bg-layer-1,Canvas);--wcu-raised:var(--dsw-alias-bg-layer-3,Canvas);--wcu-fg:var(--dsw-alias-label-primary,CanvasText);--wcu-muted:var(--dsw-alias-label-secondary,#7b8088);--wcu-border:var(--dsw-alias-border-l2,rgba(128,128,128,.3));--wcu-accent:#2674ce;color:var(--wcu-fg);font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;max-width:760px;list-style:none;box-sizing:border-box;margin:0;padding:0 0 8px}
+      [data-wincu-settings]{--wcu-card:var(--dsw-alias-settings-card-fill,var(--dsw-alias-bg-layer-2,Canvas));--wcu-card-stroke:var(--dsw-alias-settings-card-stroke,var(--dsw-alias-border-l4,rgba(128,128,128,.34)));--wcu-sunken:var(--dsw-alias-bg-module-platform,color-mix(in srgb,CanvasText 4%,Canvas));--wcu-control:var(--dsw-alias-bg-layer-1,Canvas);--wcu-fg:var(--dsw-alias-label-primary,CanvasText);--wcu-muted:var(--dsw-alias-label-secondary,#61666b);--wcu-subtle:var(--dsw-alias-label-tertiary,#81858c);--wcu-line:var(--dsw-alias-border-l2,rgba(128,128,128,.2));--wcu-line-strong:var(--dsw-alias-border-l3,rgba(128,128,128,.3));--wcu-hover:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.1));--wcu-accent:var(--dsw-alias-state-business-primary,#4176e6);--wcu-primary:var(--dsw-alias-button-primary-fill,#0f1115);--wcu-primary-fg:var(--dsw-alias-label-primary-foreground,#fff);--wcu-selected:var(--dsw-static-neutral-bluish-400,#adb2b8);color:var(--wcu-fg);font:14px/1.55 var(--dsw-font-family,-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif);max-width:720px;list-style:none;box-sizing:border-box;margin:0;padding:0 0 8px}
       [data-wincu-settings] *{box-sizing:border-box}
-      [data-wincu-settings] h2{font-size:22px;line-height:1.4;font-weight:600;margin:0 0 6px}
-      [data-wincu-settings] h3{font-size:15px;line-height:1.5;font-weight:600;margin:0}
-      [data-wincu-settings] p{margin:5px 0 0;color:var(--wcu-muted);font-size:13px;line-height:1.55}
-      [data-wincu-settings] .wcu-header{padding:0 0 22px}
-      [data-wincu-settings] .wcu-community{display:flex;align-items:flex-start;gap:10px;padding:10px 13px;margin:0 0 18px;border:1px solid var(--wcu-border);border-radius:9px;background:var(--wcu-control)}
-      [data-wincu-settings] .wcu-community a{display:inline-flex;align-items:center;gap:5px;vertical-align:baseline;white-space:nowrap;margin:2px 3px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--wcu-accent) 75%,var(--wcu-border));border-radius:6px;background:color-mix(in srgb,var(--wcu-accent) 15%,var(--wcu-control));color:var(--wcu-fg);font-size:12px;line-height:1.5;font-weight:600;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s}
-      [data-wincu-settings] .wcu-community a:hover{background:color-mix(in srgb,var(--wcu-accent) 28%,var(--wcu-control));border-color:#6ba9ef;text-decoration:underline;text-underline-offset:3px}
-      [data-wincu-settings] .wcu-community a:focus-visible{outline:2px solid #6ba9ef;outline-offset:3px}
-      [data-wincu-settings] .wcu-community svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-      [data-wincu-settings] .wcu-community p{flex:1;min-width:0;font-size:12px;margin:0;line-height:1.9}
-      [data-wincu-settings] .wcu-community[data-compact]{align-items:center;padding:0;border:0;background:none}
+      [data-wincu-settings] h2{font-size:18px;line-height:1.4;font-weight:600;margin:0}
+      [data-wincu-settings] h3{font-size:15px;line-height:22px;font-weight:600;margin:0}
+      [data-wincu-settings] p{margin:4px 0 0;color:var(--wcu-muted);font-size:13px;line-height:1.55}
+      [data-wincu-settings] .wcu-header{padding:0 0 18px}
+      [data-wincu-settings] .wcu-header>p{color:var(--wcu-subtle)}
+      [data-wincu-settings] .wcu-community{display:flex;align-items:flex-start;gap:12px;padding:9px 8px 9px 14px;margin:0 0 18px;border:.5px solid var(--wcu-card-stroke);border-radius:var(--dsw-radius-md,12px);background:var(--wcu-card)}
+      [data-wincu-settings] .wcu-community p{flex:1;min-width:0;margin:0;font-size:12.5px;line-height:1.95;color:var(--wcu-muted)}
+      [data-wincu-settings] .wcu-community a{display:inline-flex;align-items:center;gap:5px;vertical-align:baseline;white-space:nowrap;margin:0 3px;padding:1px 9px;border:.5px solid var(--wcu-line-strong);border-radius:999px;background:var(--wcu-control);color:var(--wcu-fg);font-size:12px;line-height:20px;font-weight:500;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s}
+      [data-wincu-settings] .wcu-community a:hover{background:var(--wcu-hover);border-color:var(--wcu-subtle)}
+      [data-wincu-settings] .wcu-community a:focus-visible{outline:2px solid var(--wcu-accent);outline-offset:2px}
+      [data-wincu-settings] .wcu-community svg{width:13px;height:13px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+      [data-wincu-settings] .wcu-community a svg:last-child{width:11px;height:11px;opacity:.6}
+      [data-wincu-settings] .wcu-community[data-compact]{align-items:center;gap:4px;padding:0;border:0;background:none;margin-bottom:14px}
       [data-wincu-settings] .wcu-community[data-compact] p{flex:none}
-      [data-wincu-settings] .wcu-community button{flex:none;min-height:0;padding:3px 8px;border-color:transparent;background:none;color:var(--wcu-muted);font-size:12px;line-height:1.5}
-      [data-wincu-settings] .wcu-community button:hover:enabled{filter:none;color:var(--wcu-fg);text-decoration:underline;text-underline-offset:3px}
-      [data-wincu-settings] .wcu-section{border:1px solid var(--wcu-border);border-radius:12px;padding:20px;margin-bottom:16px;background:var(--wcu-bg)}
-      [data-wincu-settings] .wcu-row{display:flex;justify-content:space-between;align-items:center;gap:16px}
-      [data-wincu-settings] .wcu-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0 8px;border:0;padding:0;min-width:0}
+      [data-wincu-settings] .wcu-community[data-compact] a{margin-left:0}
+      [data-wincu-settings] .wcu-fold{flex:none;gap:2px;height:26px;padding:0 8px 0 4px;border:0;border-radius:var(--dsw-radius-sm,8px);background:none;color:var(--wcu-subtle);font-size:12px}
+      [data-wincu-settings] .wcu-fold:hover:enabled{background:var(--wcu-hover);color:var(--wcu-fg)}
+      [data-wincu-settings] .wcu-fold svg{width:14px;height:14px;fill:currentColor;stroke:none;transition:transform .15s}
+      [data-wincu-settings] .wcu-fold[aria-expanded=false] svg{transform:rotate(-90deg)}
+      [data-wincu-settings] .wcu-section{border:.5px solid var(--wcu-card-stroke);border-radius:var(--dsw-radius-xl,20px);background:var(--wcu-card);padding:18px 20px 20px;margin-bottom:14px}
+      [data-wincu-settings] .wcu-section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
+      [data-wincu-settings] .wcu-section-head p{margin-top:2px}
+      [data-wincu-settings] [data-wincu-tool-count]{flex:none;font-size:12px;line-height:20px;color:var(--wcu-muted);padding:2px 10px;border-radius:999px;background:var(--wcu-sunken)}
+      [data-wincu-settings] .wcu-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0;border:0;padding:0;min-width:0}
+      [data-wincu-settings] .wcu-mode{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:.5px solid var(--wcu-line-strong);border-radius:var(--dsw-radius-md,12px);cursor:pointer;min-width:0;transition:background .15s,border-color .15s}
+      [data-wincu-settings] .wcu-mode:hover{background:var(--wcu-hover)}
+      [data-wincu-settings] .wcu-mode:has(input:checked){background:var(--wcu-sunken);border-color:var(--wcu-selected)}
+      [data-wincu-settings] .wcu-mode:has(input:focus-visible){outline:2px solid var(--wcu-accent);outline-offset:2px}
+      [data-wincu-settings] .wcu-mode strong{display:block;font-size:14px;font-weight:500;line-height:20px}
+      [data-wincu-settings] .wcu-mode small{display:block;font-size:12px;color:var(--wcu-subtle);line-height:1.5;margin-top:2px}
+      [data-wincu-settings] .wcu-mode .wcu-count{color:var(--wcu-muted);margin-top:6px}
+      [data-wincu-settings] input[type=radio],[data-wincu-settings] input[type=checkbox]{accent-color:var(--wcu-accent);width:16px;height:16px;flex:none;margin:2px 0 0}
+      [data-wincu-settings] summary{cursor:pointer;color:var(--wcu-fg);font-size:13px;font-weight:500;list-style:none;display:flex;align-items:center;gap:7px;padding:11px 0;width:fit-content}
+      [data-wincu-settings] summary::-webkit-details-marker{display:none}
+      [data-wincu-settings] summary:before{content:'';width:0;height:0;border-style:solid;border-width:4.5px 0 4.5px 6px;border-color:transparent transparent transparent currentColor;opacity:.55;transition:transform .15s}
+      [data-wincu-settings] details[open]>summary:before{transform:rotate(90deg)}
+      [data-wincu-settings] .wcu-tool-detail{margin-top:10px;border:.5px solid var(--wcu-line-strong);border-radius:var(--dsw-radius-md,12px);padding:0 14px}
       [data-wincu-settings] .wcu-tool-detail[hidden]{display:none}
-      @media(max-width:560px){[data-wincu-settings] .wcu-modes{grid-template-columns:1fr}}
-      [data-wincu-settings] .wcu-mode{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--wcu-border);border-radius:9px;padding:13px;background:var(--wcu-control);cursor:pointer;min-width:0}
-      [data-wincu-settings] .wcu-mode:has(input:checked){border-color:var(--wcu-accent);background:color-mix(in srgb,var(--wcu-accent) 11%,var(--wcu-control))}
-      [data-wincu-settings] .wcu-mode strong{display:block;font-size:14px;font-weight:600}
-      [data-wincu-settings] .wcu-mode small{display:block;font-size:12px;color:var(--wcu-muted);line-height:1.5;margin-top:4px}
-      [data-wincu-settings] .wcu-mode .wcu-count{color:var(--wcu-fg);margin-top:9px}
-      [data-wincu-settings] input[type=radio],[data-wincu-settings] input[type=checkbox]{accent-color:var(--wcu-accent);width:16px;height:16px;flex:none;margin:3px 0 0}
-      [data-wincu-settings] .wcu-toggle{position:relative;display:inline-flex;align-items:center;gap:10px;cursor:pointer}
-      [data-wincu-settings] .wcu-toggle input{appearance:none;width:36px;height:21px;border:1px solid var(--wcu-border);border-radius:12px;background:var(--wcu-raised);margin:0;position:relative;cursor:pointer;transition:background .15s}
-      [data-wincu-settings] .wcu-toggle input:after{content:'';position:absolute;width:15px;height:15px;left:2px;top:2px;border-radius:50%;background:var(--wcu-fg);transition:transform .15s}
-      [data-wincu-settings] .wcu-toggle input:checked{background:var(--wcu-accent);border-color:var(--wcu-accent)}
-      [data-wincu-settings] .wcu-toggle input:checked:after{transform:translateX(15px);background:white}
-      [data-wincu-settings] .wcu-indicator-label{margin-top:14px}
-      [data-wincu-settings] .wcu-cursor-preview{position:absolute;left:60%;top:55%;width:23px;height:23px;border:2px solid #70aefa;border-radius:50%;box-shadow:0 0 0 4px #70aefa22;pointer-events:none}
-      [data-wincu-settings] .wcu-cursor-preview:before{content:'↖';position:absolute;left:6px;top:-1px;font-size:19px;line-height:1;color:var(--wcu-fg)}
-      [data-wincu-settings] .wcu-cursor-preview:after{content:'DSH';position:absolute;left:20px;top:17px;padding:1px 5px;border:1px solid #70aefa;border-radius:5px;background:#15395f;color:#edf7ff;font-size:9px;line-height:1.4}
-      [data-wincu-settings] .wcu-preview{display:grid;grid-template-columns:minmax(160px,1.1fr) minmax(100px,1fr);gap:20px;align-items:center;margin-top:18px}
-      [data-wincu-settings] .wcu-screen{height:108px;border:2px solid var(--wcu-border);border-radius:8px;position:relative;background:var(--wcu-control);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--wcu-muted);font-size:11px}
-      [data-wincu-settings] .wcu-screen[data-enabled=true]{border-color:#70aefa;box-shadow:inset 0 0 12px #75b5ff33}
-      [data-wincu-settings] .wcu-banner{position:absolute;left:12px;right:12px;padding:3px 8px;text-align:center;border-radius:4px;background:#176dcc;color:white;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      [data-wincu-settings] .wcu-choice{display:flex;gap:12px;margin:7px 0 8px;flex-wrap:wrap}
-      [data-wincu-settings] .wcu-choice label{display:flex;gap:6px;align-items:center;cursor:pointer}
-      [data-wincu-settings] .wcu-choice input{margin:0}
-      [data-wincu-settings] .wcu-label{font-size:13px;font-weight:500;display:block;margin:0 0 7px}
-      [data-wincu-settings] .wcu-control{font:inherit;color:var(--wcu-fg);background:var(--wcu-control);border:1px solid var(--wcu-border);border-radius:7px;padding:8px 10px;min-height:36px;max-width:100%;width:100%}
-      [data-wincu-settings] .wcu-control:focus-visible,[data-wincu-settings] button:focus-visible,[data-wincu-settings] input:focus-visible,[data-wincu-settings] summary:focus-visible{outline:2px solid #6ba9ef;outline-offset:2px}
-      [data-wincu-settings] .wcu-detail{border-top:1px solid var(--wcu-border);margin-top:18px;padding-top:14px}
-      [data-wincu-settings] summary{cursor:pointer;color:var(--wcu-muted);font-size:13px;width:fit-content}
-      [data-wincu-settings] .wcu-field{margin-top:16px}
-      [data-wincu-settings] .wcu-tool-detail{margin-top:14px}
-      [data-wincu-settings] .wcu-tool-body{margin:14px 0 0 5px;padding-left:16px;border-left:2px solid var(--wcu-border)}
-      [data-wincu-settings] .wcu-tool-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}
-      [data-wincu-settings] .wcu-tool-group{border:0;border-top:1px solid var(--wcu-border);padding:14px 0 8px;margin:10px 0 0;min-width:0}
-      [data-wincu-settings] .wcu-tool-group legend{padding:0 8px 0 0}
+      [data-wincu-settings] .wcu-tool-body{padding:0 0 10px}
+      [data-wincu-settings] .wcu-tool-toolbar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+      [data-wincu-settings] .wcu-tool-group{border:0;border-top:.5px solid var(--wcu-line);padding:10px 0 2px;margin:8px 0 0;min-width:0}
+      [data-wincu-settings] .wcu-tool-group legend{float:left;width:100%;padding:0;margin:0 0 6px}
       [data-wincu-settings] .wcu-tool-group-label{display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600;cursor:pointer}
-      [data-wincu-settings] .wcu-tool-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 14px}
-      [data-wincu-settings] .wcu-tool-item{display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--wcu-border);border-radius:7px;background:var(--wcu-control);cursor:pointer;min-width:0}
-      [data-wincu-settings] .wcu-tool-item strong{display:block;font-size:13px;font-weight:500}
-      [data-wincu-settings] .wcu-tool-item small{display:block;font-size:11px;color:var(--wcu-muted);margin-top:3px;line-height:1.5}
-      [data-wincu-settings] .wcu-tool-count{font-size:12px;color:var(--wcu-muted);white-space:nowrap}
-      @media(max-width:500px){[data-wincu-settings] .wcu-tool-grid{grid-template-columns:1fr}}
-      [data-wincu-settings] .wcu-number{display:flex;gap:8px;align-items:center;color:var(--wcu-muted);font-size:13px}
-      [data-wincu-settings] .wcu-number input{width:104px}
-      [data-wincu-settings] .wcu-stop{align-items:flex-start;margin-top:13px}
-      [data-wincu-settings] .wcu-key{font-size:12px;font-weight:600;font-family:inherit;line-height:1.4;border:1px solid var(--wcu-border);border-bottom-width:3px;border-radius:5px;background:var(--wcu-control);padding:3px 7px;margin-right:7px;white-space:nowrap}
-      [data-wincu-settings] .wcu-stop-title{font-weight:500;display:flex;align-items:center}
-      [data-wincu-settings] .wcu-shortcut-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}
-      [data-wincu-settings] .wcu-shortcut-value{min-width:110px;min-height:36px;display:inline-flex;align-items:center;padding:6px 10px;border:1px solid var(--wcu-border);border-radius:7px;background:var(--wcu-control);color:var(--wcu-fg)}
-      [data-wincu-settings] .wcu-shortcut-value[data-recording=true]{border-color:#6ba9ef;outline:2px solid #6ba9ef33}
-      [data-wincu-settings] button{font:inherit;border:1px solid var(--wcu-border);border-radius:7px;background:var(--wcu-raised);color:var(--wcu-fg);padding:7px 12px;min-height:34px;cursor:pointer;white-space:nowrap}
-      [data-wincu-settings] button:hover:enabled{filter:brightness(1.08)}
-      [data-wincu-settings] button.wcu-primary{background:#176dcc;border-color:#176dcc;color:white}
-      [data-wincu-settings] button:disabled,[data-wincu-settings] input:disabled,[data-wincu-settings] fieldset:disabled{opacity:.5;cursor:not-allowed}
-      [data-wincu-settings] .wcu-footer{position:sticky;bottom:-24px;background:var(--wcu-bg);padding:14px 0 12px;border-top:1px solid var(--wcu-border);display:flex;gap:12px;justify-content:space-between;align-items:center;z-index:1;box-shadow:0 -10px 14px var(--wcu-bg)}
+      [data-wincu-settings] .wcu-tool-group-label input{margin:0}
+      [data-wincu-settings] .wcu-tool-group-label .wcu-tool-count{margin-left:auto;font-weight:400}
+      [data-wincu-settings] .wcu-tool-grid{clear:both;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 12px}
+      [data-wincu-settings] .wcu-tool-item{display:flex;align-items:flex-start;gap:8px;padding:7px 8px;border-radius:var(--dsw-radius-sm,8px);cursor:pointer;min-width:0}
+      [data-wincu-settings] .wcu-tool-item:hover{background:var(--wcu-hover)}
+      [data-wincu-settings] .wcu-tool-item strong{display:block;font-size:13px;font-weight:500;line-height:20px}
+      [data-wincu-settings] .wcu-tool-item small{display:block;font-size:12px;color:var(--wcu-subtle);line-height:1.45}
+      [data-wincu-settings] .wcu-tool-count{font-size:12px;color:var(--wcu-subtle);white-space:nowrap}
+      [data-wincu-settings] .wcu-notes{margin-top:10px}
+      [data-wincu-settings] .wcu-notes p{font-size:12px;color:var(--wcu-subtle);margin:3px 0 0}
+      [data-wincu-settings] .wcu-stage{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:18px;align-items:center;padding:14px;border-radius:var(--dsw-radius-lg,16px);background:var(--wcu-sunken)}
+      [data-wincu-settings] .wcu-screen{position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:linear-gradient(135deg,#1c2333 0%,#27324d 55%,#373f60 100%);box-shadow:0 1px 3px rgba(0,0,0,.25)}
+      [data-wincu-settings] .wcu-screen[data-enabled=true]{box-shadow:inset 0 0 0 1px rgba(86,134,254,.9),inset 0 0 16px rgba(86,134,254,.55),0 1px 3px rgba(0,0,0,.25)}
+      [data-wincu-settings] .wcu-window{position:absolute;left:10%;top:24%;width:58%;height:58%;border-radius:6px;background:rgba(255,255,255,.07);border:.5px solid rgba(255,255,255,.1)}
+      [data-wincu-settings] .wcu-window:before{content:'';position:absolute;left:0;right:0;top:0;height:16%;background:rgba(255,255,255,.05);border-bottom:.5px solid rgba(255,255,255,.08);border-radius:6px 6px 0 0}
+      [data-wincu-settings] .wcu-pill{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:5px;max-width:92%;height:20px;padding:0 8px;border-radius:999px;background:rgba(20,22,28,.94);border:.5px solid rgba(255,255,255,.16);box-shadow:0 3px 10px rgba(0,0,0,.35);color:#f5f7fa;font-size:9.5px;line-height:1;white-space:nowrap}
+      [data-wincu-settings] .wcu-screen[data-position=top] .wcu-pill{top:8px}
+      [data-wincu-settings] .wcu-screen[data-position=bottom] .wcu-pill{bottom:8px}
+      [data-wincu-settings] .wcu-pill-dot{flex:none;width:6px;height:6px;border-radius:50%;background:#5686fe;box-shadow:0 0 0 2px rgba(86,134,254,.28)}
+      [data-wincu-settings] .wcu-pill-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
+      [data-wincu-settings] .wcu-pill-sep{flex:none;width:1px;height:9px;background:rgba(255,255,255,.22)}
+      [data-wincu-settings] .wcu-pill kbd{flex:none;font:600 8px/12px 'Segoe UI',sans-serif;padding:0 4px;border-radius:4px;background:rgba(255,255,255,.13);border:.5px solid rgba(255,255,255,.25);color:#f5f7fa}
+      [data-wincu-settings] .wcu-pill-hint{flex:none;opacity:.78}
+      [data-wincu-settings] .wcu-pointer{position:absolute;left:60%;top:50%;width:0;height:0}
+      [data-wincu-settings] .wcu-pointer:before{content:'';position:absolute;left:-14px;top:-14px;width:28px;height:28px;border-radius:50%;background:radial-gradient(circle,rgba(86,134,254,.55),rgba(86,134,254,0) 70%)}
+      [data-wincu-settings] .wcu-pointer svg{position:absolute;left:-1px;top:-1px;width:12px;height:18px;overflow:visible}
+      [data-wincu-settings] .wcu-pointer-tag{position:absolute;left:11px;top:15px;padding:0 6px;border-radius:2px 6px 6px 6px;background:#3964fe;border:1px solid rgba(255,255,255,.92);box-shadow:0 2px 6px rgba(0,0,0,.35);color:#fff;font:700 9px/15px 'Segoe UI',sans-serif;letter-spacing:.02em}
+      [data-wincu-settings] .wcu-screen-empty{position:absolute;inset:0;display:grid;place-items:center;color:rgba(255,255,255,.6);font-size:12px}
+      [data-wincu-settings] .wcu-stage-side{display:flex;flex-direction:column;gap:8px;min-width:0}
+      [data-wincu-settings] .wcu-stage-side p{margin:0;font-size:12px;color:var(--wcu-subtle)}
+      [data-wincu-settings] .wcu-label{display:block;margin:0;font-size:12px;font-weight:500;color:var(--wcu-muted)}
+      [data-wincu-settings] .wcu-segment{display:inline-flex;width:fit-content;gap:2px;padding:2px;border-radius:10px;background:var(--wcu-control);border:.5px solid var(--wcu-line-strong)}
+      [data-wincu-settings] .wcu-segment label{position:relative;display:inline-flex;align-items:center;padding:4px 14px;border-radius:8px;font-size:13px;color:var(--wcu-muted);cursor:pointer;transition:background .15s,color .15s}
+      [data-wincu-settings] .wcu-segment label:has(input:checked){background:color-mix(in srgb,var(--wcu-fg) 10%,var(--wcu-control));color:var(--wcu-fg)}
+      [data-wincu-settings] .wcu-segment label:has(input:focus-visible){outline:2px solid var(--wcu-accent);outline-offset:1px}
+      [data-wincu-settings] .wcu-segment label:has(input:disabled){opacity:.45;cursor:not-allowed}
+      [data-wincu-settings] .wcu-segment input{position:absolute;opacity:0;width:1px;height:1px;margin:0;pointer-events:none}
+      [data-wincu-settings] .wcu-rows{margin-top:4px}
+      [data-wincu-settings] .wcu-switch-row{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:13px 0;border-bottom:.5px solid var(--wcu-line);cursor:pointer}
+      [data-wincu-settings] .wcu-row-text{min-width:0}
+      [data-wincu-settings] .wcu-row-text strong{display:block;font-size:14px;font-weight:500;line-height:20px}
+      [data-wincu-settings] .wcu-row-text small{display:block;font-size:12px;color:var(--wcu-subtle);line-height:1.5;margin-top:2px}
+      [data-wincu-settings] .wcu-switch-row input[role=switch]{appearance:none;flex:none;width:36px;height:20px;margin:0;border-radius:999px;background:var(--dsw-alias-border-l4,rgba(128,128,128,.38));position:relative;cursor:pointer;transition:background .15s}
+      [data-wincu-settings] .wcu-switch-row input[role=switch]:after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .15s}
+      [data-wincu-settings] .wcu-switch-row input[role=switch]:checked{background:var(--wcu-accent)}
+      [data-wincu-settings] .wcu-switch-row input[role=switch]:checked:after{transform:translateX(16px)}
+      [data-wincu-settings] .wcu-fields{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:16px;padding:0 0 4px}
+      [data-wincu-settings] .wcu-field .wcu-label{margin-bottom:6px}
+      [data-wincu-settings] .wcu-field p{font-size:12px;color:var(--wcu-subtle)}
+      [data-wincu-settings] .wcu-control{font:inherit;font-size:13px;color:var(--wcu-fg);background:var(--wcu-control);border:.5px solid var(--wcu-line-strong);border-radius:var(--dsw-radius-sm,8px);padding:7px 10px;min-height:34px;max-width:100%;width:100%}
+      [data-wincu-settings] .wcu-number{display:flex;gap:8px;align-items:center;color:var(--wcu-subtle);font-size:12px}
+      [data-wincu-settings] .wcu-number input{width:100px}
+      [data-wincu-settings] .wcu-stop-row{display:flex;align-items:flex-start;gap:12px;padding:0 0 14px;border-bottom:.5px solid var(--wcu-line)}
+      [data-wincu-settings] .wcu-key{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:38px;height:26px;padding:0 8px;font:600 12px/1 'Segoe UI',sans-serif;color:var(--wcu-fg);border:.5px solid var(--wcu-line-strong);border-bottom-width:2px;border-radius:6px;background:var(--wcu-control)}
+      [data-wincu-settings] .wcu-shortcut{padding-top:14px}
+      [data-wincu-settings] .wcu-shortcut-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
+      [data-wincu-settings] .wcu-shortcut-value{min-width:120px;height:34px;display:inline-flex;align-items:center;padding:0 12px;border:.5px solid var(--wcu-line-strong);border-radius:var(--dsw-radius-sm,8px);background:var(--wcu-control);color:var(--wcu-fg);font-size:13px}
+      [data-wincu-settings] .wcu-shortcut-value[data-recording=true]{border-color:var(--wcu-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--wcu-accent) 22%,transparent)}
+      [data-wincu-settings] button{font:inherit;font-size:13px;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 14px;border:.5px solid var(--wcu-line-strong);border-radius:var(--dsw-radius-md,12px);background:transparent;color:var(--wcu-fg);cursor:pointer;white-space:nowrap;transition:background .15s,opacity .15s}
+      [data-wincu-settings] button:hover:enabled{background:var(--wcu-hover)}
+      [data-wincu-settings] button.wcu-primary{background:var(--wcu-primary);border-color:transparent;color:var(--wcu-primary-fg)}
+      [data-wincu-settings] button.wcu-primary:hover:enabled{background:var(--wcu-primary);opacity:.86}
+      [data-wincu-settings] button.wcu-small{height:28px;padding:0 10px;font-size:12px;border-radius:var(--dsw-radius-sm,8px)}
+      [data-wincu-settings] button:disabled,[data-wincu-settings] input:disabled,[data-wincu-settings] fieldset:disabled{opacity:.4;cursor:not-allowed}
+      [data-wincu-settings] .wcu-control:focus-visible,[data-wincu-settings] button:focus-visible,[data-wincu-settings] input:focus-visible,[data-wincu-settings] summary:focus-visible{outline:2px solid var(--wcu-accent);outline-offset:2px}
+      [data-wincu-settings] .wcu-footer{position:sticky;bottom:12px;z-index:1;display:flex;gap:12px;justify-content:space-between;align-items:center;margin-top:4px;padding:10px 10px 10px 16px;border:.5px solid var(--wcu-card-stroke);border-radius:var(--dsw-radius-lg,16px);background:var(--wcu-card);box-shadow:0 8px 24px rgba(0,0,0,.12)}
       [data-wincu-settings] .wcu-actions{display:flex;gap:8px}
-      [data-wincu-settings] .wcu-status{font-size:12px;color:var(--wcu-muted)}
-      [data-wincu-settings] [data-tone=error]{color:var(--dsw-alias-label-error,#d56868)}
-      [data-wincu-settings] [data-tone=success]{color:var(--dsw-alias-label-success,#4fa77b)}
-      @media(max-width:700px){[data-wincu-settings] .wcu-section{padding:16px}[data-wincu-settings] .wcu-preview{grid-template-columns:1fr}[data-wincu-settings] .wcu-stop{flex-direction:column}[data-wincu-settings] .wcu-footer{flex-wrap:wrap}}
+      [data-wincu-settings] .wcu-status{font-size:12px;color:var(--wcu-subtle)}
+      [data-wincu-settings] [data-tone=error]{color:var(--dsw-alias-state-error-primary,#d93f3f)}
+      [data-wincu-settings] [data-tone=success]{color:var(--dsw-alias-state-success-primary,#2f9e5b)}
+      @media(max-width:640px){[data-wincu-settings] .wcu-modes,[data-wincu-settings] .wcu-tool-grid,[data-wincu-settings] .wcu-fields,[data-wincu-settings] .wcu-stage{grid-template-columns:1fr}[data-wincu-settings] .wcu-section{padding:16px}[data-wincu-settings] .wcu-footer{flex-wrap:wrap}}
     `;
     Object.assign(dictionaries.zh,{pluginDescription:'让 AI 操作 Windows 桌面，支持控制提示、停止快捷键和工具选择。',openSettings:'点击进行具体设置 →',notLoaded:'未能读取 Computer Use 设置。宿主尚未提供此配置，请刷新页面或重新启动 DSH 后重试。',loadingSettings:'正在读取 Computer Use 设置…',reloadSettings:'刷新页面',delayHint:'整轮操作结束后再隐藏提示。范围 200–3000 毫秒。'});
     Object.assign(dictionaries.en,{pluginDescription:'Let the agent use Windows apps, with control indicators, stop shortcuts and tool selection.',openSettings:'Click to configure →',notLoaded:'Computer Use settings could not be read. The host has not exposed this configuration. Refresh or restart DSH.',loadingSettings:'Loading Computer Use settings…',reloadSettings:'Refresh page',delayHint:'Hide the indicator after the complete operation series ends. Range: 200–3000 ms.'});
@@ -232,36 +269,41 @@ window.__ModuleLoader__.load({
       const button=(label,props)=>h('button',{type:'button',...props},t(label));
       const linkIcon=kind=>kind==='github'?h('svg',{viewBox:'0 0 16 16','aria-hidden':true,focusable:false},h('path',{fill:'currentColor',stroke:'none',d:'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'})):h('svg',{viewBox:'0 0 24 24','aria-hidden':true,focusable:false},h('path',{d:kind==='star'?'m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L2.9 9.6l6.3-.9L12 3Z':kind==='issue'?'M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 4 11.5a8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9H13a8.5 8.5 0 0 1 8 8v.5Z':'M14 3h7v7M21 3 10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5'}));
       const communityLink=(href,label,kind,title)=>h('a',{href,target:'_blank',rel:'noopener noreferrer',title:t(title),'aria-label':t(title)},linkIcon(kind),h('span',null,t(label)),linkIcon('external'));
+      const switchRow=(field,label,hint)=>h('label',{className:'wcu-switch-row'},h('span',{className:'wcu-row-text'},h('strong',null,t(label)),h('small',null,t(hint))),h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch',checked:draft[field],disabled,onChange:e=>change(field,e.target.checked)}));
+      const pointerArrow=h('svg',{viewBox:'0 0 12 18','aria-hidden':true,focusable:false},h('path',{d:'M1 1v13.5l3.4-3.1 2.2 5 2.2-1-2.1-4.8H11L1 1Z',fill:'#fff',stroke:'#111',strokeWidth:1,strokeLinejoin:'round'}));
       return h(as,{'data-wincu-settings':'true'},h('style',null,css),
         h('header',{className:'wcu-header'},
           h('aside',{className:'wcu-community','data-wincu-community':'true','data-compact':noteCompact||undefined},noteCompact?h('p',null,communityLink('https://github.com/Yu-tao-Li/dsh-computer-use-win','projectLink','github','projectTitle')):h('p',null,t('starPrefix'),
             communityLink('https://github.com/Yu-tao-Li/dsh-computer-use-win','starLink','star','starTitle'),t('starAfter'),t('issueBefore'),
             communityLink('https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new','issueLink','issue','issueTitle'),t('issueAfter')),
-            button(noteCompact?'fullNote':'compactNote',{'data-wincu-note-toggle':true,title:t(noteCompact?'fullNoteTitle':'compactNoteTitle'),disabled:noteSaving||saving||!writable,onClick:toggleNote})),
+            h('button',{type:'button',className:'wcu-fold','data-wincu-note-toggle':true,'aria-expanded':!noteCompact,title:t(noteCompact?'fullNoteTitle':'compactNoteTitle'),disabled:noteSaving||saving||!writable,onClick:toggleNote},h('svg',{viewBox:'0 0 16 16','aria-hidden':true,focusable:false},h('path',{d:'M4 6h8l-4 5z'})),h('span',null,t(noteCompact?'fullNote':'compactNote')))),
           h('h2',null,t('title')),h('p',null,t('intro'))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-tools-title'},
-          h('div',{className:'wcu-row'},h('h3',{id:idPrefix+'-tools-title'},t('toolsTitle')),h('span',{className:'wcu-tool-count','data-wincu-tool-count':true},draft.toolPreset==='lazy'?t('lazyCount'):t('toolsSelected')+' '+activeTools.length+' / '+allToolNames.length)),h('p',null,t('toolsHint')),
+          h('div',{className:'wcu-section-head'},h('div',null,h('h3',{id:idPrefix+'-tools-title'},t('toolsTitle')),h('p',null,t('toolsHint'))),h('span',{className:'wcu-tool-count','data-wincu-tool-count':true},draft.toolPreset==='lazy'?t('lazyCount'):t('toolsSelected')+' '+activeTools.length+' / '+allToolNames.length)),
           h('div',{className:'wcu-modes',role:'radiogroup','aria-label':t('toolsTitle')},...['lite','full','lazy','custom'].map(preset=>h('label',{className:'wcu-mode',key:preset},h('input',{type:'radio',name:idPrefix+'-toolPreset',id:idPrefix+'-toolPreset-'+preset,value:preset,checked:draft.toolPreset===preset,disabled,onChange:()=>change('toolPreset',preset)}),h('span',null,h('strong',null,t(preset)),h('small',null,t(preset+'Summary')),h('small',{className:'wcu-count'},preset==='lazy'?t('lazyCount'):(preset==='lite'?liteToolNames.length:preset==='full'?allToolNames.length:draft.enabledTools.length)+' / '+allToolNames.length))))),
           h('details',{className:'wcu-tool-detail','data-wincu-tools':true,hidden:draft.toolPreset!=='custom',open:draft.toolPreset==='custom'},h('summary',null,t('customTools')),
-            h('div',{className:'wcu-tool-body'},h('div',{className:'wcu-tool-toolbar'},button('allTools',{disabled:customDisabled||draft.enabledTools.length===allToolNames.length,onClick:()=>change('enabledTools',[...allToolNames])}),button('noTools',{disabled:customDisabled||!draft.enabledTools.length,onClick:()=>change('enabledTools',[])})),
+            h('div',{className:'wcu-tool-body'},h('div',{className:'wcu-tool-toolbar'},button('allTools',{className:'wcu-small',disabled:customDisabled||draft.enabledTools.length===allToolNames.length,onClick:()=>change('enabledTools',[...allToolNames])}),button('noTools',{className:'wcu-small',disabled:customDisabled||!draft.enabledTools.length,onClick:()=>change('enabledTools',[])})),
               ...toolGroups.map(([group,entries])=>{const names=entries.map(entry=>entry[0]),count=names.filter(name=>draft.enabledTools.includes(name)).length;return h('fieldset',{className:'wcu-tool-group',disabled:customDisabled,key:group},
                 h('legend',null,h('label',{className:'wcu-tool-group-label'},h('input',{type:'checkbox',id:idPrefix+'-tool-group-'+group,checked:count===names.length,'aria-checked':count&&count<names.length?'mixed':count===names.length,ref:input=>{if(input)input.indeterminate=count>0&&count<names.length;},onChange:e=>selectTools(names,e.target.checked)}),t('toolGroup_'+group),h('span',{className:'wcu-tool-count'},count+' / '+names.length))),
                 h('div',{className:'wcu-tool-grid'},...entries.map(([name])=>h('label',{className:'wcu-tool-item',key:name,title:'windows_computer_use_'+name},h('input',{type:'checkbox',id:idPrefix+'-tool-'+name,'data-wincu-tool':name,checked:draft.enabledTools.includes(name),disabled:customDisabled,onChange:e=>selectTools([name],e.target.checked)}),h('span',null,h('strong',null,t('tool_'+name)),h('small',null,t('toolHint_'+name)))))));}))),
-          draft.toolPreset==='lazy'&&h('p',{'data-wincu-lazy-hint':true},t('lazyHint')),h('p',null,t('customMemory')),h('p',null,t('toolAfter'))),
+          h('div',{className:'wcu-notes'},draft.toolPreset==='lazy'&&h('p',{'data-wincu-lazy-hint':true},t('lazyHint')),h('p',null,t('customMemory')),h('p',null,t('toolAfter')))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-indicator-title'},
-          h('div',{className:'wcu-row'},h('h3',{id:idPrefix+'-indicator-title'},t('indicatorTitle')),button('preview',{disabled:disabled||dirty||(!draft.indicatorEnabled&&!draft.cursorIndicatorEnabled),onClick:()=>run({previewToken:Date.now()},'previewed'),title:dirty?t('previewHint'):undefined})),
-          h('label',{className:'wcu-toggle wcu-indicator-label'},h('input',{id:idPrefix+'-indicatorEnabled',type:'checkbox',role:'switch',checked:draft.indicatorEnabled,disabled,onChange:e=>change('indicatorEnabled',e.target.checked)}),h('span',null,t('indicator'))),h('p',null,t('indicatorHint')),
-          h('label',{className:'wcu-toggle wcu-indicator-label'},h('input',{id:idPrefix+'-cursorIndicatorEnabled',type:'checkbox',role:'switch',checked:draft.cursorIndicatorEnabled,disabled,onChange:e=>change('cursorIndicatorEnabled',e.target.checked)}),h('span',null,t('cursorIndicator'))),h('p',null,t('cursorIndicatorHint')),
-          h('label',{className:'wcu-toggle wcu-indicator-label'},h('input',{id:idPrefix+'-remoteIndicatorVisible',type:'checkbox',role:'switch',checked:draft.remoteIndicatorVisible,disabled,onChange:e=>change('remoteIndicatorVisible',e.target.checked)}),h('span',null,t('remoteVisible'))),h('p',null,t('remoteVisibleHint')),
-          h('div',{className:'wcu-preview'},h('div',{className:'wcu-screen','data-enabled':draft.indicatorEnabled,'aria-hidden':true},
-            draft.indicatorEnabled&&h('div',{className:'wcu-banner',style:{[draft.indicatorPosition==='top'?'top':'bottom']:'8px'}},draft.indicatorText),draft.cursorIndicatorEnabled&&h('span',{className:'wcu-cursor-preview'}),h('span',null,t(draft.indicatorEnabled||draft.cursorIndicatorEnabled?'previewOn':'previewOff'))),
-            h('div',null,h('span',{className:'wcu-label'},t('position')),h('div',{className:'wcu-choice',role:'radiogroup','aria-label':t('position')},radio('indicatorPosition','top',t('top')),radio('indicatorPosition','bottom',t('bottom'))),h('p',null,t('previewNote')))),
+          h('div',{className:'wcu-section-head'},h('div',null,h('h3',{id:idPrefix+'-indicator-title'},t('indicatorTitle')),h('p',null,t('indicatorIntro'))),button('preview',{className:'wcu-small',disabled:disabled||dirty||(!draft.indicatorEnabled&&!draft.cursorIndicatorEnabled),onClick:()=>run({previewToken:Date.now()},'previewed'),title:dirty?t('previewHint'):undefined})),
+          h('div',{className:'wcu-stage'},
+            h('div',{className:'wcu-screen','data-enabled':draft.indicatorEnabled,'data-position':draft.indicatorPosition,'aria-hidden':true},h('div',{className:'wcu-window'}),
+              draft.indicatorEnabled&&h('div',{className:'wcu-pill'},h('span',{className:'wcu-pill-dot'}),h('span',{className:'wcu-pill-text'},draft.indicatorText),h('span',{className:'wcu-pill-sep'}),h('kbd',null,'Esc'),h('span',{className:'wcu-pill-hint'},'停止')),
+              draft.cursorIndicatorEnabled&&h('span',{className:'wcu-pointer'},pointerArrow,h('span',{className:'wcu-pointer-tag'},'DSH')),
+              !draft.indicatorEnabled&&!draft.cursorIndicatorEnabled&&h('span',{className:'wcu-screen-empty'},t('previewOff'))),
+            h('div',{className:'wcu-stage-side'},h('span',{className:'wcu-label'},t('position')),h('div',{className:'wcu-segment',role:'radiogroup','aria-label':t('position')},radio('indicatorPosition','top',t('top')),radio('indicatorPosition','bottom',t('bottom'))),h('p',null,t('previewNote')))),
+          h('div',{className:'wcu-rows'},switchRow('indicatorEnabled','indicator','indicatorHint'),switchRow('cursorIndicatorEnabled','cursorIndicator','cursorIndicatorHint'),switchRow('remoteIndicatorVisible','remoteVisible','remoteVisibleHint')),
           h('details',{className:'wcu-detail'},h('summary',null,t('appearance')),
-            h('div',{className:'wcu-field'},h('label',{className:'wcu-label',htmlFor:idPrefix+'-text'},t('text')),h('input',{className:'wcu-control',id:idPrefix+'-text',type:'text',maxLength:120,value:draft.indicatorText,disabled:indicatorDisabled,onChange:e=>change('indicatorText',e.target.value)})),
-            h('div',{className:'wcu-field'},h('label',{className:'wcu-label',htmlFor:idPrefix+'-delay'},t('delay')),h('div',{className:'wcu-number'},h('input',{className:'wcu-control',id:idPrefix+'-delay',type:'number',min:200,max:3000,step:100,value:draft.indicatorIdleMs,disabled:indicatorDisabled,onChange:e=>change('indicatorIdleMs',Number(e.target.value))}),h('span',null,t('ms'))),h('p',null,t('delayHint'))))),
-        h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-stop-title'},h('h3',{id:idPrefix+'-stop-title'},t('stop')),
-          h('div',{className:'wcu-row wcu-stop'},h('div',null,h('div',{className:'wcu-stop-title'},h('kbd',{className:'wcu-key'},'Esc'),t('escTitle')),h('p',null,t('stopHint')))),
-          h('div',{className:'wcu-detail','data-wincu-shortcut':'true'},h('span',{className:'wcu-label'},t('extraStop')),h('p',null,t('shortcutHint')),
+            h('div',{className:'wcu-fields'},
+              h('div',{className:'wcu-field'},h('label',{className:'wcu-label',htmlFor:idPrefix+'-text'},t('text')),h('input',{className:'wcu-control',id:idPrefix+'-text',type:'text',maxLength:120,value:draft.indicatorText,disabled:indicatorDisabled,onChange:e=>change('indicatorText',e.target.value)})),
+              h('div',{className:'wcu-field'},h('label',{className:'wcu-label',htmlFor:idPrefix+'-delay'},t('delay')),h('div',{className:'wcu-number'},h('input',{className:'wcu-control',id:idPrefix+'-delay',type:'number',min:200,max:3000,step:100,value:draft.indicatorIdleMs,disabled:indicatorDisabled,onChange:e=>change('indicatorIdleMs',Number(e.target.value))}),h('span',null,t('ms'))),h('p',null,t('delayHint')))))),
+        h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-stop-title'},
+          h('div',{className:'wcu-section-head'},h('div',null,h('h3',{id:idPrefix+'-stop-title'},t('stop')),h('p',null,t('stopIntro')))),
+          h('div',{className:'wcu-stop-row'},h('kbd',{className:'wcu-key'},'Esc'),h('div',{className:'wcu-row-text'},h('strong',null,t('escTitle')),h('small',null,t('stopHint')))),
+          h('div',{className:'wcu-shortcut','data-wincu-shortcut':'true'},h('div',{className:'wcu-row-text'},h('strong',null,t('extraStop')),h('small',null,t('shortcutHint'))),
             h('div',{className:'wcu-shortcut-row'},h('output',{className:'wcu-shortcut-value','data-recording':recording,'aria-live':'polite','aria-label':t('extraStop')},recording?t('listening'):(draft.stopShortcut?draft.stopShortcut.split('+').join(' + '):t('noShortcut'))),
               button(recording?'cancelRecord':draft.stopShortcut?'rerecord':'record',{disabled:saving||!writable,onClick:()=>{setRecordMessage('');setRecording(!recording);}}),
               button('clearShortcut',{disabled:disabled||!draft.stopShortcut,onClick:()=>{change('stopShortcut','');setRecordMessage('');}})),

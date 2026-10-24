@@ -112,7 +112,7 @@ dsh plugin --profile desktop add github:Yu-tao-Li/dsh-computer-use-win
 | 读取自绘界面、canvas 或截图中的文字 | Windows OCR、文字坐标、截图；稀疏 UIA 查询可自动补 OCR |
 | 点击、输入和填写表单 | UIA 语义动作、鼠标键盘输入、保留焦点的文本粘贴 |
 | 等待页面变化、确认操作效果 | 等待窗口、控件或可见文字，再读取或截图确认 |
-| 看清 agent 正在做什么 | 屏幕提示、鼠标旁 DSH 标识、对话步骤与结束摘要 |
+| 看清 agent 正在做什么 | 屏幕提示、鼠标旁 DSH 标签、对话步骤与结束摘要 |
 
 在 DSH 对话中，桌面工具使用鼠标图标和简洁描述，点击可展开步骤及相关截图，结束后汇总这一轮的操作。已发送、已验证、未完成和已停止会区分展示；重开对话可恢复已有记录。浏览器搜索摘要根据实际输入、提交和后续观察生成。
 
@@ -124,7 +124,7 @@ dsh plugin --profile desktop add github:Yu-tao-Li/dsh-computer-use-win
 |---|---|
 | 工具加载 | **全部 24 项**（默认）、**精简 10 项**、**懒启动初始 1 项（允许全部）**，或展开“自定义”逐项／分组选取；支持全选和全部关闭 |
 | 屏幕提示 | 开关屏幕边缘与提示条，设置文字、顶部／底部位置及结束后 200–3000 毫秒的隐藏延时 |
-| 鼠标提示 | 相对屏幕提示独立开关，显示鼠标光环和 DSH 标识；通过叠加层显示，保留系统光标主题 |
+| 鼠标提示 | 相对屏幕提示独立开关，显示鼠标光斑和 DSH 标签；通过叠加层显示，保留系统光标主题 |
 | 远程与录屏可见 | 默认开启，支持 UU 虚拟屏幕；随活动显示器、布局和 DPI 变化刷新 |
 | 自定义停止方式 | 点击“录制快捷键”，按 F8、Ctrl + Alt + K 等按键或组合键并保存；“恢复默认（Esc）”清除额外快捷键 |
 | 预览 | 保存后点击“预览接管提示”，检查当前屏幕和鼠标提示的效果 |
@@ -362,7 +362,7 @@ Open **Settings → Computer Use**, make your choices and click Save changes. Th
 |---|---|
 | Tool loading | **All: 24** (default), **Lite: 10**, **Lazy: 1 at startup with all allowed**, or an expandable Custom checklist with individual/group selection, select-all and disable-all |
 | Screen indicators | Toggle the screen edges/banner; customize text, top/bottom placement and a 200–3000ms delay before hiding after completion |
-| Pointer indicator | Toggle the pointer halo/DSH badge independently of the screen indicator; overlays preserve your Windows cursor theme |
+| Pointer indicator | Toggle the pointer glow/DSH tag independently of the screen indicator; overlays preserve your Windows cursor theme |
 | Visible in remote sessions and recordings | On by default, including UU virtual displays; refreshes as active monitors, layout and DPI change |
 | Custom stop shortcut | Click Record shortcut, press a key or combination such as F8 or Ctrl + Alt + K, and save; Restore default (Esc) clears the additional shortcut |
 | Preview | Save, then preview the current screen and pointer indicators |

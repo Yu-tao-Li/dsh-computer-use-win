@@ -184,7 +184,7 @@ app.whenReady().then(async()=>{
   await evaluate("document.querySelector('[data-wincu-note-toggle]').click()");
   await until("window.snapshot.value.communityNote==='link'&&document.querySelectorAll('[data-wincu-community] a').length===1");
   const compact=await evaluate("(()=>{const a=document.querySelector('[data-wincu-community] a');return {href:a.href,text:a.textContent,target:a.target,icons:a.querySelectorAll('svg').length,label:a.getAttribute('aria-label'),note:document.querySelector('[data-wincu-community]').textContent,toggle:document.querySelector('[data-wincu-note-toggle]').textContent,draft:!document.getElementById('wincu-page-indicatorEnabled').checked,saved:window.snapshot.value.indicatorEnabled}})()");
-  assert.deepEqual([compact.href,compact.text,compact.target,compact.toggle],['https://github.com/Yu-tao-Li/dsh-computer-use-win','dsh-computer-use-win','_blank','完整显示']);
+  assert.deepEqual([compact.href,compact.text,compact.target,compact.toggle],['https://github.com/Yu-tao-Li/dsh-computer-use-win','dsh-computer-use-win','_blank','展开']);
   assert.ok(compact.icons===2&&compact.label.includes('新窗口')&&!compact.note.includes('球球了'),'Compact note keeps one accessible project link');
   assert.ok(compact.draft&&compact.saved!==false,'Saving the note choice must neither save nor discard the pending draft');
   await evaluate("document.querySelector('[data-wincu-note-toggle]').click()");

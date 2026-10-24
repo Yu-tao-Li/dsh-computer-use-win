@@ -6,7 +6,7 @@
 
 若曾为 #29 手动添加独立的 `windows-computer-use` 或 `wincu` 覆盖条目，请先备份 profile 配置，再移除该临时重复条目，使用插件 bundle 提供的入口。避免同时启动两个桌面操作服务。
 
-插件列表显示功能简介和“点击进行具体设置”，点击打开完整设置页；Star 和 Issue 链接位于完整设置页顶部；点“精简显示”可将这段说明收为一个带 GitHub 标志的 dsh-computer-use-win 链接，点“完整显示”恢复。该选择立即保存，重启和升级后保持不变，也不会保存或放弃其他未保存的更改。无法读取宿主配置时会暂停编辑并明确提示，不再将内置默认值当作已经读取的设置。0.4.3 补齐混合版本验证器的实时字段与共享引用协议，使用宿主确认的值回读保存结果。
+插件列表显示功能简介和“点击进行具体设置”，点击打开完整设置页；Star 和 Issue 链接位于完整设置页顶部；点“折叠”可将这段说明收为一个带 GitHub 标志的 dsh-computer-use-win 链接，点“展开”恢复。该选择立即保存，重启和升级后保持不变，也不会保存或放弃其他未保存的更改。无法读取宿主配置时会暂停编辑并明确提示，不再将内置默认值当作已经读取的设置。0.4.3 补齐混合版本验证器的实时字段与共享引用协议，使用宿主确认的值回读保存结果。
 
 ### 工具加载
 
@@ -16,7 +16,7 @@
 
 ### 接管提示
 
-屏幕边缘与提示条、鼠标光环／DSH 标识独立开关。可设置提示文字、顶部／底部、结束后的隐藏延时（200–3000 毫秒），保存后可预览。提示层不抢焦点、鼠标可穿透，不修改系统光标主题。
+屏幕边缘光晕与提示条、鼠标光斑／DSH 标签独立开关。可设置提示文字、顶部／底部、结束后的隐藏延时（200–3000 毫秒），保存后可预览。提示层不抢焦点、鼠标可穿透，不修改系统光标主题。
 
 “远程与录屏可见”默认开启，让 UU、屏幕共享及录屏可以捕获提示。关闭后请求 Windows 在支持的捕获路径中排除提示。组件通过原生活动显示器枚举、显示／会话事件及接管期间 500 毫秒复核刷新，处理虚拟屏幕新增、移除、重连和布局／DPI 变化。
 
@@ -40,13 +40,13 @@ Esc 只停止当前这一轮及其排队操作，同一轮不会自动重试。�
 
 Upgrade and fully restart DSH Desktop, then open **Settings → Computer Use**. A plugin-page entry and the legacy configurable card are also available. Modern DSH uses the `mcp-dsh-computer-use-win` Config namespace; the older API uses `windows-computer-use`. Back up and remove any temporary duplicate adapter/MCP override added for #29 before using the bundled entry.
 
-The plugin list shows a short introduction that opens the complete settings page. Star and Issue links stay at the top of that page; Compact collapses that note to one dsh-computer-use-win link with the GitHub mark and Show full note restores it. The choice saves at once, persists across restarts and upgrades, and neither saves nor discards other pending changes. An unavailable host form shows an explicit state and cannot be edited. Version 0.4.3 supplies live-field metadata and the shared reference protocol for mixed-version validators, and confirms saved values against the host response.
+The plugin list shows a short introduction that opens the complete settings page. Star and Issue links stay at the top of that page; Collapse folds that note into one dsh-computer-use-win link with the GitHub mark and Expand restores it. The choice saves at once, persists across restarts and upgrades, and neither saves nor discards other pending changes. An unavailable host form shows an explicit state and cannot be edited. Version 0.4.3 supplies live-field metadata and the shared reference protocol for mixed-version validators, and confirms saved values against the host response.
 
 Choose **Lite / All / Lazy / Custom** in the outer selector. All is the default (24 entries); Lite loads 10. Custom reveals the indented checklist with individual/group selection, select-all and disable-all. Preset changes preserve your custom selection. Save applies after the current action finishes and survives restart. Management cannot re-enable user-disabled tools.
 
 Lazy starts with one management entry while allowing all tools to be loaded on demand. Switching back to Custom restores its saved list; reset returns Lazy to management only.
 
-Screen edges/banner and the pointer halo/DSH badge have independent controls. Customize text, top/bottom placement and the 200–3000ms hide delay, save and preview. The layers let clicks pass through, keep focus and leave Windows cursor themes intact. **Visible in remote sessions and recordings** is on by default, including virtual displays. Turning it off requests capture exclusion on supported Windows capture paths. Active monitor enumeration, display/session events and a 500ms topology check refresh the layers after display, layout or DPI changes. The indicators cover this plugin's complete desktop operation series, or a requested preview.
+The screen edge glow/status pill and the pointer glow/DSH tag have independent controls. Customize text, top/bottom placement and the 200–3000ms hide delay, save and preview. The layers let clicks pass through, keep focus and leave Windows cursor themes intact. **Visible in remote sessions and recordings** is on by default, including virtual displays. Turning it off requests capture exclusion on supported Windows capture paths. Active monitor enumeration, display/session events and a 500ms topology check refresh the layers after display, layout or DPI changes. The indicators cover this plugin's complete desktop operation series, or a requested preview.
 
 Physical **Esc**, or a recorded key/combination, stops the current operation series and queued input. It cannot retry in the same turn. A new user task or request to continue can use the desktop automatically, without visiting settings. Record a shortcut and save; Restore default (Esc) clears the additional key. Esc cancels recording, and blur or 15 seconds of inactivity exits it. Ordinary mouse movement, other keys and injected keys do not trigger a physical stop. Hiding the indicator keeps the listener active.
 
