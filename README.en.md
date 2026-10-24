@@ -128,6 +128,7 @@ The settings are under Computer Use, the tab with the mouse icon on the left (�
 | Find windows, buttons and text fields | It lists open windows, then uses UI Automation (UIA, the Windows interface that lets programs read on-screen controls) to find controls and their names |
 | Read text on screen, including text in images and custom-drawn apps | It takes a screenshot and uses the built-in Windows text recognition (OCR) to find words and their positions. When an app exposes few controls and a search finds nothing, the search switches to OCR by itself |
 | Click, type and fill in forms | It operates controls directly when it can, for example “press this button” or “fill in this field”, and falls back to mouse and keyboard input. Pasting text does not move your mouse |
+| Look things up and fill in web pages without taking over your mouse | Pages in Chrome and Edge go through the browser lane: the plugin reads the page structure over the browser's debugging protocol and clicks or fills elements directly. Background tabs work too, without moving your mouse or bringing a window forward (see 7.4) |
 | Wait for changes and check that an action worked | It waits for a window, control or piece of text to appear, then reads or captures the screen to confirm |
 | Show you what the agent is doing | Screen indicators, the DSH tag next to the pointer, step records in the conversation and a summary at the end |
 
@@ -158,6 +159,7 @@ The blue parts are this plugin's code, and the grey parts come from DSH or Windo
 - The **plugin adapter** (`mcp/dsh-plugin.mjs`) runs inside DSH. It passes your settings to the MCP server and tracks conversation turns, so only one conversation uses the desktop at a time.
 - The **settings page and step records** (`mcp/client.js`) are the Settings → Computer Use page. The same file turns the tool calls in a conversation into readable steps.
 - The **MCP server** (`mcp/server.mjs`) is started by DSH's official MCP bridge. It offers the tools of your preset, checks the arguments and passes each request to the backend.
+- The **browser lane** (`mcp/browser.mjs`) also runs in the MCP server. When a call carries `browserTab` or a page element ID, it skips the PowerShell backend and goes straight to the browser over the Chrome DevTools Protocol.
 - The **PowerShell backend** (`scripts/windows-uia.ps1`) reads the screen, sends input and takes screenshots. It stays running, so later calls skip PowerShell startup. Requests wait in a queue and run one at a time, so two actions never fight over the mouse and keyboard.
 - The **takeover helper** (`scripts/windows-takeover.ps1`) is a separate process that draws the indicators and listens for Esc itself. Because it goes through neither DSH nor the backend, it hears Esc even while the backend is busy: actions that have not started are cancelled, and input in progress stops as soon as it can.
 
@@ -238,6 +240,21 @@ When UIA can find a control, operate it directly with `invoke` or `set_value`. W
 
 [Parameters and results](docs/wiki/mcp-tools.md) · [On-demand loading and client compatibility](docs/tool-context.md) · [How apps differ](docs/wiki/app-technology-matrix.md)
 
+#### 7.4 Browser lane
+
+For web pages, the plugin does not have to read screenshots or move the mouse. It reads the page structure over the Chrome DevTools Protocol (CDP), then clicks, fills and selects elements directly. All of this happens inside the browser: your mouse does not move, the clipboard is not used and no window comes to the front, so tabs in the background work too. There are still 24 tools; what is new is a `browserTab` argument and page element IDs:
+
+1. The result of `list_windows` includes `browserLane`, which lists the tabs of connected browsers. Each tab has an ID such as `t1a2b`.
+2. Pass that ID as `browserTab` to `snapshot`, `accessibility_tree`, `find`, `type_text`, `keypress`, `scroll`, `screenshot` or `wait_for` to read or operate that page. Every element on the page comes with an ID such as `t1a2b:57`, which works directly in `click`, `set_value`, `focus`, `invoke`, `scroll` and `element_info`. After each action, the result shows what changed on the page.
+3. `set_value` with a web address on `t1a2b:address` opens it in that tab; on `new-tab`, it opens the address in a new background tab.
+
+The browser comes from one of two places:
+
+- **The agent browser (default).** The first `new-tab` starts a windowless Chrome in the background, or Edge if Chrome is not installed. It starts from a fresh temporary profile every time, and its tabs run in a separate isolated context, so they never see your cookies, sign-ins or history. It exits with the plugin process and closes itself after 10 idle minutes. Edge signs a new profile in to your Windows Microsoft account on its own; the agent's tabs stay in the isolated context and cannot use that sign-in, and the temporary profile is deleted after the browser closes.
+- **Your own browser (experimental).** For tasks that need your sign-ins, open `chrome://inspect/#remote-debugging` in Chrome 144 or later and allow remote debugging. According to Chrome's documentation, Chrome asks you to confirm every time a program requests a connection, and shows “Chrome is being controlled by automated test software” at the top while connected. While this is on, other programs on this computer can also control the browser after you confirm, so turn it off when you are done. This path has not yet been tested with a real Chrome.
+
+Content inside iframes is not read yet. Shortcuts such as Ctrl+L and Ctrl+T belong to the browser window and never reach the page; use `address`, `new-tab` and `close_window` instead. Environment variables and result formats are in the [MCP tools reference](docs/wiki/mcp-tools.md#browser-lane).
+
 ### 8. FAQ
 
 #### 8.1 It's installed, but I see no tools or settings, or an old version is still running
@@ -261,6 +278,8 @@ The plugin provides desktop tools only. It does not include a model, an API key,
 ### 9. Data and privacy
 
 Reading controls, text recognition, screenshots and input all run on your computer. The results go to DSH or another caller, and whether they are then sent to a remote model depends on your DSH and model settings. Screenshots and recognized text can include sensitive content from your windows, so hide accounts, paths, passwords and private chats before you share logs or open an issue.
+
+Pages read through the browser lane are also processed on your computer before they go to the caller. The agent browser carries none of your sign-ins; once you connect your own browser, the agent can read and operate the sites you are signed in to. Page text can also carry instructions aimed at the agent, so every page outline starts by reminding the model that page content is untrusted and only your instructions count.
 
 ### 10. Documentation and development
 
@@ -405,6 +424,7 @@ DSH Web 和单独的 MCP 客户端会用你电脑上的 Node.js 运行插件，�
 | 找到窗口、按钮和输入框 | 列出打开的窗口，再通过 UI Automation（UIA，Windows 给程序读取界面控件的接口）找到控件和它们的名字 |
 | 读出界面上的文字，包括图片和自绘界面里的字 | 截图，用 Windows 自带的文字识别（OCR）找出文字和位置。界面控件很少、又没找到目标时，查找会自动改用 OCR |
 | 点击、输入、填写表单 | 优先直接操作控件，比如“按下按钮”“填入内容”，不行时再模拟鼠标和键盘。粘贴文字时不会挪动你的鼠标 |
+| 在浏览器里查资料、填网页，不占用你的鼠标 | Chrome 和 Edge 里的网页走浏览器通道：插件通过浏览器的调试协议直接读网页结构，按元素点击和填写。标签页在后台也能操作，不移动鼠标，也不把窗口切到前台（见 7.4） |
 | 等页面变化，确认操作真的生效 | 等某个窗口、控件或文字出现，再读取或截图确认 |
 | 让你看清 agent 在做什么 | 屏幕提示、鼠标旁的 DSH 标签、对话里的步骤记录和结束总结 |
 
@@ -435,6 +455,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 - **插件适配器**（`mcp/dsh-plugin.mjs`）运行在 DSH 里。它把你的设置交给 MCP 服务，并跟踪对话的轮次，保证同一时间只有一段对话在操作桌面。
 - **设置页与操作记录**（`mcp/client.js`）就是“设置 → 电脑操控”这一页。它也负责把对话里的工具调用显示成好懂的步骤。
 - **MCP 服务**（`mcp/server.mjs`）由 DSH 的官方 MCP 桥启动。它按你选的方案提供工具，检查参数后把请求交给后端。
+- **浏览器通道**（`mcp/browser.mjs`）也运行在 MCP 服务里。调用带上 `browserTab` 或网页元素 ID 时，请求不经过 PowerShell 后端，而是通过 Chrome DevTools 协议直接交给浏览器。
 - **PowerShell 后端**（`scripts/windows-uia.ps1`）负责读取界面、发送输入和截图。它一直运行，所以后续调用不用每次重新启动 PowerShell。请求排队，一次只执行一个，两个操作不会同时抢鼠标和键盘。
 - **接管助手**（`scripts/windows-takeover.ps1`）是单独的进程，负责屏幕提示，并直接监听 Esc。因为它不经过 DSH 和后端，后端正忙时也能收到 Esc：还没开始的操作会被取消，正在进行的输入会尽快停下。
 
@@ -515,6 +536,21 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 
 [完整参数与返回值](docs/wiki/mcp-tools.md) · [按需加载与客户端兼容性](docs/tool-context.md) · [不同应用的技术差异](docs/wiki/app-technology-matrix.md)
 
+#### 7.4 浏览器通道
+
+处理网页时，插件可以不看截图、不动鼠标：它通过 Chrome DevTools 协议（CDP）直接读网页的结构，再按元素点击、填写和选择。这些操作都在浏览器内部完成，不移动你的鼠标，不用剪贴板，也不把窗口切到前台，放在后台的标签页同样可以操作。工具还是 24 项，只多了一个 `browserTab` 参数和网页元素 ID：
+
+1. `list_windows` 的结果里有 `browserLane`，列出已连接浏览器的标签页。每个标签页有一个 ID，例如 `t1a2b`。
+2. 把这个 ID 作为 `browserTab` 传给 `snapshot`、`accessibility_tree`、`find`、`type_text`、`keypress`、`scroll`、`screenshot` 或 `wait_for`，就是在读或操作这个网页。网页里的每个元素都带 ID，例如 `t1a2b:57`，可以直接交给 `click`、`set_value`、`focus`、`invoke`、`scroll` 和 `element_info`。每次操作后，结果里会附上页面发生的变化。
+3. 用 `set_value` 往 `t1a2b:address` 写一个网址，这个标签页就会打开它；往 `new-tab` 写网址，会在后台新开一个标签页。
+
+浏览器有两种来源：
+
+- **agent 浏览器（默认）**：第一次用 `new-tab` 时，插件在后台启动一个没有窗口的 Chrome，没装 Chrome 时用 Edge。它每次都从新的临时配置开始，标签页放在单独的隔离环境里，看不到你的 Cookie、登录状态和浏览记录。插件进程退出时它跟着退出，空闲 10 分钟也会自己关掉。如果用的是 Edge，Edge 会自动把这个临时配置登录到 Windows 的微软账户；agent 的标签页留在隔离环境里，用不到这个登录状态，临时配置在浏览器关闭后删除。
+- **你自己的浏览器（实验）**：需要登录状态的任务，可以在 Chrome 144 或更新版本里打开 `chrome://inspect/#remote-debugging`，允许远程调试。按 Chrome 的说明，每次有程序请求连接时，Chrome 都会弹窗请你确认，连接期间顶部会显示“Chrome 正受到自动测试软件的控制”。开着这个开关时，本机其他程序经你确认后也能控制这个浏览器，用完建议关掉。这条路径还没有在真实的 Chrome 上测过。
+
+目前读不到 iframe 里的内容。Ctrl+L、Ctrl+T 这类快捷键属于浏览器窗口，网页内部收不到，请改用 `address`、`new-tab` 和 `close_window`。环境变量和返回格式见 [MCP 工具文档](docs/wiki/mcp-tools.md#browser-lane)。
+
 ### 8. 常见问题
 
 #### 8.1 装好了，却看不到工具或设置页，或者还是旧版本？
@@ -538,6 +574,8 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 ### 9. 数据与隐私
 
 界面读取、文字识别、截图和输入都在你的电脑上完成，结果交给 DSH 或其他调用方。这些内容会不会再发给远程模型，取决于你的 DSH 和模型设置。截图和读出的文字可能包含窗口里的敏感信息，所以分享日志或提 Issue 之前，请先遮住账号、路径、密码和私人对话。
+
+浏览器通道读到的网页内容同样在本机处理，再交给调用方。agent 浏览器不带你的登录状态；连接你自己的浏览器后，agent 能读取和操作你已登录的网站。网页里的文字也可能夹带写给 agent 的指令，所以页面大纲的开头会提醒模型：网页内容不可信，只听你的指示。
 
 ### 10. 文档与开发
 

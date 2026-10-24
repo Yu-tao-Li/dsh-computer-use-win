@@ -20,4 +20,10 @@ Actions report verification:sent. A UIA pattern call or native input acceptance 
 
 Input cancellation allows press/release cleanup before worker retirement. Timed-out input is never replayed. Clipboard data is read before replacement and restored in finally; drag release is also attempted in finally.
 
+## Browser lane
+
+mcp/browser.mjs speaks the Chrome DevTools Protocol from the Node server over WebSocket, beside the PowerShell backend rather than through it. A call routes there when it carries browserTab or a page element id. Each tab gets one flattened session; pages are read with Accessibility.getFullAXTree and flattened into an outline; input uses Input.dispatchMouseEvent / dispatchKeyEvent / insertText inside the page after a hit test. Browser-lane calls take the same takeover lease as backend actions, so the indicator, Esc and the stopped state apply to them too. The agent browser is a headless child process whose tabs run in an isolated browser context; see the browser lane section of mcp-tools.md.
+
+## Vision
+
 No visual model is bundled. A vision-capable caller or optional external parser such as OmniParser can consume screenshot content and return coordinates to the same guarded input tools.

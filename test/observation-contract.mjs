@@ -9,7 +9,7 @@ await mkdir(path.join(root,'mcp'));await mkdir(path.join(root,'scripts'));
 let server=await readFile(new URL('../mcp/server.mjs',import.meta.url),'utf8');
 server=server.replace('function runBackend(action, args = {}, timeoutMs = 30000, request) {','function runBackend(action, args = {}, timeoutMs = 30000, request) { timeoutMs = Math.min(timeoutMs, 1400);');
 await writeFile(path.join(root,'mcp/server.mjs'),server);
-for(const file of ['settings.mjs','takeover.mjs'])await writeFile(path.join(root,'mcp',file),await readFile(new URL('../mcp/'+file,import.meta.url)));
+for(const file of ['settings.mjs','takeover.mjs','browser.mjs'])await writeFile(path.join(root,'mcp',file),await readFile(new URL('../mcp/'+file,import.meta.url)));
 const marker=path.join(root,'started.txt').replaceAll("'","''");
 await writeFile(path.join(root,'scripts/windows-uia.ps1'),`param([switch]$Persistent)
 [IO.File]::AppendAllText('${marker}', 'worker' + [Environment]::NewLine)
