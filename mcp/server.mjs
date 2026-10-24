@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { TakeoverControl, STOPPED } from './takeover.mjs';
 import { TOOL_NAMES, normalizeEnabledTools } from './settings.mjs';
+import { BrowserLane, isBrowserElementId } from './browser.mjs';
 
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -106,6 +107,13 @@ const treeDetailProperties = {
   }
 };
 
+const browserTabProperty = {
+  browserTab: {
+    type: "string",
+    description: "Browser-lane tab id from list_windows (browserLane.browsers[].tabs[].id, for example t1a2b). Works on that page over the Chrome DevTools Protocol, in the background: no pointer movement, keyboard focus, clipboard or window activation. Do not combine with windowTitle, processId, nativeWindowHandle or x/y."
+  }
+};
+
 const treeBudgetProperties = {
   treeTimeoutMs: {
     type: "integer", minimum: 100, maximum: 30000, default: 5000,
@@ -124,13 +132,14 @@ const tools = [
   },
   {
     name: "windows_computer_use_snapshot",
-    description: "Capture a screenshot and a UI Automation tree for the active window or desktop." + webContentNote,
+    description: "Capture a screenshot and a UI Automation tree for the active window or desktop." + webContentNote + " With browserTab, return that tab's page as an accessibility outline (element ids such as t1a2b:57 for click/set_value/focus/scroll) plus its viewport image, read in the background.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         scope: { type: "string", enum: ["active_window", "desktop"], default: "active_window" },
         ...windowTargetProperties,
+        ...browserTabProperty,
         ...treeViewProperties,
         ...treeDetailProperties,
         ...treeBudgetProperties,
@@ -154,13 +163,14 @@ const tools = [
   },
   {
     name: "windows_computer_use_accessibility_tree",
-    description: "Read the UI Automation tree without taking a screenshot." + webContentNote,
+    description: "Read the UI Automation tree without taking a screenshot." + webContentNote + " With browserTab, read that tab's page as an accessibility outline in the background; its element ids (t1a2b:57) work in click/double_click/set_value/focus/invoke/scroll/element_info.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         scope: { type: "string", enum: ["active_window", "desktop"], default: "active_window" },
         ...windowTargetProperties,
+        ...browserTabProperty,
         ...treeViewProperties,
         ...treeDetailProperties,
         ...treeBudgetProperties,
@@ -171,7 +181,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_list_windows",
-    description: "List top-level windows visible to Windows UI Automation.",
+    description: "List top-level windows visible to Windows UI Automation. browserLane lists the tabs of connected Chromium browsers with ids for browserTab, and explains how to open a background tab (set_value elementId new-tab).",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -183,7 +193,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_find",
-    description: "Find UIA elements by name, automation id, class, value or type. When UIA is sparse or incomplete and no match is found, automatically read visible text with OCR. OCR candidates have SCREEN coordinates and source:'ocr', not UIA element ids. If the literal query misses, inspect ocr.lines and reformulate using the visible text (a search box may say '大家都在搜').",
+    description: "Find UIA elements by name, automation id, class, value or type. When UIA is sparse or incomplete and no match is found, automatically read visible text with OCR. OCR candidates have SCREEN coordinates and source:'ocr', not UIA element ids. If the literal query misses, inspect ocr.lines and reformulate using the visible text (a search box may say '大家都在搜'). With browserTab, search that page's accessibility outline instead and return page element ids.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -192,6 +202,7 @@ const tools = [
         query: { type: "string" },
         scope: { type: "string", enum: ["active_window", "desktop"], default: "active_window" },
         ...windowTargetProperties,
+        ...browserTabProperty,
         ...treeViewProperties,
         ...treeBudgetProperties,
         controlType: { type: "string" },
@@ -204,7 +215,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_element_info",
-    description: "Return UI Automation information for an element id or a screen point.",
+    description: "Return UI Automation information for an element id or a screen point. A browser-lane page element id (t1a2b:57) returns its tag, text, value, link and page box.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -220,7 +231,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_click",
-    description: "Click a screen coordinate or the center of a UI Automation element. dispatch:'auto' (default) = element clicks use the UIA Invoke/Toggle pattern in the background (no foreground steal), coordinate clicks use foreground SendInput; dispatch:'background' = PostMessage into the target window's queue (no foreground steal, delivery unverified — Chromium/Electron/UWP may drop it, then retry with foreground); dispatch:'foreground' = always foreground SendInput. Raw-coordinate clicks home-correct if the target window moved since it was observed (reported as 'homed').",
+    description: "Click a screen coordinate or the center of a UI Automation element. dispatch:'auto' (default) = element clicks use the UIA Invoke/Toggle pattern in the background (no foreground steal), coordinate clicks use foreground SendInput; dispatch:'background' = PostMessage into the target window's queue (no foreground steal, delivery unverified — Chromium/Electron/UWP may drop it, then retry with foreground); dispatch:'foreground' = always foreground SendInput. Raw-coordinate clicks home-correct if the target window moved since it was observed (reported as 'homed'). A browser-lane page element id (t1a2b:57) is clicked inside the page itself, in the background; a covered element is refused and the covering element is named.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -237,7 +248,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_double_click",
-    description: "Double click a screen coordinate or the center of a UI Automation element. Supports the same dispatch modes as click (background posts a real WM_LBUTTONDBLCLK).",
+    description: "Double click a screen coordinate or the center of a UI Automation element. Supports the same dispatch modes as click (background posts a real WM_LBUTTONDBLCLK). Browser-lane page element ids are double-clicked inside the page.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -254,7 +265,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_move",
-    description: "Move the mouse pointer to a screen coordinate or the center of an element.",
+    description: "Move the mouse pointer to a screen coordinate or the center of an element. A browser-lane page element id hovers it inside the page without moving the desktop pointer.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -295,13 +306,14 @@ const tools = [
   },
   {
     name: "windows_computer_use_scroll",
-    description: "Scroll at a screen coordinate or element center. Positive deltaY scrolls down.",
+    description: "Scroll at a screen coordinate or element center. Positive deltaY scrolls down. With browserTab (the page) or a browser-lane page element id, scroll inside the page in the background.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         elementId: { type: "string" },
         ...windowTargetProperties,
+        ...browserTabProperty,
         ...treeViewProperties,
         x: { type: "integer" },
         y: { type: "integer" },
@@ -312,13 +324,14 @@ const tools = [
   },
   {
     name: "windows_computer_use_type_text",
-    description: "Type text into the focused control. method:'clipboard' (default) uses clipboard paste (reliable for CJK, restores the clipboard) and needs the target in the foreground; method:'sendinput' sends each character as a KEYEVENTF_UNICODE SendInput event (no clipboard, needs the target in the foreground, best for ASCII/short text); method:'background' posts WM_CHAR straight into the target window's message queue — no clipboard, no foreground steal, delivery unverified. With a window target the result includes verifyValue (the text control's value after typing, truncated to 200 chars).",
+    description: "Type text into the focused control. method:'clipboard' (default) uses clipboard paste (reliable for CJK, restores the clipboard) and needs the target in the foreground; method:'sendinput' sends each character as a KEYEVENTF_UNICODE SendInput event (no clipboard, needs the target in the foreground, best for ASCII/short text); method:'background' posts WM_CHAR straight into the target window's message queue — no clipboard, no foreground steal, delivery unverified. With a window target the result includes verifyValue (the text control's value after typing, truncated to 200 chars). With browserTab, insert the text at that page's focused field inside the browser: no clipboard, pointer or foreground change.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["text"],
       properties: {
         ...windowTargetProperties,
+        ...browserTabProperty,
         text: { type: "string" },
         method: { type: "string", enum: ["clipboard", "sendinput", "background"], default: "clipboard" },
         focusMode: { type: "string", enum: ["preserve", "main"], default: "preserve", description: "preserve keeps the focus established by a previous click, essential for OCR/visual targets. main explicitly tries to focus the window's largest Edit/Document control." },
@@ -328,13 +341,14 @@ const tools = [
   },
   {
     name: "windows_computer_use_keypress",
-    description: "Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. dispatch:'background' supports only a single printable character (posted as WM_CHAR into the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendKeys).",
+    description: "Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. dispatch:'background' supports only a single printable character (posted as WM_CHAR into the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendKeys). With browserTab, the key goes to that page inside the browser: Alt+Left/Alt+Right/F5 go back/forward/reload, Enter/Escape answer an open JavaScript dialog, and browser-window shortcuts such as Ctrl+L or Ctrl+T are refused.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["keys"],
       properties: {
         ...windowTargetProperties,
+        ...browserTabProperty,
         keys: {
           type: "array",
           minItems: 1,
@@ -346,7 +360,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_focus",
-    description: "Set keyboard focus to a UI Automation element.",
+    description: "Set keyboard focus to a UI Automation element, or to a browser-lane page element inside its page.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -360,7 +374,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_invoke",
-    description: "Invoke a UI Automation element through Invoke, Toggle, SelectionItem, or ExpandCollapse patterns, with click fallback.",
+    description: "Invoke a UI Automation element through Invoke, Toggle, SelectionItem, or ExpandCollapse patterns, with click fallback. A browser-lane page element id is clicked inside the page.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -375,7 +389,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_set_value",
-    description: "Set a UI Automation ValuePattern value, or focus and type as fallback.",
+    description: "Set a UI Automation ValuePattern value, or focus and type as fallback. Browser lane: a page element id fills that field, selects that option or sets that checkbox inside the page; <tab>:address (for example t1a2b:address) navigates the tab to a web address; new-tab opens the address in a background tab of a separate agent browser without sign-ins, and <browser>:new-tab opens it in that connected browser.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -392,11 +406,11 @@ const tools = [
   },
   {
     name: "windows_computer_use_activate_window",
-    description: "Bring a top-level window to the foreground by title substring, process id, or native HWND. This tool always activates its target; the shared activate flag cannot suppress it.",
+    description: "Bring a top-level window to the foreground by title substring, process id, or native HWND. This tool always activates its target; the shared activate flag cannot suppress it. With browserTab, bring that tab to the front of its browser window.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      properties: windowTargetProperties
+      properties: { ...windowTargetProperties, ...browserTabProperty }
     }
   },
   {
@@ -431,21 +445,23 @@ const tools = [
   },
   {
     name: "windows_computer_use_screenshot",
-    description: "Capture a window or desktop without querying UIA. Returns an image plus bounds and imageScale for mapping image pixels to SCREEN coordinates: screen = bounds origin + image / imageScale. Use when the accessibility provider is unavailable, or to locate icons visually. Capture does not prove an action succeeded; inspect the resulting state.",
+    description: "Capture a window or desktop without querying UIA. Returns an image plus bounds and imageScale for mapping image pixels to SCREEN coordinates: screen = bounds origin + image / imageScale. Use when the accessibility provider is unavailable, or to locate icons visually. Capture does not prove an action succeeded; inspect the resulting state. With browserTab, capture that tab's viewport inside the browser, also in the background; its pixels are page pixels, not screen coordinates.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       ...windowTargetProperties,
+      ...browserTabProperty,
       scope: { type: "string", enum: ["active_window", "desktop"], default: "active_window" },
       maxWidth: { type: "integer", minimum: 0, maximum: 7680, default: 1600 }
     } }
   },
   {
     name: "windows_computer_use_wait_for",
-    description: "Wait for a window, a UIA element, or literal visible OCR text to appear/disappear. condition:'window' uses native window enumeration; 'element' uses a bounded UIA query; 'text' uses OCR without UIA. Returns verification:'observed' only when the condition was observed; truncated UIA absence is inconclusive. Text is literal, so use the actual expected text, not an inferred semantic label.",
+    description: "Wait for a window, a UIA element, or literal visible OCR text to appear/disappear. condition:'window' uses native window enumeration; 'element' uses a bounded UIA query; 'text' uses OCR without UIA. Returns verification:'observed' only when the condition was observed; truncated UIA absence is inconclusive. Text is literal, so use the actual expected text, not an inferred semantic label. With browserTab, element/text conditions poll that page's accessibility outline.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         ...windowTargetProperties,
+        ...browserTabProperty,
         condition: { type: "string", enum: ["window", "element", "text"], default: "window" },
         query: { type: "string" },
         controlType: { type: "string" },
@@ -462,11 +478,11 @@ const tools = [
   },
   {
     name: "windows_computer_use_close_window",
-    description: "Close a window gracefully by posting WM_CLOSE (the app can veto with a save dialog). Safer than killing the process; use close_window instead of alt+f4 when the app may have unsaved state you want to handle. The shared activate flag is ignored: WM_CLOSE is posted in the background and needs no foreground switch.",
+    description: "Close a window gracefully by posting WM_CLOSE (the app can veto with a save dialog). Safer than killing the process; use close_window instead of alt+f4 when the app may have unsaved state you want to handle. The shared activate flag is ignored: WM_CLOSE is posted in the background and needs no foreground switch. With browserTab, close that tab; the page may still ask to confirm leaving.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      properties: windowTargetProperties
+      properties: { ...windowTargetProperties, ...browserTabProperty }
     }
   },
   {
@@ -489,12 +505,12 @@ const tools = [
 // shortened. The discovery tool returns the original definition on demand.
 const conciseDescriptions = {
   health: 'Check Windows backend availability.',
-  snapshot: 'Screenshot and UIA tree. Partial trees report truncation; use OCR for sparse UIA.',
-  accessibility_tree: 'Read a bounded UIA tree; partial output does not establish absence.',
-  list_windows: 'List native top-level windows, HWND/PID and responsiveness.',
+  snapshot: 'Screenshot and UIA tree. Partial trees report truncation; use OCR for sparse UIA. browserTab: page outline and viewport.',
+  accessibility_tree: 'Read a bounded UIA tree; partial output does not establish absence. browserTab: page outline with element ids.',
+  list_windows: 'List native top-level windows, HWND/PID and responsiveness; browserLane lists browser tabs for browserTab.',
   find: 'Find UIA controls; empty sparse searches add OCR. OCR hits use SCREEN coordinates, not element IDs.',
-  element_info: 'Inspect a UIA element ID or physical SCREEN point.',
-  click: 'Click elementId or physical SCREEN x/y. auto prefers UIA for elements; background delivery is unverified.',
+  element_info: 'Inspect a UIA element ID, page element ID or physical SCREEN point.',
+  click: 'Click elementId or physical SCREEN x/y. auto prefers UIA for elements; background delivery is unverified. Page ids (t1a2b:57) act inside the page.',
   double_click: 'Double-click elementId or physical SCREEN x/y; background delivery is unverified.',
   move: 'Move pointer to elementId or physical SCREEN x/y.',
   drag: 'Drag a path of physical SCREEN coordinates; target must be foreground.',
@@ -503,11 +519,11 @@ const conciseDescriptions = {
   keypress: 'Send key/chord, e.g. ["ctrl","a"]. Windows key blocked; background supports one printable character only.',
   focus: 'Focus a UIA element.',
   invoke: 'Invoke/toggle/select/expand a UIA element, with optional click fallback.',
-  set_value: 'Set a UIA value, with optional focus/type fallback.',
+  set_value: 'Set a UIA value, with optional focus/type fallback. Page ids fill fields; <tab>:address navigates; new-tab opens a URL in a background tab.',
   activate_window: 'Activate target window; activation cannot be suppressed.',
   wait: 'Pause briefly before observing again.',
   ocr: 'Read visible text without UIA. Literal query; inspect lines on misses. Click word.x/y in SCREEN coordinates.',
-  screenshot: 'Capture without UIA. SCREEN = bounds origin + image pixel / imageScale. Inspect resulting state to verify actions.',
+  screenshot: 'Capture without UIA. SCREEN = bounds origin + image pixel / imageScale. Inspect resulting state to verify actions. browserTab: page pixels.',
   wait_for: 'Wait for window/UIA element/literal OCR text. observed means condition met; partial UIA absence is inconclusive.',
   close_window: 'Post WM_CLOSE in background; application may close or show a save dialog.',
   move_window: 'Move window to physical SCREEN x/y; updates coordinate homing.'
@@ -522,7 +538,8 @@ const concisePropertyDescriptions = {
   ocrFallback: 'Add OCR after empty sparse/incomplete UIA search.',
   focusMode: 'preserve keeps clicked focus; main chooses largest text control.',
   query: 'Literal text; OCR ignores case/whitespace.',
-  resolveControl: 'Optional UIA hit-test; may block or return a whole document.'
+  resolveControl: 'Optional UIA hit-test; may block or return a whole document.',
+  browserTab: 'Browser tab id from list_windows; background page access.'
 };
 function compactSchema(schema, key) {
   const result = {};
@@ -552,7 +569,7 @@ const enabledTools = new Set(initialNames);
 // advertises the management entry alone, so no capability name is left to infer
 // from. MCP instructions are the channel for that statement: DSH publishes them
 // as a system-prompt section attributed to this server.
-const capabilityInstructions = 'Windows Computer Use reads and operates real Windows applications on this machine: it lists windows, reads UI Automation trees, takes screenshots, recognizes on-screen text with OCR, clicks, types, sends keys and manages windows. The current tool-loading preset starts without those desktop tools, so call windows_computer_use_tools with operation "enable" and the names a task needs (or ["*"] for all allowed tools) before using them; "describe" returns one tool\'s full arguments. Prefer UI Automation elements over screen coordinates, and observe again to verify that an action took effect.';
+const capabilityInstructions = 'Windows Computer Use reads and operates real Windows applications on this machine: it lists windows, reads UI Automation trees, takes screenshots, recognizes on-screen text with OCR, clicks, types, sends keys and manages windows. The current tool-loading preset starts without those desktop tools, so call windows_computer_use_tools with operation "enable" and the names a task needs (or ["*"] for all allowed tools) before using them; "describe" returns one tool\'s full arguments. Prefer UI Automation elements over screen coordinates, and observe again to verify that an action took effect. Web pages in Chromium browsers can also be read and operated in the background through the browser lane: list_windows shows its tabs.';
 // A Custom checklist that allows no desktop tool must not claim the capability:
 // enabling one is refused, and saying otherwise contradicts the user's setting.
 const managementOnly = initialNames.length === 1 && initialNames[0] === discoveryName
@@ -667,6 +684,31 @@ const interruptibleActions = new Set(["health", "snapshot", "screenshot", "tree"
 const takeover = new TakeoverControl({ powershell, config: process.env.WCU_SETTINGS_JSON ? JSON.parse(process.env.WCU_SETTINGS_JSON) : {}, onStop(error) {
   for (const request of pendingToolCalls.values()) { request.takeoverError = error.message; request.stoppedByUser = error.message === STOPPED; cancelBackendRequest(request); }
 } });
+
+const browserLane = new BrowserLane();
+
+// Browser-lane calls share the takeover lease with backend actions, so the
+// indicator, Esc and the stopped state cover them the same way.
+async function runBrowser(action, args, request) {
+  let acquired = false;
+  const prepared = takeoverSetup.then(async () => {
+    if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
+    await takeover.begin(); acquired = true;
+  });
+  takeoverSetup = prepared.catch(() => {});
+  try {
+    await prepared;
+    const result = await browserLane.run(action, args, request);
+    const content = [{ type: "text", text: "" }];
+    if (result.text) content.push({ type: "text", text: result.text });
+    if (result.screenshot?.base64) {
+      content.push({ type: "image", data: result.screenshot.base64, mimeType: result.screenshot.mimeType });
+      result.meta.screenshot = { ...result.screenshot, base64: `<${result.screenshot.base64.length} base64 chars omitted>` };
+    }
+    content[0].text = safeJson(result.meta);
+    return { content, ...(result.meta.ok === false ? { isError: true } : {}) };
+  } finally { if (acquired) await takeover.end(); }
+}
 
 function dispatchNextBackend(proc) {
   if (retiringBackends.has(proc)) return;
@@ -847,15 +889,21 @@ async function callTool(name, args, request) {
   if (!definition) throw new Error(`Unknown tool: ${name}`);
   args = validateArguments(definition.inputSchema, args);
   const actionName = name.replace("windows_computer_use_", "");
-  if (["click", "double_click", "move", "scroll", "element_info"].includes(actionName) && !args.elementId && (args.x === undefined || args.y === undefined)) throw new Error("INVALID_ARGUMENTS: provide elementId or both x and y");
+  const browser = args.browserTab !== undefined || isBrowserElementId(args.elementId);
+  // A browser tab alone names the page, which is what scroll needs.
+  if (["click", "double_click", "move", "scroll", "element_info"].includes(actionName) && !args.elementId && (args.x === undefined || args.y === undefined) && !(browser && actionName === "scroll")) throw new Error("INVALID_ARGUMENTS: provide elementId or both x and y");
   if (actionName === "wait_for") {
-    if (args.condition === "window" && !args.windowTitle?.trim() && !args.processId && !args.nativeWindowHandle) throw new Error("INVALID_ARGUMENTS: window wait requires a target");
+    if (args.condition === "window" && !browser && !args.windowTitle?.trim() && !args.processId && !args.nativeWindowHandle) throw new Error("INVALID_ARGUMENTS: window wait requires a target");
     if (args.condition !== "window" && !args.query?.trim()) throw new Error("INVALID_ARGUMENTS: text/element wait requires query");
   }
   if (actionName === "keypress" && args.keys.filter(key => !/^(ctrl|control|alt|option|shift)$/i.test(key)).length !== 1) throw new Error("INVALID_ARGUMENTS: keypress needs exactly one non-modifier key");
+  if (browser) return runBrowser(actionName === "accessibility_tree" ? "tree" : actionName, args, request);
   switch (name) {
-    case "windows_computer_use_health":
-      return backendText("health", args, undefined, request);
+    case "windows_computer_use_health": {
+      const result = await runBackend("health", args, undefined, request);
+      result.browserLane = browserLane.health();
+      return { content: [{ type: "text", text: safeJson(result) }] };
+    }
     case "windows_computer_use_snapshot": {
       const result = await observeBackend("snapshot", args, request);
       const content = [{ type: "text", text: safeJson(stripImagePayload(result)) }];
@@ -866,8 +914,11 @@ async function callTool(name, args, request) {
     }
     case "windows_computer_use_accessibility_tree":
       return observationText("tree", args, request);
-    case "windows_computer_use_list_windows":
-      return backendText("list_windows", args, undefined, request);
+    case "windows_computer_use_list_windows": {
+      const result = await runBackend("list_windows", args, undefined, request);
+      try { await browserLane.annotateWindows(result); } catch (error) { result.browserLane = { error: error.message }; }
+      return { content: [{ type: "text", text: safeJson(result) }] };
+    }
     case "windows_computer_use_find":
       return observationText("find", args, request);
     case "windows_computer_use_element_info":
@@ -1164,7 +1215,7 @@ if (process.argv.includes("--self-test")) {
       process.exit(1);
     });
 } else if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.on("exit", () => { killBackend(); takeover.child?.stdin.end(); });
+  process.on("exit", () => { killBackend(); browserLane.close(); takeover.child?.stdin.end(); });
   process.stdin.on("data", (chunk) => {
     try {
       ingest(chunk);

@@ -10,7 +10,7 @@ const root = await mkdtemp(path.join(os.tmpdir(), 'wcu-activation-test-'));
 await mkdir(path.join(root, 'mcp'));
 await mkdir(path.join(root, 'scripts'));
 await writeFile(path.join(root, 'mcp/server.mjs'), await readFile(new URL('../mcp/server.mjs', import.meta.url)));
-for(const file of ['settings.mjs','takeover.mjs'])await writeFile(path.join(root,'mcp',file),await readFile(new URL('../mcp/'+file,import.meta.url)));
+for(const file of ['settings.mjs','takeover.mjs','browser.mjs'])await writeFile(path.join(root,'mcp',file),await readFile(new URL('../mcp/'+file,import.meta.url)));
 const fixturePath = root.replaceAll("'", "''");
 await writeFile(path.join(root, 'scripts/windows-uia.ps1'), `
 param([switch]$Persistent)
