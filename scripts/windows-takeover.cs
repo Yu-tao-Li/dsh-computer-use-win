@@ -29,6 +29,11 @@ namespace DshTakeover {
     [StructLayout(LayoutKind.Sequential)] internal struct MonitorInfo { public uint size; public Rect bounds,work; public uint flags; }
     internal delegate bool MonitorCallback(IntPtr monitor,IntPtr dc,IntPtr rectangle,IntPtr data);
     [StructLayout(LayoutKind.Sequential, Pack=1)] internal struct Blend { public byte op, flags, alpha, format; }
+    [StructLayout(LayoutKind.Sequential)] internal struct IconInfo { public bool icon; public int hotX, hotY; public IntPtr mask, color; }
+    [DllImport("user32.dll", SetLastError=true)] internal static extern bool GetIconInfo(IntPtr icon, out IconInfo info);
+    [DllImport("user32.dll")] internal static extern IntPtr LoadCursor(IntPtr instance, IntPtr name);
+    [DllImport("user32.dll")] internal static extern uint GetDpiForSystem();
+    [DllImport("user32.dll", SetLastError=true)] internal static extern bool SystemParametersInfo(uint action, uint param, out int value, uint ini);
     [DllImport("user32.dll")] internal static extern bool SetProcessDpiAwarenessContext(IntPtr value);
     [DllImport("user32.dll", SetLastError=true)] internal static extern IntPtr SetWindowsHookEx(int id, Hook callback, IntPtr module, uint thread);
     [DllImport("user32.dll")] internal static extern bool UnhookWindowsHookEx(IntPtr hook);
@@ -122,7 +127,12 @@ namespace DshTakeover {
       Emit(new { kind = "ready", hookActive = true, monitors = displays.Length });
     }
 
-    void SystemEventsSubscribe() { Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplaysChanged; Microsoft.Win32.SystemEvents.SessionSwitch += SessionChanged; }
+    void SystemEventsSubscribe() { Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplaysChanged; Microsoft.Win32.SystemEvents.SessionSwitch += SessionChanged; Microsoft.Win32.SystemEvents.UserPreferenceChanged += PreferencesChanged; }
+    // A pointer size or scheme change arrives as a preference change; measure the arrow again.
+    void PreferencesChanged(object sender,Microsoft.Win32.UserPreferenceChangedEventArgs args) {
+      if (shuttingDown) return;
+      try { dispatcher.BeginInvoke((Action)PointerFrame.ForgetPointerSize); } catch (InvalidOperationException) { }
+    }
     void SessionChanged(object sender,Microsoft.Win32.SessionSwitchEventArgs args) { DisplaysChanged(sender,EventArgs.Empty); }
     void DisplaysChanged(object sender, EventArgs args) {
       if (shuttingDown) return;
@@ -289,6 +299,7 @@ namespace DshTakeover {
         shuttingDown = true; cancel.Set(); timer.Stop(); timer.Dispose(); HideFrames(); HidePointer();
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplaysChanged;
         Microsoft.Win32.SystemEvents.SessionSwitch -= SessionChanged;
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= PreferencesChanged;
         if (hook != IntPtr.Zero) Native.UnhookWindowsHookEx(hook);
         dispatcher.Dispose(); cancel.Dispose();
       }
@@ -304,6 +315,7 @@ namespace DshTakeover {
     bool flipX, flipY;
     Rectangle lastBounds;
     byte lastAlpha;
+    SizeF lastExtent;
     bool remoteVisible;
     internal PointerFrame(bool visible) {
       remoteVisible=visible;
@@ -320,40 +332,93 @@ namespace DshTakeover {
     internal void SetRemoteVisible(bool visible) {remoteVisible=visible;if(IsHandleCreated)Native.SetWindowDisplayAffinity(Handle,visible?0u:0x11u);}
     internal bool ClickThrough { get { return (Native.GetWindowLong(Handle,-20)&0x08080020)==0x08080020; } }
     internal bool CaptureExcluded { get { uint affinity; return Native.GetWindowDisplayAffinity(Handle,out affinity)&&affinity==0x11; } }
-    static bool FlipX(Native.Point point, Rectangle screen, float zoom) { return screen.Right-point.x < 96*zoom; }
-    static bool FlipY(Native.Point point, Rectangle screen, float zoom) { return screen.Bottom-point.y < 66*zoom; }
-    internal static Rectangle LayoutForPoint(Native.Point point, Rectangle screen, float zoom) {
-      int width=(int)Math.Ceiling(120*zoom),height=(int)Math.Ceiling(84*zoom);
-      int centerX=(int)Math.Round((FlipX(point,screen,zoom)?96:24)*zoom),centerY=(int)Math.Round((FlipY(point,screen,zoom)?60:24)*zoom);
+    // Geometry in 96-DPI units. The tag sits just past the pointer's visible
+    // extent; the canvas grows with it, and the default arrow keeps 120x84.
+    static float TagX(SizeF extent) { return Math.Max(13f,extent.Width+2); }
+    static float TagY(SizeF extent) { return Math.Max(17f,extent.Height-1); }
+    static float CanvasWidth(SizeF extent) { return Math.Max(120f,24+TagX(extent)+48); }
+    static float CanvasHeight(SizeF extent) { return Math.Max(84f,24+TagY(extent)+27); }
+    static bool FlipX(Native.Point point, Rectangle screen, float zoom, SizeF extent) { return screen.Right-point.x < (CanvasWidth(extent)-24)*zoom; }
+    static bool FlipY(Native.Point point, Rectangle screen, float zoom, SizeF extent) { return screen.Bottom-point.y < (CanvasHeight(extent)-18)*zoom; }
+    internal static Rectangle LayoutForPoint(Native.Point point, Rectangle screen, float zoom) { return LayoutForPoint(point,screen,zoom,SizeF.Empty); }
+    internal static Rectangle LayoutForPoint(Native.Point point, Rectangle screen, float zoom, SizeF extent) {
+      float canvasWidth=CanvasWidth(extent),canvasHeight=CanvasHeight(extent);
+      int width=(int)Math.Ceiling(canvasWidth*zoom),height=(int)Math.Ceiling(canvasHeight*zoom);
+      int centerX=(int)Math.Round((FlipX(point,screen,zoom,extent)?canvasWidth-24:24)*zoom),centerY=(int)Math.Round((FlipY(point,screen,zoom,extent)?canvasHeight-24:24)*zoom);
       return new Rectangle(point.x-centerX,point.y-centerY,width,height);
+    }
+    // The user's pointer size: the arrow's visible extent past its hotspot, in
+    // 96-DPI units. Measured once, and again only after Windows reports a
+    // preference change (pointer size or cursor scheme).
+    static SizeF? pointerExtent;
+    internal static void ForgetPointerSize() { pointerExtent=null; }
+    internal static SizeF PointerExtent() {
+      if(!pointerExtent.HasValue) {
+        var measured=MeasureCursor(Native.LoadCursor(IntPtr.Zero,new IntPtr(32512)));
+        float dpi=96; try { dpi=Native.GetDpiForSystem(); } catch(EntryPointNotFoundException) { }
+        // Windows enlarges the accessibility pointer when drawing it, not in the
+        // arrow image; SPI_GETCURSORBASESIZE reports that size (32 by default).
+        int baseSize; if(!Native.SystemParametersInfo(0x2028,0,out baseSize,0)||baseSize<32)baseSize=32;
+        float factor=Math.Min(8f,baseSize/32f)/Math.Max(1f,dpi/96f);
+        pointerExtent=new SizeF(measured.Width*factor,measured.Height*factor);
+      }
+      return pointerExtent.Value;
+    }
+    // Visible pixels past the hotspot, in physical pixels.
+    internal static SizeF MeasureCursor(IntPtr cursor) {
+      Native.IconInfo info;
+      if(cursor==IntPtr.Zero||!Native.GetIconInfo(cursor,out info))return SizeF.Empty;
+      try {
+        using(var icon=Icon.FromHandle(cursor))
+        using(var image=icon.ToBitmap()) {
+          var data=image.LockBits(new Rectangle(0,0,image.Width,image.Height),ImageLockMode.ReadOnly,PixelFormat.Format32bppArgb);
+          int right=-1,bottom=-1;
+          try {
+            int row=Math.Abs(data.Stride)/4;var pixels=new int[row*image.Height];
+            Marshal.Copy(data.Scan0,pixels,0,pixels.Length);
+            for(int y=0;y<image.Height;y++)for(int x=0;x<image.Width;x++)if(((pixels[y*row+x]>>24)&0xff)>40){if(x>right)right=x;if(y>bottom)bottom=y;}
+          } finally { image.UnlockBits(data); }
+          // A monochrome pointer draws without alpha; size it from its cell like the arrow.
+          if(right<0)return new SizeF(Math.Max(0,image.Width*.375f-info.hotX),Math.Max(0,image.Height*.6f-info.hotY));
+          return new SizeF(Math.Max(0,right-info.hotX+1),Math.Max(0,bottom-info.hotY+1));
+        }
+      } catch(ArgumentException) { return SizeF.Empty; }
+      catch(ExternalException) { return SizeF.Empty; }
+      finally {
+        if(info.mask!=IntPtr.Zero)Native.DeleteObject(info.mask);
+        if(info.color!=IntPtr.Zero)Native.DeleteObject(info.color);
+      }
     }
     internal void Update(Native.Point point, byte alpha) {
       var screen=Native.DisplayFromPoint(point);
       uint dpiX=96,dpiY=96; try { if(Native.GetDpiForMonitor(Native.MonitorFromPoint(point,2),0,out dpiX,out dpiY)!=0)dpiX=96; } catch(EntryPointNotFoundException) { }
       float zoom=Math.Max(1f,Math.Min(3f,dpiX/96f));
-      bool nextFlipX=FlipX(point,screen,zoom),nextFlipY=FlipY(point,screen,zoom);
-      bool redraw=bitmap==IntPtr.Zero||Math.Abs(scale-zoom)>.01f||flipX!=nextFlipX||flipY!=nextFlipY;
+      var extent=PointerExtent();
+      bool nextFlipX=FlipX(point,screen,zoom,extent),nextFlipY=FlipY(point,screen,zoom,extent);
+      bool redraw=bitmap==IntPtr.Zero||Math.Abs(scale-zoom)>.01f||flipX!=nextFlipX||flipY!=nextFlipY||extent!=lastExtent;
       if(redraw) {
-        using(var image=Draw(zoom,nextFlipX,nextFlipY)) {
+        using(var image=Draw(zoom,nextFlipX,nextFlipY,extent)) {
           IntPtr next=image.GetHbitmap(Color.FromArgb(0));
           IntPtr selected=Native.SelectObject(dc,next);
           if(bitmap==IntPtr.Zero)previous=selected; else Native.DeleteObject(bitmap);
           bitmap=next;
         }
-        scale=zoom;flipX=nextFlipX;flipY=nextFlipY;
+        scale=zoom;flipX=nextFlipX;flipY=nextFlipY;lastExtent=extent;
       }
-      var bounds=LayoutForPoint(point,screen,zoom);
+      var bounds=LayoutForPoint(point,screen,zoom,extent);
       if(!redraw&&bounds==lastBounds&&alpha==lastAlpha)return;
       var destination=new Native.Point(bounds.X,bounds.Y);var origin=new Native.Point(0,0);var size=new Native.Size(bounds.Width,bounds.Height);
       var blend=new Native.Blend { op=0,flags=0,alpha=alpha,format=1 };
       if(!Native.UpdateLayeredWindow(Handle,IntPtr.Zero,ref destination,ref size,dc,ref origin,0,ref blend,2))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),"Could not present pointer indicator");
       lastBounds=bounds;lastAlpha=alpha;
     }
-    internal static Bitmap Draw(float zoom,bool left,bool up) {
-      var image=new Bitmap((int)Math.Ceiling(120*zoom),(int)Math.Ceiling(84*zoom),PixelFormat.Format32bppPArgb);
+    internal static Bitmap Draw(float zoom,bool left,bool up) { return Draw(zoom,left,up,SizeF.Empty); }
+    internal static Bitmap Draw(float zoom,bool left,bool up,SizeF extent) {
+      float canvasWidth=CanvasWidth(extent),canvasHeight=CanvasHeight(extent);
+      var image=new Bitmap((int)Math.Ceiling(canvasWidth*zoom),(int)Math.Ceiling(canvasHeight*zoom),PixelFormat.Format32bppPArgb);
       using(var g=Graphics.FromImage(image)) {
         g.Clear(Color.Transparent);g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=TextRenderingHint.AntiAliasGridFit;g.ScaleTransform(zoom,zoom);
-        float x=left?96:24,y=up?60:24;
+        float x=left?canvasWidth-24:24,y=up?canvasHeight-24:24;
         // A soft spotlight under the tip instead of a hard ring.
         using(var spot=new GraphicsPath()) {
           spot.AddEllipse(x-16,y-16,32,32);
@@ -363,7 +428,8 @@ namespace DshTakeover {
         using(var font=new Font("Segoe UI",10,FontStyle.Bold,GraphicsUnit.Pixel))
         using(var format=new StringFormat(StringFormat.GenericTypographic) { Alignment=StringAlignment.Center, LineAlignment=StringAlignment.Center }) {
           float w=(float)Math.Ceiling(g.MeasureString("DSH",font,PointF.Empty,format).Width)+14,h=19;
-          float bx=left?x-8-w:x+13,by=up?y-10-h:y+17;
+          // Below-right clears the pointer's whole extent; the other corners only need to clear the tip.
+          float bx=left?x-8-w:up?x+13:x+TagX(extent),by=up?y-10-h:left?y+17:y+TagY(extent);
           using(var shadow=Frame.Rounded(new RectangleF(bx,by+1.5f,w,h),6)) using(var brush=new SolidBrush(Color.FromArgb(60,0,0,0))) g.FillPath(brush,shadow);
           using(var shape=TagShape(new RectangleF(bx,by,w,h),left,up)) {
             using(var fill=new SolidBrush(Color.FromArgb(255,57,100,254)))g.FillPath(fill,shape);
@@ -423,12 +489,13 @@ namespace DshTakeover {
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         g.Clear(Color.Transparent);
         float scale = Math.Max(1f, Math.Min(2f, width/1920f));
-        // Edge glow in DeepSeek blue: a soft falloff without a hard outline.
+        // Edge glow: a bright core line that reads on dark wallpapers, then a
+        // DeepSeek-blue falloff that reads on light ones.
         g.CompositingMode = CompositingMode.SourceCopy;
-        int glow = (int)Math.Round(14*scale);
+        int core = (int)Math.Round(2*scale), glow = core+(int)Math.Round(18*scale);
         for (int i=0;i<glow;i++) {
-          int alpha=(int)(140*Math.Pow(1-i/(double)glow,2.4));
-          using (var pen = new Pen(Color.FromArgb(alpha,86,134,254),1)) g.DrawRectangle(pen,i,i,width-2*i-1,height-2*i-1);
+          var color = i<core ? Color.FromArgb(235,150,184,255) : Color.FromArgb((int)(175*Math.Pow(1-(i-core)/(double)(glow-core),2.2)),77,124,254);
+          using (var pen = new Pen(color,1)) g.DrawRectangle(pen,i,i,width-2*i-1,height-2*i-1);
         }
         g.CompositingMode = CompositingMode.SourceOver;
         // Status pill: live dot, the user's text, then an Esc keycap.
