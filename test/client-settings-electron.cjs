@@ -177,6 +177,20 @@ app.whenReady().then(async()=>{
   await until("window.snapshot.value.stopShortcut===''");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='恢复默认（Esc）').disabled"),true,'Default reset must remain visible and disabled when already using Esc');
   assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),24,'Restoring the stop shortcut must preserve selected tools');
+  // The support note collapses to one project link. The choice saves at once
+  // and leaves a pending draft alone.
+  await evaluate("document.getElementById('wincu-page-indicatorEnabled').click()");
+  await until("!document.getElementById('wincu-page-indicatorEnabled').checked");
+  await evaluate("document.querySelector('[data-wincu-note-toggle]').click()");
+  await until("window.snapshot.value.communityNote==='link'&&document.querySelectorAll('[data-wincu-community] a').length===1");
+  const compact=await evaluate("(()=>{const a=document.querySelector('[data-wincu-community] a');return {href:a.href,text:a.textContent,target:a.target,icons:a.querySelectorAll('svg').length,label:a.getAttribute('aria-label'),note:document.querySelector('[data-wincu-community]').textContent,toggle:document.querySelector('[data-wincu-note-toggle]').textContent,draft:!document.getElementById('wincu-page-indicatorEnabled').checked,saved:window.snapshot.value.indicatorEnabled}})()");
+  assert.deepEqual([compact.href,compact.text,compact.target,compact.toggle],['https://github.com/Yu-tao-Li/dsh-computer-use-win','dsh-computer-use-win','_blank','完整显示']);
+  assert.ok(compact.icons===2&&compact.label.includes('新窗口')&&!compact.note.includes('球球了'),'Compact note keeps one accessible project link');
+  assert.ok(compact.draft&&compact.saved!==false,'Saving the note choice must neither save nor discard the pending draft');
+  await evaluate("document.querySelector('[data-wincu-note-toggle]').click()");
+  await until("window.snapshot.value.communityNote==='full'&&document.querySelector('[data-wincu-community]').textContent.includes('您来许愿，我来实现')");
+  await evaluate("window.clickButton('放弃更改')");
+  await until("document.getElementById('wincu-page-indicatorEnabled').checked");
   // Theme tokens are the values read from the real Desktop host. Check both
   // foreground/background contrast and native control theme propagation.
   await evaluate("document.querySelectorAll('[data-wincu-settings] details').forEach(d=>d.open=true)");

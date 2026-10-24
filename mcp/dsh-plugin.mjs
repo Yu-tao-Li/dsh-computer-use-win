@@ -25,6 +25,7 @@ const fields = {
   indicatorPosition: z.union([z.const('top'),z.const('bottom')]).default('top').description('提示位置 / Banner position'),
   indicatorIdleMs: z.number().min(200).max(3000).default(800).description('结束后隐藏延时（毫秒） / Hide delay (ms)'),
   stopShortcut: z.string().pattern(STOP_SHORTCUT_PATTERN).default('').description('自定义停止快捷键 / Custom stop shortcut'),
+  communityNote: z.union([z.const('full'),z.const('link')]).default('full').description('项目支持说明 / Project support note'),
   resumeToken: z.number().min(0).default(0),
   previewToken: z.number().min(0).default(0)
 };

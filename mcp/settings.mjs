@@ -8,7 +8,7 @@ export function normalizeEnabledTools(value) {
 
 export const DEFAULT_SETTINGS = Object.freeze({
   mode: 'full', toolPreset: 'auto', enabledTools: TOOL_NAMES, indicatorEnabled: true, cursorIndicatorEnabled: true, remoteIndicatorVisible: true, indicatorText: 'DSH 正在控制电脑',
-  indicatorPosition: 'top', indicatorIdleMs: 800, stopShortcut: '',
+  indicatorPosition: 'top', indicatorIdleMs: 800, stopShortcut: '', communityNote: 'full',
   resumeToken: 0, previewToken: 0
 });
 
@@ -41,6 +41,7 @@ export function normalizeSettings(input = {}) {
   if (!['top', 'bottom'].includes(value.indicatorPosition)) throw new Error('indicatorPosition must be top or bottom');
   if (!Number.isInteger(value.indicatorIdleMs) || value.indicatorIdleMs < 200 || value.indicatorIdleMs > 3000) throw new Error('indicatorIdleMs must be 200–3000');
   value.stopShortcut = normalizeStopShortcut(value.stopShortcut);
+  if (!['full', 'link'].includes(value.communityNote)) throw new Error('communityNote must be full or link');
   for (const key of ['resumeToken', 'previewToken']) {
     if (!Number.isSafeInteger(value[key]) || value[key] < 0) throw new Error(`${key} must be a nonnegative integer`);
   }

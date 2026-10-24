@@ -59,6 +59,8 @@ window.__ModuleLoader__.load({
     Object.assign(dictionaries.en,{extraStop:'Custom stop shortcut',stopHint:'Control stays paused until you resume. Ordinary mouse movement does not stop it.',shortcutHint:'Click Record shortcut, then press a key or combination, such as F8 or Ctrl + Alt + K. Save to apply. Esc always remains available.',record:'Record shortcut',rerecord:'Record again',cancelRecord:'Cancel recording',clearShortcut:'Clear',noShortcut:'Not set',listening:'Press your shortcut… (Esc to cancel)',unsupportedKey:'Use a letter, number, function key or common key, optionally with Ctrl, Alt, Shift or Win.',recordCancelled:'Recording cancelled',recordTimedOut:'Recording timed out. Click the button to try again.'});
     Object.assign(dictionaries.zh,{clearShortcut:'恢复默认（Esc）',noShortcut:'Esc（默认）',shortcutHint:'点击“录制快捷键”，再按下想用的按键或组合键，例如 F8 或 Ctrl + Alt + K。保存后生效；恢复默认后仅保留 Esc。',starTitle:'在 GitHub 上给项目 Star（在新窗口打开）',issueTitle:'在 GitHub 上提 Issue（在新窗口打开）'});
     Object.assign(dictionaries.en,{clearShortcut:'Restore default (Esc)',noShortcut:'Esc (default)',shortcutHint:'Click Record shortcut, then press a key or combination, such as F8 or Ctrl + Alt + K. Save to apply. Restoring the default keeps only Esc.',starTitle:'Star this project on GitHub (opens in a new window)',issueTitle:'Open a GitHub issue (opens in a new window)'});
+    Object.assign(dictionaries.zh,{compactNote:'精简显示',fullNote:'完整显示',compactNoteTitle:'只保留 dsh-computer-use-win 链接，可随时恢复',fullNoteTitle:'恢复完整的 Star 与 Issue 说明',projectLink:'dsh-computer-use-win',projectTitle:'在 GitHub 上打开 dsh-computer-use-win（在新窗口打开）'});
+    Object.assign(dictionaries.en,{compactNote:'Compact',fullNote:'Show full note',compactNoteTitle:'Keep only the dsh-computer-use-win link; switch back anytime',fullNoteTitle:'Show the full Star and Issue note again',projectLink:'dsh-computer-use-win',projectTitle:'Open dsh-computer-use-win on GitHub (opens in a new window)'});
     Object.assign(dictionaries.zh,{cursorIndicator:'突出显示鼠标',cursorIndicatorHint:'接管时在鼠标旁显示蓝色光环和 DSH 标识，便于看清操作位置。停止或接管结束后自动消失。'});
     Object.assign(dictionaries.en,{cursorIndicator:'Highlight the pointer',cursorIndicatorHint:'Show a blue halo and DSH badge beside the pointer during control. They disappear when control stops or ends.'});
     Object.assign(dictionaries.zh,{toolsTitle:'工具加载',toolsHint:'默认加载全部工具。需要调整时，展开下方设置，选择 agent 可以使用的工具。',customTools:'自定义工具',toolsSelected:'已启用',toolsUnit:'个工具',allTools:'恢复默认（全部启用）',noTools:'全部关闭',toolAfter:'保存后，会在当前动作结束时更新可用工具。',toolGroup_observe:'屏幕与内容',toolGroup_input:'鼠标与键盘',toolGroup_windows:'窗口与控件',toolGroup_other:'等待与工具管理'});
@@ -83,12 +85,16 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] h3{font-size:15px;line-height:1.5;font-weight:600;margin:0}
       [data-wincu-settings] p{margin:5px 0 0;color:var(--wcu-muted);font-size:13px;line-height:1.55}
       [data-wincu-settings] .wcu-header{padding:0 0 22px}
-      [data-wincu-settings] .wcu-community{padding:10px 13px;margin:0 0 18px;border:1px solid var(--wcu-border);border-radius:9px;background:var(--wcu-control)}
+      [data-wincu-settings] .wcu-community{display:flex;align-items:flex-start;gap:10px;padding:10px 13px;margin:0 0 18px;border:1px solid var(--wcu-border);border-radius:9px;background:var(--wcu-control)}
       [data-wincu-settings] .wcu-community a{display:inline-flex;align-items:center;gap:5px;vertical-align:baseline;white-space:nowrap;margin:2px 3px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--wcu-accent) 75%,var(--wcu-border));border-radius:6px;background:color-mix(in srgb,var(--wcu-accent) 15%,var(--wcu-control));color:var(--wcu-fg);font-size:12px;line-height:1.5;font-weight:600;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s}
       [data-wincu-settings] .wcu-community a:hover{background:color-mix(in srgb,var(--wcu-accent) 28%,var(--wcu-control));border-color:#6ba9ef;text-decoration:underline;text-underline-offset:3px}
       [data-wincu-settings] .wcu-community a:focus-visible{outline:2px solid #6ba9ef;outline-offset:3px}
       [data-wincu-settings] .wcu-community svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-      [data-wincu-settings] .wcu-community p{font-size:12px;margin:0;line-height:1.9}
+      [data-wincu-settings] .wcu-community p{flex:1;min-width:0;font-size:12px;margin:0;line-height:1.9}
+      [data-wincu-settings] .wcu-community[data-compact]{align-items:center;padding:0;border:0;background:none}
+      [data-wincu-settings] .wcu-community[data-compact] p{flex:none}
+      [data-wincu-settings] .wcu-community button{flex:none;min-height:0;padding:3px 8px;border-color:transparent;background:none;color:var(--wcu-muted);font-size:12px;line-height:1.5}
+      [data-wincu-settings] .wcu-community button:hover:enabled{filter:none;color:var(--wcu-fg);text-decoration:underline;text-underline-offset:3px}
       [data-wincu-settings] .wcu-section{border:1px solid var(--wcu-border);border-radius:12px;padding:20px;margin-bottom:16px;background:var(--wcu-bg)}
       [data-wincu-settings] .wcu-row{display:flex;justify-content:space-between;align-items:center;gap:16px}
       [data-wincu-settings] .wcu-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0 8px;border:0;padding:0;min-width:0}
@@ -175,6 +181,7 @@ window.__ModuleLoader__.load({
       const [draft,setDraft] = React.useState(saved), [dirty,setDirty] = React.useState(false);
       const [saving,setSaving] = React.useState(false), [message,setMessage] = React.useState(''),[tone,setTone]=React.useState('');
       const [recording,setRecording] = React.useState(false), [recordMessage,setRecordMessage] = React.useState('');
+      const [noteView,setNoteView] = React.useState(null), [noteSaving,setNoteSaving] = React.useState(false);
       const savedKey = JSON.stringify(Object.fromEntries(Object.keys(defaults).map(key=>[key,saved[key]])));
       React.useEffect(()=>{if(!dirty)setDraft(saved);},[savedKey,dirty]);
       const change = (field,value) => {const next={...draft,[field]:value};setDraft(next);setDirty(Object.keys(defaults).some(key=>!equal(next[key],saved[key])));setMessage('');};
@@ -207,18 +214,30 @@ window.__ModuleLoader__.load({
         const patch=Object.fromEntries(Object.keys(defaults).filter(key=>!equal(draft[key],saved[key])).map(key=>[key,draft[key]]));
         if(await run(patch,'saved'))setDirty(false);
       };
+      // The support note is a display choice. Save it at once, outside the draft,
+      // so it never saves or discards other pending changes.
+      React.useEffect(()=>setNoteView(null),[saved.communityNote]);
+      const noteCompact=(noteView??saved.communityNote)==='link';
+      const toggleNote = async () => {
+        const next=noteCompact?'full':'link';
+        setNoteView(next);setNoteSaving(true);
+        try {await savePatch({communityNote:next});}
+        catch(error){setNoteView(null);setMessage(t('failed')+': '+String(error.message||error));setTone('error');}
+        finally{setNoteSaving(false);}
+      };
       const disabled = saving||!writable||recording,indicatorDisabled=disabled||!draft.indicatorEnabled;
       const activeTools=draft.toolPreset==='lazy'?['tools']:draft.toolPreset==='full'?allToolNames:draft.toolPreset==='lite'?liteToolNames:draft.enabledTools;
       const customDisabled=disabled||draft.toolPreset!=='custom';
       const radio=(field,value,label)=>h('label',{key:value},h('input',{type:'radio',name:idPrefix+'-'+field,id:idPrefix+'-'+field+'-'+value,value,checked:draft[field]===value,disabled:indicatorDisabled,onChange:()=>change(field,value)}),label);
       const button=(label,props)=>h('button',{type:'button',...props},t(label));
-      const linkIcon=kind=>h('svg',{viewBox:'0 0 24 24','aria-hidden':true,focusable:false},h('path',{d:kind==='star'?'m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L2.9 9.6l6.3-.9L12 3Z':kind==='issue'?'M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 4 11.5a8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9H13a8.5 8.5 0 0 1 8 8v.5Z':'M14 3h7v7M21 3 10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5'}));
+      const linkIcon=kind=>h('svg',{viewBox:'0 0 24 24','aria-hidden':true,focusable:false},h('path',{d:kind==='star'?'m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L2.9 9.6l6.3-.9L12 3Z':kind==='issue'?'M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 4 11.5a8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9H13a8.5 8.5 0 0 1 8 8v.5Z':kind==='repo'?'m16 18 6-6-6-6M8 6l-6 6 6 6':'M14 3h7v7M21 3 10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5'}));
       const communityLink=(href,label,kind,title)=>h('a',{href,target:'_blank',rel:'noopener noreferrer',title:t(title),'aria-label':t(title)},linkIcon(kind),h('span',null,t(label)),linkIcon('external'));
       return h(as,{'data-wincu-settings':'true'},h('style',null,css),
         h('header',{className:'wcu-header'},
-          h('aside',{className:'wcu-community','data-wincu-community':'true'},h('p',null,t('starPrefix'),
+          h('aside',{className:'wcu-community','data-wincu-community':'true','data-compact':noteCompact||undefined},noteCompact?h('p',null,communityLink('https://github.com/Yu-tao-Li/dsh-computer-use-win','projectLink','repo','projectTitle')):h('p',null,t('starPrefix'),
             communityLink('https://github.com/Yu-tao-Li/dsh-computer-use-win','starLink','star','starTitle'),t('starAfter'),t('issueBefore'),
-            communityLink('https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new','issueLink','issue','issueTitle'),t('issueAfter'))),
+            communityLink('https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new','issueLink','issue','issueTitle'),t('issueAfter')),
+            button(noteCompact?'fullNote':'compactNote',{'data-wincu-note-toggle':true,title:t(noteCompact?'fullNoteTitle':'compactNoteTitle'),disabled:noteSaving||saving||!writable,onClick:toggleNote})),
           h('h2',null,t('title')),h('p',null,t('intro'))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-tools-title'},
           h('div',{className:'wcu-row'},h('h3',{id:idPrefix+'-tools-title'},t('toolsTitle')),h('span',{className:'wcu-tool-count','data-wincu-tool-count':true},draft.toolPreset==='lazy'?t('lazyCount'):t('toolsSelected')+' '+activeTools.length+' / '+allToolNames.length)),h('p',null,t('toolsHint')),
