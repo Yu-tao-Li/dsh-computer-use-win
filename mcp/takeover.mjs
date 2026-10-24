@@ -9,13 +9,31 @@ import { DEFAULT_SETTINGS, normalizeSettings } from './settings.mjs';
 export const STOPPED = 'COMPUTER_USE_STOPPED_BY_USER: The user stopped this operation series with Esc or their custom shortcut. Do not retry desktop input in this turn. A new user turn, including a request to continue, can use the desktop automatically; no settings change is required.';
 const helperScript = fileURLToPath(new URL('../scripts/windows-takeover.ps1', import.meta.url));
 
+// Windows refuses to replace a file that another process holds open without
+// delete sharing (a reader, an antivirus scan) for a moment, with EPERM, EACCES
+// or EBUSY. Retry the replace briefly, as graceful-fs does for rename on win32.
+const BUSY_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+function pause(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+  catch { const end = Date.now() + ms; while (Date.now() < end) { } }
+}
+function replaceFile(from, to) {
+  for (let delay = 10, waited = 0; ; delay = Math.min(delay * 2, 100)) {
+    try { renameSync(from, to); return; }
+    catch (error) {
+      if (!BUSY_CODES.has(error?.code) || waited >= 1000) throw error;
+      pause(delay); waited += delay;
+    }
+  }
+}
+
 export function atomicJson(file, value) {
   if (!file) return;
   mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
     writeFileSync(temporary, JSON.stringify(value) + '\n', 'utf8');
-    renameSync(temporary, file);
+    replaceFile(temporary, file);
   } catch (error) {
     // This temporary file belongs to this failed write and has no further use.
     try { unlinkSync(temporary); } catch { }
