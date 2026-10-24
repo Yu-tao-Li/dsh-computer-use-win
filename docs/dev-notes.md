@@ -178,3 +178,25 @@ Issue #24 原版 tools/list 序列化为 43,495 字符。保留全部执行定�
 修复 #29 的包入口发现、客户端依赖和现代 Config/volatile 表单路径，使用官方 bridge；真实 Desktop 已验证独立入口、保存和重启持久化。实现 #28 的可见接管反馈，停止采用物理 Esc／录制快捷键和显式恢复，普通输入不自动退出。原生透明层保留系统光标，默认允许远程捕获，并按活动显示器变化重建。实际三块 2560×1440 屏幕的窗口边界和采集通过，用户在 UU 虚拟屏幕中确认提示条与鼠标标识均可见。
 
 Windows 回归由专用输入夹具和测试事件验证停止、取消与收尾，不向用户桌面发送测试点击或按键。动态显示器新增、分辨率变化、移除和重连通过测试入口驱动真实重建逻辑；实际远程验证覆盖现有三屏布局。完整发布验证与 CI 结果见 v0.4.2 Release。
+
+## 2026-10-25：Issue #50 Chromium 网页的无障碍树
+
+结论：Electron 窗口读不到网页控件，有两个原因，修好一个还不够。第一，Chromium 要等 UIA 客户端读取页面根节点的属性，才会构建网页的无障碍树。第二，网页放在六层以上没有名字的 views 布局 Pane 下面，默认深度根本走不到。
+
+测量环境是 Electron 44.0.0（Chromium 152）、Windows 11 26200 和 PowerShell 5.1，夹具不强制打开无障碍。
+
+- 冷窗口在 control 视图里只有窗口外框和 views 布局层，共 14–15 个节点。raw 视图里，`Chrome_RenderWidgetHostHWND`（名字是 Chrome Legacy Window）下面挂着一个空的 Document，也就是页面根节点；control 视图把这个空节点过滤掉了，所以普通遍历一般碰不到它。
+- 真正起作用的是读取页面根节点的属性，比如 ControlType。只导航（RawViewWalker.GetFirstChild）不会触发，只读 renderer 自身那个 Pane 的属性也不会。issue 里的 `WM_GETOBJECT(UiaRootObjectId)` 就是 `FromHandle` 本来会发的消息，并不是关键。`FindAll` 能触发，是因为托管 `FindAll` 默认按 control 视图过滤，要读每个节点的 IsControlElement；但它没有上限，大页面上一次调用可能很长，而且第一次总返回 0。
+- 读取之后，页面树 50–450 ms 到达：普通页面约 50–150 ms，约 6000 个节点的页面约 300–430 ms。旧的根节点随即被替换，从之前拿到的元素继续导航会一直是空的，所以每次探测都要重新 `FromHandle`。
+- 页面加载之前没有 renderer 子窗口；加载后第一次探测约 0.1 秒就绪。刷新页面会换一个新的 renderer HWND，但无障碍模式保留，新窗口一探测就有内容。用 `sendInputEvent` 连续 51 秒只发输入、不调用无障碍 API，页面树没有被关掉。真实系统输入没有测，所以每次观察仍会重新探测。
+- 不预热、只做深遍历时，结果不确定：4 次里 2 次在 0.3 秒内出现内容，1 次 4 秒内都没有，还有 1 次遍历卡住约 73 秒之后才出现。这正是改成显式预热的原因。
+- 深度：control 视图里页面根节点在第 8 层（Window → RootView → NonClientView → WinFrameView → ClientView → View → View → View → Document），按钮在第 10 层以下。所以 main 即使用 `--force-renderer-accessibility` 强制打开无障碍，默认的 tree 也只有 9 个节点，find 找不到按钮，snapshot 只有 7 个节点；只有手动传 `maxDepth: 12` 才有 78 个节点。CI 原来的 Chromium 冒烟测试全部显式传 12，所以一直没测出来。
+
+实现方式：做窗口范围的观察之前，对每个可见的 renderer 子窗口（最多 8 个）读一次页面根节点的属性，再等网页树出来。每次调用最多等 1.5 秒，并且不超过 `treeTimeoutMs` 的一半；状态按 renderer HWND 记录，一直空着的 renderer 在 30 秒内的后续观察里继续尝试，之后不再等待。renderer 无响应（WebView2、CEF 的 renderer 可能属于别的进程）时不进入 UIA；读取被拒绝（比如提权窗口被 UIPI 拦截）时也不等待。在窗口范围的树里，没有名字的 Chrome Pane 不计入 `maxDepth`，最多额外 16 层；返回的 `depth` 仍是实际层级。桌面范围既不预热，也不改深度计法，避免某个网页占满整个桌面概览的节点预算。
+
+修复后的实测：
+- 同一个夹具，第一次按默认参数调用 `accessibility_tree` 就返回 78 个节点，预热等了 71 ms；find 返回 UIA 结果，snapshot 52 个节点。
+- ChatGPT/Codex 桌面版（Chromium 156，页面树事先已经打开）：默认 tree 从 13 个节点（只有标题栏按钮）变成 67 个，find 按钮从 3 个变成 31 个。
+- 用独立配置目录启动的 Edge 155 和 Google Chrome 155：第一次观察分别预热 90 ms 和 100 ms，读到网页按钮。Chrome 的顶层窗口下有 3 个 renderer 子窗口，其中 2 个隐藏，所以只取可见的这一点是必要的。issue 说 Chrome 预热后仍然没有内容，在这里没有复现。
+- WebView2：用 Office 自带的 WebView2 SDK 搭了一个 WinForms 宿主（运行时 155）。renderer 属于另一个进程 msedgewebview2，页面根节点在第 11 层。main 两次读取都只有 16 个节点；修复后第一次观察预热 81 ms，读到网页控件。
+- CEF 走同一条代码路径，但本机没有可见的 CEF 窗口，没有实测。issue 提到的透明点击穿透窗口，renderer 的树不会挂进父窗口，这次也没有处理。

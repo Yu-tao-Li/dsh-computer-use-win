@@ -113,6 +113,9 @@ const treeBudgetProperties = {
   }
 };
 
+const maxDepthDescription = "Levels below the root. In window-scoped trees, unnamed Chromium layout panes (Electron, Chrome/Edge, CEF, WebView2) do not count, so page content stays within the default depth.";
+const webContentNote = " In a Chromium-based window (Electron, Chrome/Edge, CEF, WebView2) the first observation enables the page's accessibility tree; webContent reports whether it is ready.";
+
 const tools = [
   {
     name: "windows_computer_use_health",
@@ -121,7 +124,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_snapshot",
-    description: "Capture a screenshot and a UI Automation tree for the active window or desktop.",
+    description: "Capture a screenshot and a UI Automation tree for the active window or desktop." + webContentNote,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -144,14 +147,14 @@ const tools = [
           default: 1600,
           description: "Downscale the screenshot so its width is at most this many pixels (0 = native resolution). The response then carries imageScale + origin so image pixels can be mapped back to screen coordinates."
         },
-        maxDepth: { type: "integer", minimum: 0, maximum: 12, default: 5 },
+        maxDepth: { type: "integer", minimum: 0, maximum: 12, default: 5, description: maxDepthDescription },
         maxNodes: { type: "integer", minimum: 1, maximum: 2000, default: 250 }
       }
     }
   },
   {
     name: "windows_computer_use_accessibility_tree",
-    description: "Read the UI Automation tree without taking a screenshot.",
+    description: "Read the UI Automation tree without taking a screenshot." + webContentNote,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -161,7 +164,7 @@ const tools = [
         ...treeViewProperties,
         ...treeDetailProperties,
         ...treeBudgetProperties,
-        maxDepth: { type: "integer", minimum: 0, maximum: 12, default: 6 },
+        maxDepth: { type: "integer", minimum: 0, maximum: 12, default: 6, description: maxDepthDescription },
         maxNodes: { type: "integer", minimum: 1, maximum: 3000, default: 500 }
       }
     }
@@ -193,7 +196,7 @@ const tools = [
         ...treeBudgetProperties,
         controlType: { type: "string" },
         ocrFallback: { type: "boolean", default: true, description: "Use OCR after an empty sparse/incomplete UIA search. Disable for UIA-only diagnostics. No input is sent." },
-        maxDepth: { type: "integer", minimum: 0, maximum: 12, default: 8 },
+        maxDepth: { type: "integer", minimum: 0, maximum: 12, default: 8, description: maxDepthDescription },
         maxNodes: { type: "integer", minimum: 1, maximum: 5000, default: 1200 },
         maxResults: { type: "integer", minimum: 1, maximum: 200, default: 25 }
       }
@@ -449,7 +452,7 @@ const tools = [
         scope: { type: "string", enum: ["active_window", "desktop"], default: "active_window" },
         ...treeViewProperties,
         treeTimeoutMs: { type: "integer", minimum: 100, maximum: 30000, default: 1000 },
-        maxDepth: { type: "integer", minimum: 0, maximum: 12, default: 8 },
+        maxDepth: { type: "integer", minimum: 0, maximum: 12, default: 8, description: maxDepthDescription },
         maxNodes: { type: "integer", minimum: 1, maximum: 5000, default: 1200 },
         appear: { type: "boolean", default: true },
         timeoutMs: { type: "integer", minimum: 100, maximum: 60000, default: 5000 },
@@ -937,6 +940,12 @@ async function observeBackend(action, args, request) {
   // This is a fallback heuristic, not proof that the app is inaccessible.
   const sparse = (result.nodeCount ?? result.scannedNodes) <= 20;
   if (sparse || result.truncated) result.hint = "UIA is sparse or incomplete. Use OCR text/coordinates or screenshot vision; literal 'search' may miss a placeholder. Inspect visible text before choosing a coordinate.";
+  // A Chromium page whose accessibility tree has not arrived is not an app
+  // without accessibility: say whether observing again can still help.
+  const web = result.webContent;
+  if (web && web.ready === 0) result.hint = web.state === "unavailable"
+    ? "This Chromium window exposes no page content to UI Automation. Use OCR text/coordinates or screenshot vision."
+    : "Chromium is still building this page's accessibility tree. Observe the window again shortly before falling back to OCR coordinates.";
   if (action === "find" && args.ocrFallback && !args.controlType && result.results?.length === 0 && (sparse || result.truncated) && result.targetResponsive !== false && !request?.cancelled) {
     try {
       const ocr = await runBackend("ocr", { ...args, resolveControl: false, maxWidth: 1920 }, 20000, request);

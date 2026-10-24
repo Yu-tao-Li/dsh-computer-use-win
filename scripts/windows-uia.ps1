@@ -249,6 +249,21 @@ public static class WindowsComputerUseNative {
     return result.ToArray();
   }
 
+  // Chromium hosts (Electron, Chrome/Edge, CEF, WebView2) draw each page in a
+  // Chrome_RenderWidgetHostHWND child window, possibly owned by another process.
+  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent, EnumWindowsCallback callback, IntPtr data);
+  public static IntPtr[] ChromiumRenderers(IntPtr window, int max) {
+    var result = new System.Collections.Generic.List<IntPtr>();
+    var name = new System.Text.StringBuilder(64);
+    EnumChildWindows(window, delegate(IntPtr hwnd, IntPtr data) {
+      name.Length = 0;
+      GetClassName(hwnd, name, name.Capacity);
+      if (name.ToString() == "Chrome_RenderWidgetHostHWND" && IsWindowVisible(hwnd)) result.Add(hwnd);
+      return result.Count < max;
+    }, IntPtr.Zero);
+    return result.ToArray();
+  }
+
   [DllImport("user32.dll", SetLastError=true)]
   public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, UIntPtr wParam,
     IntPtr lParam, uint flags, uint timeout, out UIntPtr result);
@@ -460,7 +475,7 @@ function New-ElementCacheRequest {
   # below use Cached, including RuntimeId. Never fetch an entire subtree.
   $cache.AutomationElementMode = [System.Windows.Automation.AutomationElementMode]::Full
   foreach ($name in @('Name','AutomationId','ClassName','ControlType','BoundingRectangle',
-      'IsEnabled','IsOffscreen','HasKeyboardFocus','ProcessId','NativeWindowHandle','RuntimeId')) {
+      'IsEnabled','IsOffscreen','HasKeyboardFocus','ProcessId','NativeWindowHandle','RuntimeId','FrameworkId')) {
     $cache.Add([System.Windows.Automation.AutomationElement]::("${name}Property"))
   }
   if ($DetailLevel -eq "full") {
@@ -1356,10 +1371,12 @@ function Convert-Tree {
     [System.Windows.Automation.AutomationElement]$Element,
     [string]$Path, [int]$Depth, [int]$MaxDepth, [ref]$Count, [int]$MaxNodes,
     [string]$ViewMode = "control", [bool]$IncludeOffscreen = $false,
-    [string]$DetailLevel = "compact", [object]$Traversal, [object]$Owner = $null
+    [string]$DetailLevel = "compact", [object]$Traversal, [object]$Owner = $null,
+    [int]$Level = -1
   )
   if ($Count.Value -ge $MaxNodes) { $Traversal.reason = "maxNodes"; return $null }
   if (-not (Test-TreeBudget $Traversal)) { return $null }
+  if ($Level -lt 0) { $Level = $Depth }
   $previousOwner = $script:ObservationOwner
   if ($null -eq $Owner -and $null -ne $script:NativeOwners) {
     $nativeHwnd = Invoke-Safe { [int64]$Element.Cached.NativeWindowHandle } 0
@@ -1368,14 +1385,21 @@ function Convert-Tree {
   $script:ObservationOwner = $Owner
   $info = Convert-ElementInfo -Element $Element -Id "uia:$Path" -Depth $Depth -DetailLevel $DetailLevel -UseCache
   $Count.Value++
+  # Chromium nests a page six or more levels down, under unnamed layout panes
+  # (NonClientView, ClientView, View...). In window-scoped trees those panes do
+  # not use up maxDepth, so the default depths reach the page; 16 extra levels
+  # bound the recursion. Desktop trees stay an overview of every window.
+  $childLevel = $Level + 1
+  if ($Traversal.chromiumLayout -and $info.controlType -eq 'Pane' -and [string]::IsNullOrEmpty($info.name) -and
+      (Invoke-Safe { $Element.Cached.FrameworkId } '') -eq 'Chrome') { $childLevel = $Level }
   $childrenOut = New-Object System.Collections.Generic.List[object]
-  if ($Depth -lt $MaxDepth -and $Count.Value -lt $MaxNodes -and (Test-TreeBudget $Traversal)) {
+  if ($childLevel -le $MaxDepth -and $Depth -lt $MaxDepth + 16 -and $Count.Value -lt $MaxNodes -and (Test-TreeBudget $Traversal)) {
     try {
       $child = $Traversal.walker.GetFirstChild($Element, $Traversal.cache)
       $i = 0
       while ($null -ne $child) {
         if ($Count.Value -ge $MaxNodes -or -not (Test-TreeBudget $Traversal)) { break }
-        $childOut = Convert-Tree -Element $child -Path "$Path.$i" -Depth ($Depth + 1) -MaxDepth $MaxDepth -Count $Count -MaxNodes $MaxNodes -ViewMode $ViewMode -IncludeOffscreen $IncludeOffscreen -DetailLevel $DetailLevel -Traversal $Traversal -Owner $Owner
+        $childOut = Convert-Tree -Element $child -Path "$Path.$i" -Depth ($Depth + 1) -MaxDepth $MaxDepth -Count $Count -MaxNodes $MaxNodes -ViewMode $ViewMode -IncludeOffscreen $IncludeOffscreen -DetailLevel $DetailLevel -Traversal $Traversal -Owner $Owner -Level $childLevel
         if ($null -ne $childOut) { $childrenOut.Add($childOut) }
         if ($Count.Value -ge $MaxNodes -or $null -ne $Traversal.reason -or -not (Test-TreeBudget $Traversal)) { break }
         $child = $Traversal.walker.GetNextSibling($child, $Traversal.cache)
@@ -1904,6 +1928,82 @@ function Get-WindowResponsive {
   return [WindowsComputerUseNative]::IsResponsive([IntPtr]([int64]$Window.nativeWindowHandle))
 }
 
+# ----------------------------------------------------------------------------
+# Chromium page content (issue #50). Electron, Chrome/Edge, CEF and WebView2
+# build a page's accessibility tree only after a UIA client reads a property of
+# the page root, the first child of the Chrome_RenderWidgetHostHWND window.
+# The control view skips that empty root, so tree walks alone can leave a
+# window at its frame and layout panes. Before a window-scoped observation,
+# read the root of each visible renderer and wait briefly for the page tree.
+# An empty renderer is retried by later observations for 30 seconds; a single
+# call waits at most 1.5 seconds and half of its traversal budget.
+# ----------------------------------------------------------------------------
+$script:ChromiumPages = @{}   # renderer hwnd -> @{ processId; firstSeen; ready }
+
+function Test-ChromiumPage {
+  param([IntPtr]$Renderer)
+  # Resolve the renderer on every probe: enabling the page tree replaces the
+  # root, and navigation from an element obtained earlier stays empty.
+  $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+  $root = $walker.GetFirstChild([System.Windows.Automation.AutomationElement]::FromHandle($Renderer))
+  if ($null -eq $root) { return $false }
+  [void]$root.Current.ControlType
+  return ($null -ne $walker.GetFirstChild($root))
+}
+
+function Initialize-ChromiumPages {
+  param([object]$Window, [object]$Traversal)
+  if ($null -eq $Window) { return $null }
+  $renderers = @([WindowsComputerUseNative]::ChromiumRenderers([IntPtr]([int64]$Window.nativeWindowHandle), 8))
+  if ($renderers.Count -eq 0) { return $null }
+  foreach ($key in @($script:ChromiumPages.Keys)) {
+    if (-not [WindowsComputerUseNative]::IsWindow([IntPtr]([int64]$key))) { $script:ChromiumPages.Remove($key) }
+  }
+  $now = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+  $status = [ordered]@{ renderers = $renderers.Count; ready = 0; waitedMs = 0; state = 'ready' }
+  $pending = New-Object System.Collections.Generic.List[object]
+  foreach ($renderer in $renderers) {
+    $owner = [uint32]0
+    [void][WindowsComputerUseNative]::GetWindowThreadProcessId($renderer, [ref]$owner)
+    $key = [string]$renderer.ToInt64()
+    $page = $script:ChromiumPages[$key]
+    if ($null -eq $page -or $page.processId -ne $owner) {
+      $page = @{ processId = $owner; firstSeen = $now; ready = $false }
+      $script:ChromiumPages[$key] = $page
+    }
+    # WebView2 and CEF renderers can belong to a process other than the window's.
+    if (-not [WindowsComputerUseNative]::IsResponsive($renderer)) {
+      $status["unresponsive"] = 1 + [int]$status["unresponsive"]
+      continue
+    }
+    # A provider that refuses the read (an elevated app behind UIPI, a closing
+    # page) gains nothing from waiting; the next observation probes it again.
+    try { $ready = Test-ChromiumPage $renderer } catch { continue }
+    if ($ready) { $page.ready = $true; $status.ready++; continue }
+    # A page tree that disappeared (Chromium turned accessibility off again)
+    # starts a new warm-up period.
+    if ($page.ready) { $page.ready = $false; $page.firstSeen = $now }
+    $pending.Add(@{ renderer = $renderer; page = $page })
+  }
+  # Measured on Electron 44: the page tree arrives 50-450 ms after the read.
+  $start = $Traversal.watch.ElapsedMilliseconds
+  $limit = [Math]::Min(1500, [int]($Traversal.budgetMs / 2))
+  while ($true) {
+    $waiting = @($pending | Where-Object { -not $_.page.ready -and ($now - $_.page.firstSeen) -lt 30000 })
+    if ($waiting.Count -eq 0 -or ($Traversal.watch.ElapsedMilliseconds - $start) -ge $limit) { break }
+    Start-Sleep -Milliseconds 50
+    foreach ($item in $waiting) {
+      if (Invoke-Safe { Test-ChromiumPage $item.renderer } $false) { $item.page.ready = $true; $status.ready++ }
+    }
+  }
+  $status.waitedMs = [int]($Traversal.watch.ElapsedMilliseconds - $start)
+  if ($status.ready -lt $renderers.Count) {
+    $starting = @($pending | Where-Object { -not $_.page.ready -and ($now - $_.page.firstSeen) -lt 30000 }).Count
+    $status.state = if ($status.ready -gt 0) { 'partial' } elseif ($starting -gt 0) { 'starting' } else { 'unavailable' }
+  }
+  return $status
+}
+
 function Get-TreeResult {
   param([string]$Scope, [int]$MaxDepth, [int]$MaxNodes, [object]$InputObject = $null)
   $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1921,15 +2021,17 @@ function Get-TreeResult {
   $responsive = Get-WindowResponsive $window
   $cache = New-ElementCacheRequest $detailLevel
   $walker = New-Object System.Windows.Automation.TreeWalker -ArgumentList (Get-ViewCondition $viewMode $includeOffscreen)
-  $traversal = @{watch=$stopwatch; budgetMs=$budgetMs; cache=$cache; walker=$walker; reason=$null; error=$null}
+  $traversal = @{watch=$stopwatch; budgetMs=$budgetMs; cache=$cache; walker=$walker; reason=$null; error=$null; chromiumLayout=($Scope -ne 'desktop')}
   $tree = $null
   $count = 0
+  $pages = $null
   if ($null -ne $responsive -and -not $responsive) {
     $traversal.reason = "targetUnresponsive"
   } else {
     $root = Get-ScopeRoot $Scope $InputObject
     Update-WindowCache $root
     Update-WindowIdentity $InputObject $root
+    if ($Scope -ne 'desktop') { $pages = Initialize-ChromiumPages $window $traversal }
     try {
       if (Test-TreeBudget $traversal) {
         $root = $root.GetUpdatedCache($cache)
@@ -1950,6 +2052,7 @@ function Get-TreeResult {
     durationMs = [int]$stopwatch.ElapsedMilliseconds; tree = $tree
     treeTimeoutMs = $budgetMs; targetResponsive = $responsive
   }
+  if ($null -ne $pages) { $result["webContent"] = $pages }
   if ($null -ne $traversal.reason) {
     $result["truncationReason"] = $traversal.reason
     if ($traversal.reason -ne "maxNodes") {
@@ -2055,7 +2158,7 @@ function Invoke-Action {
       $results = New-Object System.Collections.Generic.List[object]
       Search-Tree -Node $treeResult.tree -Query $query -ControlType $controlType -MaxResults $maxResults -Results $results
       $out = [ordered]@{ ok = $true; query = $query; results = @($results.ToArray()); scannedNodes = $treeResult.nodeCount; truncated = $treeResult.truncated }
-      foreach ($key in @('durationMs','treeTimeoutMs','targetResponsive','truncationReason','warning','providerError')) {
+      foreach ($key in @('durationMs','treeTimeoutMs','targetResponsive','truncationReason','warning','providerError','webContent')) {
         if ($treeResult.Contains($key)) { $out[$key] = $treeResult[$key] }
       }
       if ($results.Count -eq 0 -and $treeResult.nodeCount -lt 10) {
@@ -2085,10 +2188,14 @@ function Invoke-Action {
           $requested = Get-ObservationWindow $inputObject
           if ($pointHwnd -ne [int64]$requested.nativeWindowHandle) { throw 'Point is outside or occluded by another target window.' }
         }
+        # A cold Chromium page answers hit tests with its layout pane.
+        $pages = Initialize-ChromiumPages $ownerWindow @{ watch = [Diagnostics.Stopwatch]::StartNew(); budgetMs = 2000 }
         $el = [System.Windows.Automation.AutomationElement]::FromPoint($point)
         $script:ObservationOwner = $ownerWindow
         try {
-          return ([ordered]@{ ok = $true; point = [ordered]@{ x = $x; y = $y }; element = (Convert-ElementInfo -Element $el -Id $null -Depth 0 -DetailLevel $detailLevel) })
+          $result = [ordered]@{ ok = $true; point = [ordered]@{ x = $x; y = $y }; element = (Convert-ElementInfo -Element $el -Id $null -Depth 0 -DetailLevel $detailLevel) }
+          if ($null -ne $pages) { $result["webContent"] = $pages }
+          return $result
         } finally { $script:ObservationOwner = $null }
       }
     }
@@ -2577,6 +2684,9 @@ function Invoke-Action {
       # hit-test the center of the matching word run's union box with UIA.
       $matched = @()
       if ($query.Length -gt 0 -and $lines.Count -gt 0) {
+        if ([bool](Get-Prop $inputObject 'resolveControl' $false) -and $null -ne $winEl) {
+          [void](Initialize-ChromiumPages $winEl @{ watch = [Diagnostics.Stopwatch]::StartNew(); budgetMs = 2000 })
+        }
         foreach ($line in $lines) {
           if ($matched.Count -ge 3) { break }
           $lineText = [string]$line.text

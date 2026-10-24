@@ -35,6 +35,7 @@ const suites = [
   ['uia-cache-contract', powershell, ['-NoProfile', '-File', 'test/uia-cache-contract.ps1']],
   ['uia-native-smoke', process.execPath, ['test/uia-native-smoke.mjs', path.join(root, 'uia-native-smoke')]],
   ['uia-chromium-smoke', process.execPath, ['test/uia-chromium-smoke.mjs', path.join(root, 'uia-chromium-smoke')]],
+  ['uia-chromium-lazy-smoke', process.execPath, ['test/uia-chromium-lazy-smoke.mjs', path.join(root, 'uia-chromium-lazy-smoke')]],
   ['sparse-canvas-smoke', process.execPath, ['test/sparse-canvas-smoke.mjs', path.join(root, 'sparse-canvas-smoke')]],
   ['ocr-query-contract', powershell, ['-NoProfile', '-File', 'test/ocr-query-contract.ps1']],
   ['native-input-errors', powershell, ['-NoProfile', '-File', 'test/native-input-errors.ps1']],
@@ -57,7 +58,7 @@ for (const [name, command, args] of suites) {
   await writeFile(path.join(temp, 'stdout.log'), result.stdout || '');
   await writeFile(path.join(temp, 'stderr.log'), (result.stderr || '') + (result.error ? '\n' + result.error.message : ''));
   // Keep stage timings visible in successful CI jobs as well as failures.
-  if (['bundle-startup','uia-native-smoke','uia-chromium-smoke'].includes(name) && result.stdout) console.log(result.stdout.trimEnd());
+  if (['bundle-startup','uia-native-smoke','uia-chromium-smoke','uia-chromium-lazy-smoke'].includes(name) && result.stdout) console.log(result.stdout.trimEnd());
   const passed = result.status === 0 && !result.error;
   results.push({ name, passed, exitCode: result.status, durationMs: Date.now() - start });
   await writeFile(path.join(root, 'results.json'), JSON.stringify({ powershell, node: process.version, results }, null, 2) + '\n');

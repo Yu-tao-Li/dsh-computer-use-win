@@ -49,6 +49,10 @@ try{
     }
     const cold=await call(client,'accessibility_tree',{...target,maxNodes:300,maxDepth:12});
     assert.ok(cold.nodeCount>10,JSON.stringify(cold));assert.equal(cold.targetResponsive,true);
+    // Default arguments reach the page through Chromium's unnamed layout panes.
+    const names=node=>node?[node.name,...(node.children||[]).flatMap(names)]:[];
+    const defaults=await call(client,'accessibility_tree',{nativeWindowHandle:ready.hwnd});
+    assert.equal(defaults.webContent?.state,'ready');assert.ok(names(defaults.tree).includes('Fixture action'),'Default depth misses the page');
     for(const viewMode of ['control','raw','content']){
       const r=await call(client,'accessibility_tree',{...target,viewMode,detailLevel:'full',maxDepth:12,maxNodes:300});
       assert.ok(r.nodeCount>10);assert.equal(r.targetResponsive,true);assert.ok(!r.providerError,r.providerError);

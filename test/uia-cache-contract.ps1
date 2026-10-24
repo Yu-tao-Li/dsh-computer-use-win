@@ -40,7 +40,7 @@ namespace Fixture.Automation {
   }
   public class AutomationElement {
     public class Info {
-      public string Name="Fixture node", AutomationId="fixture", ClassName="Fixture", LocalizedControlType="button";
+      public string Name="Fixture node", AutomationId="fixture", ClassName="Fixture", LocalizedControlType="button", FrameworkId="Fixture";
       public ControlType ControlType=new ControlType(); public int ProcessId=4242, NativeWindowHandle=42;
       public bool IsEnabled=true, IsOffscreen=false, HasKeyboardFocus=false;
       public Fixture.Rect BoundingRectangle=new Fixture.Rect {X=1,Y=2,Width=30,Height=40};
@@ -64,7 +64,7 @@ namespace Fixture.Automation {
     }
     public bool TryGetCurrentPattern(AutomationPattern p, out object pattern) {CurrentReads++; pattern=null; return false;}
     public List<AutomationElement> FindAll(TreeScope scope, Condition condition) {FindCalls++; return Children;}
-    public static AutomationProperty NameProperty=new AutomationProperty("Name"), AutomationIdProperty=new AutomationProperty("AutomationId"), ClassNameProperty=new AutomationProperty("ClassName"), ControlTypeProperty=new AutomationProperty("ControlType"), BoundingRectangleProperty=new AutomationProperty("BoundingRectangle"), IsEnabledProperty=new AutomationProperty("IsEnabled"), IsOffscreenProperty=new AutomationProperty("IsOffscreen"), HasKeyboardFocusProperty=new AutomationProperty("HasKeyboardFocus"), ProcessIdProperty=new AutomationProperty("ProcessId"), NativeWindowHandleProperty=new AutomationProperty("NativeWindowHandle"), RuntimeIdProperty=new AutomationProperty("RuntimeId"), LocalizedControlTypeProperty=new AutomationProperty("LocalizedControlType");
+    public static AutomationProperty NameProperty=new AutomationProperty("Name"), AutomationIdProperty=new AutomationProperty("AutomationId"), ClassNameProperty=new AutomationProperty("ClassName"), ControlTypeProperty=new AutomationProperty("ControlType"), BoundingRectangleProperty=new AutomationProperty("BoundingRectangle"), IsEnabledProperty=new AutomationProperty("IsEnabled"), IsOffscreenProperty=new AutomationProperty("IsOffscreen"), HasKeyboardFocusProperty=new AutomationProperty("HasKeyboardFocus"), ProcessIdProperty=new AutomationProperty("ProcessId"), NativeWindowHandleProperty=new AutomationProperty("NativeWindowHandle"), RuntimeIdProperty=new AutomationProperty("RuntimeId"), LocalizedControlTypeProperty=new AutomationProperty("LocalizedControlType"), FrameworkIdProperty=new AutomationProperty("FrameworkId");
   }
   public class TreeWalker {
     public TreeWalker(Condition c) {}
@@ -76,8 +76,17 @@ namespace Fixture.Automation {
     public AutomationElement GetNextSibling(AutomationElement e, CacheRequest c) {AutomationElement.SiblingCalls++; Step(); int i=e.Parent.Children.IndexOf(e)+1; return i>=e.Parent.Children.Count?null:e.Parent.Children[i].GetUpdatedCache(c);}
   }
 }
+// Native surface used by the Chromium page warm-up; no real windows involved.
+public static class WindowsComputerUseNative {
+  public static IntPtr[] Renderers = new IntPtr[0];
+  public static HashSet<long> Hung = new HashSet<long>(), Gone = new HashSet<long>();
+  public static IntPtr[] ChromiumRenderers(IntPtr window, int max) {return Renderers;}
+  public static bool IsWindow(IntPtr hwnd) {return !Gone.Contains(hwnd.ToInt64());}
+  public static bool IsResponsive(IntPtr hwnd) {return !Hung.Contains(hwnd.ToInt64());}
+  public static uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId) {processId=4242; return 1;}
+}
 '@
-$names = @('Get-Prop','Get-ViewMode','Get-DetailLevel','Get-ViewCondition','Invoke-Safe','Convert-Rect','Get-ControlTypeName','Get-Patterns','Get-ValueText','New-ElementCacheRequest','Convert-ElementInfo','Test-TreeBudget','Get-Children','Convert-Tree','Element-Matches','Search-Tree','Get-TreeResult','Invoke-Action')
+$names = @('Get-Prop','Get-ViewMode','Get-DetailLevel','Get-ViewCondition','Invoke-Safe','Convert-Rect','Get-ControlTypeName','Get-Patterns','Get-ValueText','New-ElementCacheRequest','Convert-ElementInfo','Test-TreeBudget','Get-Children','Convert-Tree','Element-Matches','Search-Tree','Initialize-ChromiumPages','Get-TreeResult','Invoke-Action')
 foreach ($name in $names) {
   $definition = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name}, $true)
   if ($null -ne $definition) { . ([scriptblock]::Create($definition.Extent.Text.Replace('System.Windows','Fixture'))) }
@@ -92,6 +101,10 @@ function Resolve-TargetWindow {param($InputObject) $script:Resolutions++; return
 function Resolve-Element {param($ElementId,$InputObject) return $script:Root}
 function Set-WindowForeground {param($Element) return $script:Activated}
 function Test-Failsafe { return $true }
+function Get-NativeWindowList {param([bool]$IncludeInvisible,[int]$MaxWindows) return ,@()}
+# Renderer page probe: ready from the Nth probe of a renderer listed in PageReadyAt.
+$script:ChromiumPages=@{}; $script:PageProbes=0; $script:PageReadyAt=@{}; $script:PageRefuses=@()
+function Test-ChromiumPage {param([IntPtr]$Renderer) $script:PageProbes++; $key=[string]$Renderer.ToInt64(); if ($script:PageRefuses -contains $key) {throw 'Access is denied.'}; $at=$script:PageReadyAt[$key]; return ($null -ne $at -and $script:PageProbes -ge $at)}
 function Assert-Equal {param($Actual,$Expected,[string]$Label) if ($Actual -ne $Expected) {throw "${Label}: expected=$Expected actual=$Actual"}}
 function Reset-Fixture {
   [Fixture.Automation.AutomationElement]::Reset()
@@ -177,4 +190,81 @@ $result=Invoke-Action find ([pscustomobject]@{query='cached value';treeTimeoutMs
 Assert-Equal $result.results.Count 2 'Find still matches cached value text'
 Assert-Equal $result.treeTimeoutMs 1000 'Find forwards budget'
 if (-not $result.warning) {throw 'Find must forward partial-tree warning'}
-Write-Output 'PASS cached compact/full, stable ids, lazy wide/deep limits, partial deadlines, provider errors, value search, activation refusal/success/hung diagnostics and element_info detail contract'
+# Unnamed Chromium layout panes do not use up maxDepth; named or non-Chrome panes do.
+function New-Node {param([int]$Key,[string]$Type,[string]$Name,[string]$Framework)
+  $node=New-Object Fixture.Automation.AutomationElement $Key
+  $node.Cached.ControlType=New-Object Fixture.Automation.ControlType; $node.Cached.ControlType.ProgrammaticName="ControlType.$Type"
+  $node.Cached.Name=$Name; $node.Cached.FrameworkId=$Framework; return $node}
+function Find-Node {param($Node,[string]$Name) if ($null -eq $Node) {return $null}; if ($Node.name -eq $Name) {return $Node}; foreach ($child in @($Node.children)) {$hit=Find-Node $child $Name; if ($null -ne $hit) {return $hit}}; return $null}
+function New-PaneChain {param([int]$Length,[string]$Name='',[string]$Framework='Chrome')
+  Reset-Fixture; $parent=$script:Root
+  for ($i=0;$i -lt $Length;$i++) {$pane=New-Node (2+$i) Pane $Name $Framework; $parent.Add($pane); $parent=$pane}
+  $button=New-Node 500 Button 'Page action' Chrome; $parent.Add($button); $button.Add((New-Node 501 Text 'Page label' Chrome))}
+New-PaneChain 7
+$result=Get-TreeResult active_window 1 100 ([pscustomobject]@{})
+Assert-Equal $result.nodeCount 9 'Layout panes do not use depth'
+Assert-Equal (Find-Node $result.tree 'Page action').depth 8 'Reported depth stays structural'
+Assert-Equal (Find-Node $result.tree 'Page label') $null 'Content levels still use depth'
+Assert-Equal (Get-TreeResult active_window 2 100 ([pscustomobject]@{})).nodeCount 10 'Next content level'
+Assert-Equal ([Fixture.Automation.AutomationElement]::CurrentReads) 0 'Layout check reads cached properties'
+New-PaneChain 7 'Named pane'
+Assert-Equal (Get-TreeResult active_window 1 100 ([pscustomobject]@{})).nodeCount 2 'Named panes use depth'
+New-PaneChain 7 '' 'Win32'
+Assert-Equal (Get-TreeResult active_window 1 100 ([pscustomobject]@{})).nodeCount 2 'Non-Chromium panes use depth'
+New-PaneChain 30
+Assert-Equal (Get-TreeResult active_window 2 100 ([pscustomobject]@{})).nodeCount 19 'Layout recursion bounded at maxDepth+16'
+New-PaneChain 7
+Assert-Equal (Get-TreeResult desktop 1 100 ([pscustomobject]@{})).nodeCount 2 'Desktop trees keep layout panes in maxDepth'
+# Chromium page warm-up: probe each visible renderer, wait briefly, retry later.
+Reset-Fixture
+[WindowsComputerUseNative]::Renderers=@([IntPtr]101); $script:PageReadyAt=@{'101'=1}; $script:PageProbes=0
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $result.webContent.state ready 'Page tree present on first probe'
+Assert-Equal $script:PageProbes 1 'Ready renderer probed once'
+if ($result.webContent.waitedMs -gt 40) {throw 'Ready page must not wait'}
+[WindowsComputerUseNative]::Renderers=@([IntPtr]102); $script:PageReadyAt=@{'102'=3}; $script:PageProbes=0
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $result.webContent.ready 1 'Late page tree awaited'
+Assert-Equal $script:PageProbes 3 'Probes until the page tree arrives'
+if ($result.webContent.waitedMs -lt 90) {throw "Probes must be spaced: $($result.webContent.waitedMs)"}
+[WindowsComputerUseNative]::Renderers=@([IntPtr]103); $script:PageReadyAt=@{}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $result.webContent.state starting 'Empty renderer still starting'
+if ($result.webContent.waitedMs -lt 1450 -or $result.webContent.waitedMs -gt 1750) {throw "One call waits at most 1.5 s: $($result.webContent.waitedMs)"}
+Assert-Equal $result.nodeCount 1 'Tree still returned after the wait'
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400})
+if ($result.webContent.waitedMs -gt 300) {throw "Wait limited to half the budget: $($result.webContent.waitedMs)"}
+$script:ChromiumPages['103'].firstSeen-=31000; $probes=$script:PageProbes
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $result.webContent.state unavailable 'Warm-up period ends after 30 s'
+Assert-Equal ($script:PageProbes-$probes) 1 'Expired renderer probed once without waiting'
+if ($result.webContent.waitedMs -gt 40) {throw 'Expired renderer must not wait'}
+$script:ChromiumPages['103'].ready=$true
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400})
+Assert-Equal $result.webContent.state starting 'A lost page tree starts a new warm-up period'
+[void][WindowsComputerUseNative]::Hung.Add(104); [WindowsComputerUseNative]::Renderers=@([IntPtr]104); $probes=$script:PageProbes
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal ($script:PageProbes-$probes) 0 'Hung renderer never entered'
+Assert-Equal $result.webContent.unresponsive 1 'Hung renderer reported'
+Assert-Equal $result.webContent.state unavailable 'Hung renderer has no page tree'
+[WindowsComputerUseNative]::Renderers=@([IntPtr]105); $script:PageRefuses=@('105'); $probes=$script:PageProbes
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal ($script:PageProbes-$probes) 1 'Refused renderer probed once'
+Assert-Equal $result.webContent.state unavailable 'Refused renderer is not awaited'
+if ($result.webContent.waitedMs -gt 40) {throw 'Refused renderer must not wait'}
+$script:PageRefuses=@()
+[WindowsComputerUseNative]::Renderers=@([IntPtr]101,[IntPtr]103); $script:PageReadyAt=@{'101'=1}; $script:PageProbes=0
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400})
+Assert-Equal $result.webContent.state partial 'One of two pages ready'
+[void][WindowsComputerUseNative]::Gone.Add(101); [WindowsComputerUseNative]::Renderers=@([IntPtr]103)
+[void](Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400}))
+Assert-Equal $script:ChromiumPages.ContainsKey('101') $false 'Closed renderers are forgotten'
+$probes=$script:PageProbes
+$result=Get-TreeResult desktop 1 10 ([pscustomobject]@{})
+Assert-Equal ($script:PageProbes-$probes) 0 'Desktop scope does not warm pages'
+Assert-Equal $result.Contains('webContent') $false 'Desktop scope reports no page state'
+$result=Invoke-Action find ([pscustomobject]@{query='Fixture';treeTimeoutMs=400})
+Assert-Equal $result.webContent.renderers 1 'Find forwards page state'
+[WindowsComputerUseNative]::Renderers=@()
+Assert-Equal (Get-TreeResult active_window 1 10 ([pscustomobject]@{})).Contains('webContent') $false 'Windows without renderers report no page state'
+Write-Output 'PASS cached compact/full, stable ids, lazy wide/deep limits, Chromium layout depth, bounded page warm-up, partial deadlines, provider errors, value search, activation refusal/success/hung diagnostics and element_info detail contract'

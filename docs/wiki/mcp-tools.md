@@ -6,6 +6,8 @@ The Node server enforces the same schemas returned by tools/list. Unknown proper
 
 Prefer scoped UIA observations. find supplements an empty sparse (at most 20 nodes, a heuristic) or incomplete search with OCR, unless ocrFallback:false or controlType is specified. OCR candidates are recognized text and screen coordinates, not UIA ids. Inspect ocr.lines if a literal query misses a placeholder.
 
+Chromium-based windows (Electron, Chrome/Edge, CEF, WebView2) build a page's accessibility tree only after a UIA client reads a property of the page root, the first child of each Chrome_RenderWidgetHostHWND window. The control view skips that empty root, so a tree walk alone can leave such a window at its frame and layout panes. Before a window-scoped snapshot, accessibility_tree, find or element wait_for, the backend reads that root for each visible renderer window and waits for the page tree: at most 1.5 seconds and half of treeTimeoutMs per call. The result then carries webContent with renderers, ready, waitedMs and state: ready, partial, starting (observe again shortly) or unavailable (no page tree after 30 seconds of observations, or an unresponsive renderer). element_info by point and OCR resolveControl warm the window the same way before hit-testing. In window-scoped trees, unnamed Chromium layout panes do not count toward maxDepth, so the default depths reach the page; reported depth values stay structural. Desktop-scoped trees neither warm pages nor change depth counting, so they remain an overview of every window.
+
 screenshot and default OCR do not resolve UIA. An unobstructed foreground window uses a screen crop checked before and after capture; background/covered windows use window-capture fallbacks. OCR resolveControl:true opts into hit-testing; its control may represent the whole page. includeScreenshot:true returns MCP image content. Map image pixels to screen = imageBounds origin + image / imageScale. Screen-region captures report occludedPossible:false only when the foreground, Z-order and geometry checks passed; the last-resort screen fallback reports true.
 
 After a coordinate click, type_text preserves focus. Explicit focusMode:main requests heuristic main-control focus. Input actions only report verification:sent; use wait_for for an expected window, UIA element or literal visible text. A confirmed condition reports verification:observed; truncated UIA absence and occluded OCR are inconclusive. Confirm text that exists only after the desired effect, rather than the same text just typed.
@@ -33,7 +35,7 @@ Check that the Windows UI Automation backend, screenshot capture, and input stac
 
 ### snapshot
 
-Capture a screenshot and a UI Automation tree for the active window or desktop.
+Capture a screenshot and a UI Automation tree for the active window or desktop. In a Chromium-based window (Electron, Chrome/Edge, CEF, WebView2) the first observation enables the page's accessibility tree; webContent reports whether it is ready.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -54,7 +56,7 @@ Capture a screenshot and a UI Automation tree for the active window or desktop.
 
 ### accessibility_tree
 
-Read the UI Automation tree without taking a screenshot.
+Read the UI Automation tree without taking a screenshot. In a Chromium-based window (Electron, Chrome/Edge, CEF, WebView2) the first observation enables the page's accessibility tree; webContent reports whether it is ready.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
