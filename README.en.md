@@ -14,6 +14,8 @@ Your [**Star ⭐ ↗**](https://github.com/Yu-tao-Li/dsh-computer-use-win) keeps
 
 ## English
 
+**New in 0.5.1: redesigned settings and control indicator.** The settings page follows DSH's native style. The “DSH 正在控制电脑” status pill, the screen-edge glow and the DSH tag at the pointer are redesigned, and the tag sits past the pointer at your pointer size, including the accessibility size. The Star and Issue note at the top of the settings page folds into one link.
+
 **New in 0.5.0: Lazy startup.** Select Lazy in Settings → Computer Use to start with one management tool and load desktop tools on demand. All tools remain allowed, and All remains the default preset. See [tool loading](docs/tool-context.md).
 
 When the startup set is the management entry alone and at least one desktop tool is allowed — which is what Lazy startup does — the server returns an MCP handshake note that this machine can be read and operated and that tools must be enabled first. With no desktop tool name advertised at startup, the model still learns the capability exists.
@@ -73,15 +75,15 @@ Standalone MCP loads all tools by default. Set `WCU_TOOL_MODE=lazy` for manageme
 
 ### Interface tour
 
-These are real screenshots from **DSH Desktop 2.0.18 with plugin 0.4.3**, using the Chinese interface. In a separate demonstration conversation, the agent opened a new browser window, searched for “晴天” and confirmed “周杰伦” in the results. The images were recaptured as lossless PNGs at native pixel resolution, showing only the relevant conversation content or settings panel. Click an image to view the original.
+These are real screenshots from **DSH Desktop 2.0.18**, using the Chinese interface: the conversation images come from plugin 0.4.3 and the settings images from 0.5.1. In a separate demonstration conversation, the agent opened a new browser window, searched for “晴天” and confirmed “周杰伦” in the results. The images were recaptured as lossless PNGs at native pixel resolution, showing only the relevant conversation content or settings panel. Click an image to view the original.
 
 **Actions in the conversation.** Expand tool calls to see mouse-icon rows for typing, key presses and result checks. Expand an action row for its Steps and screenshots entry.
 
 ![Real search demonstration: mouse-icon conversation rows for text input, key presses and result checks, with a steps and screenshots entry](assets/desktop-search-steps-hd.png)
 
-**Tool loading.** Choose Lite, All or Custom first. This image shows only the dark settings panel, with the default All preset and its 24 tools.
+**Tool loading.** Choose Lite, All, Lazy or Custom first. This image shows only the dark settings panel, with the default All preset and its 24 tools; Collapse folds the Star and Issue note at the top into one link.
 
-![Computer Use settings panel: Star and Issue links, plus Lite, All and Custom tool presets](assets/desktop-settings-overview-hd.png)
+![Computer Use settings panel: the collapsible Star and Issue note, plus Lite, All, Lazy and Custom tool presets](assets/desktop-settings-overview-hd.png)
 
 <details>
 <summary>See the search summary, custom tools, control indicators and stop settings</summary>
@@ -90,13 +92,13 @@ These are real screenshots from **DSH Desktop 2.0.18 with plugin 0.4.3**, using 
 
 ![Actual conversation summary after searching for 晴天: a new Edge window, the search query and confirmation that 周杰伦 appeared in the results](assets/desktop-search-result-hd.png)
 
-**Custom tools.** Custom reveals the indented checklist with individual and group selection. The screenshot shows an unsaved demonstration draft, discarded after capture.
+**Custom tools.** Custom reveals the grouped checklist with individual and group selection. The screenshot shows an unsaved demonstration draft, discarded after capture.
 
-![Part of the expanded Custom checklist, with indented groups, select-all, disable-all and group selection](assets/desktop-settings-tools-custom-hd.png)
+![Part of the expanded Custom checklist, with groups, select-all, disable-all and group selection](assets/desktop-settings-tools-custom-hd.png)
 
-**Control indicators.** Choose screen and pointer indicators, remote visibility and placement. The blue area is the settings page's built-in illustration.
+**Control indicators.** The screen indicator, pointer tag and remote visibility each have a switch, and the pill goes at the top or bottom. The built-in preview shows what control looks like: the screen-edge glow, the “DSH 正在控制电脑” pill and the DSH tag at the pointer.
 
-![Control indicator settings: screen and pointer indicators, remote and recording visibility, top or bottom placement, and the built-in illustration](assets/desktop-settings-indicators-hd.png)
+![Control indicator settings: the built-in preview with edge glow, status pill and pointer tag, top or bottom placement, and switches for the screen indicator, pointer indicator and remote visibility](assets/desktop-settings-indicators-hd.png)
 
 **Stop settings.** Esc stops the current turn. Record an additional shortcut or restore the Esc default.
 
@@ -238,7 +240,7 @@ npm ci
 npm test
 ```
 
-The standalone MCP server has no third-party runtime dependencies. The DSH adapter uses the host's Schemastery and official MCP bridge; development dependencies are for testing. **25 isolated regression suites** cover settings compatibility, control lifecycle, cancellation, UIA, capture, OCR protocols and input boundaries. `npm test` sends no physical input and does not change installed DSH profiles. Live UIA tests operate only on dedicated fixture windows; logs go to the temporary directory printed by the command.
+The standalone MCP server has no third-party runtime dependencies. The DSH adapter uses the host's Schemastery and official MCP bridge; development dependencies are for testing. **27 isolated regression suites** cover settings compatibility, control lifecycle, cancellation, UIA, capture, OCR protocols and input boundaries. `npm test` sends no physical input and does not change installed DSH profiles. Live UIA tests operate only on dedicated fixture windows; logs go to the temporary directory printed by the command.
 
 `node test/notepad-e2e.mjs` is a separate real-input test that opens Notepad. Run it on a dedicated test desktop. See the compatibility note above for what each PowerShell version validates.
 
@@ -251,6 +253,8 @@ MIT licensed. Derived from [cgissing/windows-computer-use](https://github.com/cg
 ---
 
 ## 简体中文
+
+**0.5.1 新版设置页与接管提示**：设置页按 DSH 原生样式重做；“DSH 正在控制电脑”提示条、屏幕边缘光晕和鼠标旁的 DSH 标签重新设计，标签按你的指针大小（含辅助功能放大）放在指针外侧；设置页顶部的 Star 与 Issue 说明可一键折叠。
 
 **0.5.0 新增懒启动**：在“设置 → Computer Use”选择“懒启动”，启动只加载 1 项管理工具，桌面工具按需加载，仍允许全部工具。现有默认方案保持“全部”。详见[工具加载](docs/tool-context.md)。
 
@@ -311,15 +315,15 @@ dsh plugin --profile desktop add github:Yu-tao-Li/dsh-computer-use-win
 
 ### 界面预览
 
-以下为 **DSH Desktop 2.0.18 + 插件 0.4.3** 的真实界面。演示在独立会话中完成：新开浏览器窗口，搜索“晴天”，并确认结果中出现“周杰伦”。配图重新截取为原始像素的无损 PNG，仅保留相关对话内容或设置面板；点击图片可查看原图。
+以下为 **DSH Desktop 2.0.18** 的真实界面：对话截图来自插件 0.4.3，设置页截图来自 0.5.1。演示在独立会话中完成：新开浏览器窗口，搜索“晴天”，并确认结果中出现“周杰伦”。配图重新截取为原始像素的无损 PNG，仅保留相关对话内容或设置面板；点击图片可查看原图。
 
 **对话中的操作记录。** 展开工具调用后，可看到带鼠标图标的“输入了文本”“发送了按键”“检查了操作结果”等记录，点击操作行可进入“查看步骤和截图”。
 
 ![真实搜索演示：DSH对话中带鼠标图标的输入、按键、结果检查记录，以及查看步骤和截图入口](assets/desktop-search-steps-hd.png)
 
-**工具加载。** 外层先选精简、全部或自定义。下图仅截取暗色设置面板，展示默认加载全部 24 项工具的方案。
+**工具加载。** 外层先选精简、全部、懒启动或自定义。下图仅截取暗色设置面板，展示默认加载全部 24 项工具的方案；顶部的 Star 与 Issue 说明可点“折叠”收为一个链接。
 
-![Computer Use设置面板：Star和Issue入口，以及精简、全部、自定义三种工具加载方案](assets/desktop-settings-overview-hd.png)
+![Computer Use设置面板：可折叠的Star和Issue说明，以及精简、全部、懒启动、自定义四种工具加载方案](assets/desktop-settings-overview-hd.png)
 
 <details>
 <summary>查看搜索总结、自定义工具、接管提示与停止设置</summary>
@@ -328,13 +332,13 @@ dsh plugin --profile desktop add github:Yu-tao-Li/dsh-computer-use-win
 
 ![浏览器搜索晴天后的真实对话总结：新建Edge窗口、输入搜索词，并确认周杰伦出现在结果中](assets/desktop-search-result-hd.png)
 
-**自定义工具。** 选择“自定义”才展开缩进清单，可以逐项或按组选择。图中为尚未保存的演示草稿，拍摄后已放弃更改。
+**自定义工具。** 选择“自定义”才展开分组清单，可以逐项或按组选择。图中为尚未保存的演示草稿，拍摄后已放弃更改。
 
-![自定义工具方案展开后的部分缩进清单，支持全选、全部关闭和分组选择](assets/desktop-settings-tools-custom-hd.png)
+![自定义方案展开后的部分分组清单，支持全选、全部关闭和按组选择](assets/desktop-settings-tools-custom-hd.png)
 
-**接管提示。** 分别选择屏幕提示、鼠标标识和远程可见，也可调整提示位置。图中蓝色区域是设置页自带的示意预览。
+**接管提示。** 屏幕提示、鼠标标签和远程可见各自开关，提示条可放在顶部或底部。图中的预览示意接管时的样子：屏幕边缘光晕、“DSH 正在控制电脑”提示条和鼠标旁的 DSH 标签。
 
-![接管提示设置：屏幕与鼠标提示、远程和录屏可见、顶部或底部位置，以及内置示意预览](assets/desktop-settings-indicators-hd.png)
+![接管提示设置：内置预览（屏幕边缘光晕、提示条、鼠标DSH标签）、顶部或底部位置，以及屏幕提示、鼠标提示和远程录屏可见三个开关](assets/desktop-settings-indicators-hd.png)
 
 **停止设置。** Esc 停止当前轮；可录制额外快捷键，也可恢复默认 Esc。
 
@@ -476,7 +480,7 @@ npm ci
 npm test
 ```
 
-独立 MCP 服务无第三方运行时依赖；DSH 适配器使用宿主的 Schemastery 和官方 MCP 桥。开发依赖仅用于测试。**25 套隔离回归**覆盖设置兼容、控制生命周期、取消、UIA、截图、OCR 协议和输入边界。`npm test` 不发送物理输入，不修改已安装的 DSH profile；真实 UIA 测试仅操作专属夹具窗口，日志保存在命令输出的临时目录。
+独立 MCP 服务无第三方运行时依赖；DSH 适配器使用宿主的 Schemastery 和官方 MCP 桥。开发依赖仅用于测试。**27 套隔离回归**覆盖设置兼容、控制生命周期、取消、UIA、截图、OCR 协议和输入边界。`npm test` 不发送物理输入，不修改已安装的 DSH profile；真实 UIA 测试仅操作专属夹具窗口，日志保存在命令输出的临时目录。
 
 `node test/notepad-e2e.mjs` 是单独的真实输入测试，会打开记事本，应在专属测试桌面运行。两种 PowerShell 的验证范围见上方兼容性说明。
 
