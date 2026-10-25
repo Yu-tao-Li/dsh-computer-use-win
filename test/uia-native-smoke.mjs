@@ -37,10 +37,14 @@ try{
   for(let i=0;i<40&&state.checked!==true;i++)await delay(50);assert.equal(state.checked,true);
   const typed=await call('set_value',{...target,elementId:find.results[0].id,value:'background text'});assert.equal(typed.method,'EM_REPLACESEL',JSON.stringify(typed));
   for(let i=0;i<40&&state.text!=='background text';i++)await delay(50);assert.equal(state.text,'background text');
+  assert.notEqual(await front(),state.hwnd,'Background element actions must not bring the fixture forward: '+JSON.stringify(state));
   // type_text (auto) writes at the caret of the edit that has the focus in the
-  // fixture's own thread, with EM_REPLACESEL.
+  // fixture's own thread, with EM_REPLACESEL. The fixture focuses its edit
+  // itself; on a desktop with no recent user input (CI runners) Windows lets
+  // that call activate the fixture, and then there is nothing left to check.
   await writeFile(path.join(artifacts,'native-command.json'),JSON.stringify({id:11,action:'focus-edit'}));
   for(let i=0;i<40&&state.focused!==true;i++)await delay(50);assert.equal(state.focused,true);
+  const frontBeforeTyping=await front();
   const keyed=await call('type_text',{...target,text:' typed'});assert.equal(keyed.method,'background:EM_REPLACESEL',JSON.stringify(keyed));assert.equal(keyed.verified,true);
   for(let i=0;i<40&&state.text!=='background text typed';i++)await delay(50);assert.equal(state.text,'background text typed');
   // Without a window target, observations follow the window DSH gave input to.
@@ -51,7 +55,7 @@ try{
   await writeFile(path.join(artifacts,'native-command.json'),JSON.stringify({id:12,action:'first-line'}));
   for(let i=0;i<40&&state.firstLine===undefined;i++)await delay(50);assert.ok(state.firstLine>0,JSON.stringify(state));
   const noExpand=await client.call('windows_computer_use_invoke',{...target,elementId:button.id,action:'expand'});assert.equal(noExpand.isError,true);assert.match(noExpand.content[0].text,/ELEMENT_ACTION_UNSUPPORTED/);
-  assert.notEqual(await front(),state.hwnd,'Background element actions must not bring the fixture forward');
+  if(frontBeforeTyping!==state.hwnd)assert.notEqual(await front(),state.hwnd,'Background typing and scrolling must not bring the fixture forward: '+JSON.stringify(state));
   await writeFile(path.join(artifacts,'native-command.json'),JSON.stringify({id:1,action:'hang'}));
   for(let i=0;i<30&&!state.hanging;i++)await delay(50);assert.equal(state.hanging,true);
   const start=performance.now();
