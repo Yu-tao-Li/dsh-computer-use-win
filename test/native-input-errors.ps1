@@ -12,7 +12,7 @@ foreach ($name in $names) {
   if ($null -eq $function) { throw "Missing function: $name" }
   # Bind clipboard/keys to unambiguous test types. PowerShell 7 may resolve the
   # real WinForms assembly before a same-name Add-Type fixture on some runners.
-  $body = $function.Extent.Text.Replace('[System.Windows.Forms.Clipboard]', '[WcuTestClipboard]').Replace('[System.Windows.Forms.SendKeys]', '[WcuTestSendKeys]')
+  $body = $function.Extent.Text.Replace('[System.Windows.Forms.Clipboard]', '[WcuTestClipboard]').Replace('[System.Windows.Forms.SendKeys]', '[WcuTestSendKeys]').Replace('System.Windows.Forms.DataObject', 'WcuTestDataObject')
   Invoke-Expression $body
 }
 Add-Type -TypeDefinition @'
@@ -30,10 +30,15 @@ public static class WindowsComputerUseNative {
     Calls++; return flags == MOUSEEVENTF_LEFTDOWN ? PressResult : ReleaseResult;
   }
 }
+  public class WcuTestDataObject {
+    public System.Collections.Generic.Dictionary<string, object> Data = new System.Collections.Generic.Dictionary<string, object>();
+    public void SetData(string format, bool convert, object value) { Data[format] = value; }
+  }
   public static class WcuTestClipboard {
     public static string LastText;
     public static object GetDataObject() { return null; }
     public static void SetText(string value) { LastText = value; }
+    public static void SetDataObject(object data, bool copy) { object text; ((WcuTestDataObject)data).Data.TryGetValue("UnicodeText", out text); LastText = text as string; }
     public static void Clear() {}
   }
   public static class WcuTestSendKeys {

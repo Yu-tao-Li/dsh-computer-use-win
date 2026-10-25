@@ -1,7 +1,7 @@
 // Real Win32 overlay/hook and event objects; key events are simulated inside
 // the test-only helper seam. No keyboard/mouse input is sent to the desktop.
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rename } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -14,8 +14,23 @@ for(const stopShortcut of ['Esc','Ctrl','Ctrl+Ctrl+K','F25','Ctrl+😀',null])as
 
 const root = await mkdtemp(path.join(os.tmpdir(), 'wcu-takeover-native-'));
 const configFile = path.join(root, 'settings.json'), stateFile = path.join(root, 'state.json');
-await writeFile(configFile, JSON.stringify({ ...DEFAULT_SETTINGS, indicatorEnabled: false, indicatorIdleMs: 200 }));
-const control = new TakeoverControl({ configFile, stateFile, testMode: true });
+async function saveConfig(value) {
+  const temporary = configFile + '.test-pending';
+  await writeFile(temporary, JSON.stringify(value));
+  // Unlike production's separate writer process, this fixture shares the event
+  // loop with the watcher. Yield so its pending read can close the Windows handle.
+  for (let attempt = 0; ; attempt++) {
+    try { await rename(temporary, configFile); return; }
+    catch (error) {
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 100) throw error;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+}
+await saveConfig({ ...DEFAULT_SETTINGS, indicatorEnabled: false, indicatorIdleMs: 200 });
+const powershell = process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe';
+// Settings are watched concurrently; publish complete JSON with an atomic rename.
+const control = new TakeoverControl({ powershell, configFile, stateFile, testMode: true });
 control.disabledForTest = false;
 try {
   const initial = await control.command('status');
@@ -35,16 +50,16 @@ try {
   const eventProbe = spawnSync(process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe', ['-NoProfile','-File',fileURLToPath(new URL('./takeover-event.ps1',import.meta.url)),'-CancelEvent',control.eventName,'-ExpectCancelled'],{encoding:'utf8',windowsHide:true,timeout:10000});
   assert.equal(eventProbe.status,0,eventProbe.stderr);
   await control.end();
-  const replacement = new TakeoverControl({ configFile, stateFile });
+  const replacement = new TakeoverControl({ powershell, configFile, stateFile });
   await replacement.begin();
   assert.equal(replacement.paused,false,'A new standalone operation must not require a settings resume');
   await replacement.end();
   await replacement.close();
-  await writeFile(configFile, JSON.stringify({ ...DEFAULT_SETTINGS, indicatorEnabled: false, indicatorIdleMs: 200, resumeToken: 1 }));
+  await saveConfig({ ...DEFAULT_SETTINGS, indicatorEnabled: false, indicatorIdleMs: 200, resumeToken: 1 });
   await control.sync();
   assert.equal(control.paused, false); assert.equal((await control.command('status')).cancelled, false);
   let resumeToken=1;
-  const configure=async stopShortcut=>{await writeFile(configFile,JSON.stringify({...DEFAULT_SETTINGS,indicatorEnabled:false,indicatorIdleMs:200,resumeToken,stopShortcut}));await control.sync();};
+  const configure=async stopShortcut=>{await saveConfig({...DEFAULT_SETTINGS,indicatorEnabled:false,indicatorIdleMs:200,resumeToken,stopShortcut});await control.sync();};
   const resume=async stopShortcut=>{await control.end();resumeToken++;await configure(stopShortcut);assert.equal(control.paused,false);};
   const key=async(vk,extra={})=>control.command('test_key',{vk,...extra});
   await configure('F8');await control.begin();
@@ -65,9 +80,9 @@ try {
   assert.equal((await key(0xA4,{down:false})).consumed,false);assert.equal((await key(0x4B,{down:false})).consumed,true);
   await resume('F9');await control.begin();const helperPid=control.child.pid;
   const cursorConfig=JSON.parse(await readFile(configFile,'utf8'));
-  await writeFile(configFile,JSON.stringify({...cursorConfig,cursorIndicatorEnabled:false}));await control.sync();
+  await saveConfig({...cursorConfig,cursorIndicatorEnabled:false});await control.sync();
   assert.equal((await control.command('status')).pointerVisible,false,'Pointer marker must turn off live');
-  await writeFile(configFile,JSON.stringify({...cursorConfig,cursorIndicatorEnabled:true}));await control.sync();
+  await saveConfig({...cursorConfig,cursorIndicatorEnabled:true});await control.sync();
   assert.equal((await control.command('status')).pointerVisible,true,'Pointer marker must turn on live');
   assert.equal(control.child.pid,helperPid,'Changing the marker must keep the worker alive');
   await configure('F10');assert.equal(control.child.pid,helperPid,'Shortcut changes must not restart active worker');
@@ -80,9 +95,9 @@ try {
   assert.ok(shown.windows >= 1); assert.equal(shown.foreground, initial.foreground, 'Overlay must not activate');
   assert.equal(shown.overlayCaptureExcluded,false);assert.equal(shown.overlayClickThrough,true);
   const visibleConfig=JSON.parse(await readFile(configFile,'utf8'));
-  await writeFile(configFile,JSON.stringify({...visibleConfig,remoteIndicatorVisible:false}));await control.sync();
+  await saveConfig({...visibleConfig,remoteIndicatorVisible:false});await control.sync();
   const excluded=await control.command('status');assert(excluded.overlayCaptureExcluded&&excluded.pointerCaptureExcluded,'Opt-out must exclude both layers live');
-  await writeFile(configFile,JSON.stringify({...visibleConfig,remoteIndicatorVisible:true}));await control.sync();
+  await saveConfig({...visibleConfig,remoteIndicatorVisible:true});await control.sync();
   const visible=await control.command('status');assert(!visible.overlayCaptureExcluded&&!visible.pointerCaptureExcluded);
   const waitDisplays=async expected=>{const deadline=Date.now()+2500;for(;;){const state=await control.command('status');if(JSON.stringify(state.overlayBounds)===JSON.stringify(expected))return state;if(Date.now()>deadline)throw Error('Display topology did not refresh: '+JSON.stringify(state));await new Promise(r=>setTimeout(r,50));}};
   const virtualScreens=[{left:-1280,top:0,width:1280,height:720},{left:0,top:0,width:1920,height:1080}];

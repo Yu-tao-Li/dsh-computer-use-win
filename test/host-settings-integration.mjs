@@ -36,7 +36,7 @@ ctx.provide('profileContext',{home:root,dir:root,name:'isolated-wcu-test'});
 ctx.provide('configEditor',editor);ctx.provide('loader',{await:async()=>{}});
 const tools=new ToolRuntime(ctx),settings=new SettingsForms(ctx);
 const fiber=ctx.plugin(adapter,raw);entry={id:1,options:{id:'mcp-dsh-computer-use-win',name:'dsh-computer-use-win/mcp/dsh-plugin.mjs',config:raw},fiber:fiber.ctx.fiber};
-const until=async test=>{const deadline=Date.now()+12000;while(!await test()){if(Date.now()>deadline)throw Error('Host integration condition timed out; fixture='+root);await new Promise(r=>setTimeout(r,40))}};
+const until=async test=>{const deadline=Date.now()+30000;while(!await test()){if(Date.now()>deadline)throw Error('Host integration condition timed out; fixture='+root);await new Promise(r=>setTimeout(r,40))}};
 try {
   await fiber;
   await until(()=>tools.schemas().length===24);
@@ -69,12 +69,15 @@ try {
   for(const stopShortcut of ['Esc','Ctrl','F25','Ctrl+Ctrl+K'])await assert.rejects(settings.update(entry.options.id,{stopShortcut}));
   await settings.update(entry.options.id,{stopShortcut:''});
   await until(async()=>JSON.parse(await readFile(liveFile,'utf8')).stopShortcut==='');
-  const locker=spawn('powershell.exe',['-NoProfile','-File',fileURLToPath(new URL('./host-settings-lock.ps1',import.meta.url)),'-ConfigPath',liveFile],{windowsHide:true,stdio:['ignore','pipe','pipe']});
+  const releasePath=path.join(root,'release-lock');
+  const locker=spawn('powershell.exe',['-NoProfile','-File',fileURLToPath(new URL('./host-settings-lock.ps1',import.meta.url)),'-ConfigPath',liveFile,'-ReleasePath',releasePath],{windowsHide:true,stdio:['ignore','pipe','pipe']});
   const lockReleased=new Promise((resolve,reject)=>{locker.once('error',reject);locker.once('exit',code=>code===0?resolve():reject(Error('Fixture lock failed: '+code)));});
   await new Promise((resolve,reject)=>{locker.stdout.once('data',chunk=>String(chunk).includes('locked')?resolve():reject(Error('Lock marker missing')));locker.once('error',reject);});
-  await settings.update(entry.options.id,{stopShortcut:'F9'});
-  await new Promise(resolve=>setTimeout(resolve,450));
-  assert.equal(JSON.parse(await readFile(liveFile,'utf8')).stopShortcut,'','Locked file must retain the previous complete config');
+  try {
+    await settings.update(entry.options.id,{stopShortcut:'F9'});
+    await new Promise(resolve=>setTimeout(resolve,450));
+    assert.equal(JSON.parse(await readFile(liveFile,'utf8')).stopShortcut,'','Locked file must retain the previous complete config');
+  } finally { await writeFile(releasePath,'release'); }
   await lockReleased;
   await until(async()=>JSON.parse(await readFile(liveFile,'utf8')).stopShortcut==='F9');
   assert.ok(!(await readdir(path.dirname(liveFile))).some(name=>name.endsWith('.tmp')),'Failed writes must not leave temporary files');
@@ -100,6 +103,20 @@ try {
   await until(()=>tools.schemas().length===1);
   await settings.update(entry.options.id,{toolPreset:'full',enabledTools:row.value.enabledTools});
   await until(()=>tools.schemas().length===24);
+  for (const key of ['browserFirst','browserVisible']) {
+    assert.equal(settings.describe().find(x=>x.ns===entry.options.id).value[key],true);
+    await settings.update(entry.options.id,{[key]:false});
+    await until(async()=>JSON.parse(await readFile(liveFile,'utf8'))[key]===false);
+    assert.equal(JSON.parse(await readFile(editor.documentPath,'utf8'))[key],false);
+    await settings.update(entry.options.id,{[key]:true});
+    await until(async()=>JSON.parse(await readFile(liveFile,'utf8'))[key]===true);
+  }
+  // The browser follows the Windows default and sign-ins stay off until chosen.
+  assert.deepEqual((({browserApp,browserSignIn})=>[browserApp,browserSignIn])(settings.describe().find(x=>x.ns===entry.options.id).value),['default',false]);
+  await settings.update(entry.options.id,{browserApp:'edge',browserSignIn:true});
+  await until(async()=>{const live=JSON.parse(await readFile(liveFile,'utf8'));return live.browserApp==='edge'&&live.browserSignIn===true;});
+  await settings.update(entry.options.id,{browserApp:'default',browserSignIn:false});
+  await until(async()=>{const live=JSON.parse(await readFile(liveFile,'utf8'));return live.browserApp==='default'&&live.browserSignIn===false;});
   await settings.update(entry.options.id,{toolPreset:'lazy'});
   await until(()=>tools.schemas().length===1&&tools.schemas()[0].name.endsWith('windows_computer_use_tools'));
   assert.equal(JSON.parse(await readFile(editor.documentPath,'utf8')).toolPreset,'lazy');

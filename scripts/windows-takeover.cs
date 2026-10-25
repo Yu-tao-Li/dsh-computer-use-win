@@ -7,10 +7,48 @@ using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Threading;
+#if WCU_CORE
+using System.Text.Json;
+#else
 using System.Web.Script.Serialization;
+#endif
 using System.Windows.Forms;
 
 namespace DshTakeover {
+  // PowerShell 7 uses modern .NET, where System.Web's serializer is unavailable.
+  // Keep the command dictionary's primitive/array shapes identical on both runtimes.
+  internal sealed class CommandJson {
+#if WCU_CORE
+    public string Serialize(object value) { return JsonSerializer.Serialize(value); }
+    public T Deserialize<T>(string text) {
+      using (var document = JsonDocument.Parse(text)) return (T)ConvertValue(document.RootElement);
+    }
+    static object ConvertValue(JsonElement value) {
+      switch (value.ValueKind) {
+        case JsonValueKind.Object:
+          var map = new Dictionary<string,object>();
+          foreach (var entry in value.EnumerateObject()) map.Add(entry.Name, ConvertValue(entry.Value));
+          return map;
+        case JsonValueKind.Array:
+          var items = new List<object>();
+          foreach (var entry in value.EnumerateArray()) items.Add(ConvertValue(entry));
+          return items.ToArray();
+        case JsonValueKind.String: return value.GetString();
+        case JsonValueKind.Number:
+          long integer;
+          if (value.TryGetInt64(out integer)) return integer;
+          return value.GetDouble();
+        case JsonValueKind.True: return true;
+        case JsonValueKind.False: return false;
+        default: return null;
+      }
+    }
+#else
+    readonly JavaScriptSerializer inner = new JavaScriptSerializer();
+    public string Serialize(object value) { return inner.Serialize(value); }
+    public T Deserialize<T>(string text) { return inner.Deserialize<T>(text); }
+#endif
+  }
   public static class Host {
     public static void Run(string eventName, bool testMode) {
       try { Native.SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch (EntryPointNotFoundException) { }
@@ -85,7 +123,7 @@ namespace DshTakeover {
     readonly Native.Hook callback;
     readonly IntPtr hook;
     readonly bool testMode;
-    readonly JavaScriptSerializer json = new JavaScriptSerializer();
+    readonly CommandJson json = new CommandJson();
     readonly List<Frame> frames = new List<Frame>();
     PointerFrame pointer;
     Native.Point? testPointerPoint;
@@ -159,7 +197,7 @@ namespace DshTakeover {
       try {
         string line;
         while ((line = Console.ReadLine()) != null) {
-          var command = new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line);
+          var command = new CommandJson().Deserialize<Dictionary<string,object>>(line);
           dispatcher.BeginInvoke((Action)(() => Dispatch(command)));
         }
       } catch (Exception error) { Console.Error.WriteLine(error.Message); }

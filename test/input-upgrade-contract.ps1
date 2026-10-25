@@ -31,14 +31,19 @@ namespace Fixture.Forms {
   public static void SetDataObject(object data,bool copy){Data=(DataObject)data;}
   public static void Clear(){Data=null;}
  }
- public static class SendKeys {public static bool Fail;public static void SendWait(string keys){if(Fail)throw new Exception("PASTE_FAILURE");}}
+ public static class SendKeys {public static bool Fail;public static string[] Pasted;public static void SendWait(string keys){if(keys=="^v"&&Clipboard.Data!=null)Pasted=Clipboard.Data.GetFormats(false);if(Fail)throw new Exception("PASTE_FAILURE");}}
 }
 '@
 function Start-Sleep {param($Milliseconds)}
 function Test-Failsafe {return $true}
 function Has-WindowTarget {param($InputObject) return -not [string]::IsNullOrWhiteSpace((Get-Prop $InputObject 'windowTitle' ''))}
 function Activate-TargetIfRequested {param($InputObject)}
-function Assert-TargetIsForeground {param($InputObject) $script:GuardCalls++}
+function Start-Input {param($InputObject,$Hwnd,[switch]$NoActivate) $script:GuardCalls++; return @{moved=$null}}
+function Complete-Input {param($State,$Result) $script:CompleteCalls++}
+function Get-RootWindowAt {param($X,$Y) return 7}
+function Get-ElementWindow {param($Element) return 0}
+function Assert-PointOnTarget {param($X,$Y,$Target)}
+function Assert-InputAllowed {param($What)}
 function Get-PointFromArgs {param($InputObject) return @{x=1;y=2;elementId=$null}}
 function Get-ObservationWindow {param($InputObject,$Scope) return $null}
 function Capture-Screenshot {param($WindowElement,$MaxWidth) return @{path='fake.png';bounds=@{x=0;y=0};imageScale=1;method='fixture';occludedPossible=$script:Occluded}}
@@ -59,19 +64,23 @@ foreach($fail in @($false,$true)){
   [Fixture.Forms.Clipboard]::Data=$original
   [Fixture.Forms.SendKeys]::Fail=$fail
   if($fail){Expect-Error {Type-Text 'new'} 'PASTE_FAILURE'}else{Type-Text 'new'}
+  # The pasted text is kept out of clipboard history and cloud clipboard.
+  foreach($format in @('UnicodeText','ExcludeClipboardContentFromMonitorProcessing','CanIncludeInClipboardHistory','CanUploadToCloudClipboard')){if([Fixture.Forms.SendKeys]::Pasted -notcontains $format){throw "Pasted data lacks $format"}}
   Assert-Equal ([Fixture.Forms.Clipboard]::Data.GetData('Bitmap',$false)) 'image fixture'
   Assert-Equal ([Fixture.Forms.Clipboard]::Data.GetData('FileDrop',$false)[0]) 'fixture.txt'
   Assert-Equal ([Fixture.Forms.Clipboard]::Data.GetData('Text',$false)) 'old'
 }
 [Fixture.Forms.SendKeys]::Fail=$false
 $inputArgs=[pscustomobject]@{path=@(@{x=10;y=20},@{x=30;y=40})}
-[WindowsComputerUseNative]::Reset(); $script:GuardCalls=0
+[WindowsComputerUseNative]::Reset(); $script:GuardCalls=0; $script:CompleteCalls=0
 [WindowsComputerUseNative]::FailMoveAt=2
 Expect-Error {Invoke-Action 'drag' $inputArgs} 'COMPUTER_USE_INPUT_UNAVAILABLE'
-Assert-Equal ([WindowsComputerUseNative]::Press) 1;Assert-Equal ([WindowsComputerUseNative]::Release) 1;Assert-Equal $script:GuardCalls 1
+# A failed drag still releases the button and gives the pointer and foreground back.
+Assert-Equal ([WindowsComputerUseNative]::Press) 1;Assert-Equal ([WindowsComputerUseNative]::Release) 1;Assert-Equal $script:GuardCalls 1;Assert-Equal $script:CompleteCalls 1
 [WindowsComputerUseNative]::Reset()
 [WindowsComputerUseNative]::ScrollResult=0
 Expect-Error {Invoke-Action 'scroll' ([pscustomobject]@{})} 'Windows rejected scroll input'
+Assert-Equal $script:CompleteCalls 2
 [WindowsComputerUseNative]::Reset()
 Assert-Equal (Invoke-Action 'drag' $inputArgs).points 2
 $script:Occluded=$false

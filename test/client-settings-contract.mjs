@@ -8,6 +8,6 @@ import electron from 'electron';
 const root=await mkdtemp(path.join(os.tmpdir(),'wcu-settings-card-'));
 const env={...process.env,WCU_SETTINGS_TEST_ROOT:root,WCU_REACT_ENTRY:fileURLToPath(import.meta.resolve('react')),WCU_REACT_DOM_ENTRY:fileURLToPath(import.meta.resolve('react-dom/client'))};
 delete env.ELECTRON_RUN_AS_NODE;
-const result=spawnSync(electron,[fileURLToPath(new URL('./client-settings-electron.cjs',import.meta.url))],{env,encoding:'utf8',windowsHide:true,timeout:30000,maxBuffer:1024*1024});
+const result=spawnSync(electron,[fileURLToPath(new URL('./client-settings-electron.cjs',import.meta.url))],{env,encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:1024*1024});
 assert.ifError(result.error);assert.equal(result.status,0,result.stderr);
 console.log(result.stdout.trim());

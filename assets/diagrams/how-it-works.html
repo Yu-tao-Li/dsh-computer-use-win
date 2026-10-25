@@ -22,22 +22,47 @@
   .rows span { color: var(--faint); font-size: 11.5px; }
   .rows svg { flex: none; width: 11px; height: 15px; color: var(--muted); }
   .details { align-self: flex-start; font-size: 11.5px; padding: 1px 8px; border-radius: 6px; border: 1px solid var(--chat-line); color: var(--fg); }
-  /* The screen mirrors the plugin's own indicator preview (mcp/client.js), enlarged. */
-  .screen { position: relative; height: 136px; border-radius: 9px; overflow: hidden; background: linear-gradient(135deg, #1c2333 0%, #27324d 55%, #373f60 100%); box-shadow: inset 0 0 0 1.5px rgba(86,134,254,.9), inset 0 0 22px rgba(86,134,254,.55); }
-  .window { position: absolute; left: 9%; top: 31%; width: 60%; height: 56%; border-radius: 6px; background: rgba(255,255,255,.07); border: .5px solid rgba(255,255,255,.12); }
-  .window::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 13px; border-bottom: .5px solid rgba(255,255,255,.1); }
-  .pill { position: absolute; left: 50%; top: 9px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; height: 23px; padding: 0 9px; border-radius: 999px; background: rgba(20,22,28,.94); border: .5px solid rgba(255,255,255,.16); box-shadow: 0 3px 10px rgba(0,0,0,.35); color: #f5f7fa; font-size: 11px; white-space: nowrap; }
+  /* The two Browser Use switches of the settings page, both on by default. */
+  .settings { display: grid; gap: 6px; padding: 8px 10px 9px; border-radius: 8px; border: 1px solid var(--chat-line); background: var(--chat); }
+  .set-title { font-size: 11px; font-weight: 600; color: var(--muted); }
+  .set-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+  .switch { flex: none; position: relative; width: 26px; height: 15px; border-radius: 8px; background: var(--blue); }
+  .switch::after { content: ''; position: absolute; right: 2px; top: 2px; width: 11px; height: 11px; border-radius: 50%; background: #ffffff; }
+  /* The screens mirror the plugin's own indicators, enlarged: the DSH browser's
+     blue frame, tab badge and page pointer (mcp/browser.mjs) and the takeover
+     preview of mcp/client.js. */
+  .screen { position: relative; flex: none; height: 74px; border-radius: 9px; overflow: hidden; background: linear-gradient(135deg, #1c2333 0%, #27324d 55%, #373f60 100%); }
+  .screen.glow { box-shadow: inset 0 0 0 1.5px rgba(86,134,254,.9), inset 0 0 22px rgba(86,134,254,.55); }
+  .window { position: absolute; left: 9%; top: 46%; width: 58%; height: 44%; border-radius: 6px; background: rgba(255,255,255,.07); border: .5px solid rgba(255,255,255,.12); }
+  .window::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 9px; border-bottom: .5px solid rgba(255,255,255,.1); }
+  .pill { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; height: 23px; padding: 0 9px; border-radius: 999px; background: rgba(20,22,28,.94); border: .5px solid rgba(255,255,255,.16); box-shadow: 0 3px 10px rgba(0,0,0,.35); color: #f5f7fa; font-size: 11px; white-space: nowrap; }
   .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #5686fe; box-shadow: 0 0 0 2px rgba(86,134,254,.28); }
   .pill .sep { width: 1px; height: 10px; background: rgba(255,255,255,.22); }
   .pill kbd { font-size: 9.5px; line-height: 14px; padding: 0 4px; background: rgba(255,255,255,.13); border: .5px solid rgba(255,255,255,.25); color: #f5f7fa; }
   .pill .hint-stop { opacity: .78; }
-  .pointer { position: absolute; left: 62%; top: 56%; width: 0; height: 0; }
-  .pointer::before { content: ''; position: absolute; left: -17px; top: -17px; width: 34px; height: 34px; border-radius: 50%; background: radial-gradient(circle, rgba(86,134,254,.55), rgba(86,134,254,0) 70%); }
+  .pointer { position: absolute; left: 63%; top: 43%; width: 0; height: 0; }
   .pointer svg { position: absolute; left: -1px; top: -1px; width: 14px; height: 21px; overflow: visible; }
+  .pointer.agent::before { content: ''; position: absolute; left: -17px; top: -17px; width: 34px; height: 34px; border-radius: 50%; background: radial-gradient(circle, rgba(86,134,254,.55), rgba(86,134,254,0) 70%); }
   .pointer-tag { position: absolute; left: 13px; top: 18px; padding: 0 7px; border-radius: 2px 7px 7px 7px; background: #3964fe; border: 1px solid rgba(255,255,255,.92); box-shadow: 0 2px 6px rgba(0,0,0,.35); color: #fff; font: 700 10.5px/17px 'Segoe UI', sans-serif; letter-spacing: .02em; }
+  /* Browser Use: the DSH browser works behind the window you are using. */
+  .browser { position: absolute; left: 6%; top: 11%; width: 66%; height: 78%; border-radius: 5px; overflow: hidden; background: #ffffff; box-shadow: 0 3px 10px rgba(0,0,0,.4); }
+  .browser .bar { position: absolute; left: 0; right: 0; top: 0; height: 14px; background: #2c4a8a; }
+  .browser .bar::after { content: ''; position: absolute; left: 20px; right: 7px; top: 3.5px; height: 7px; border-radius: 4px; background: rgba(255,255,255,.26); }
+  .browser .bar svg { position: absolute; left: 6px; top: 2.5px; width: 9px; height: 9px; }
+  .browser i { position: absolute; left: 9px; height: 4px; border-radius: 2px; background: #d0d7de; }
+  .browser i.link { background: #4176e6; }
+  .browser .dsh { position: absolute; width: 0; height: 0; }
+  .browser .dsh svg { position: absolute; left: -1.2px; top: -1px; width: 10px; height: 13.5px; overflow: visible; filter: drop-shadow(0 0 2.2px rgba(86,134,254,.95)) drop-shadow(0 0 5px rgba(86,134,254,.55)); }
+  .yours { position: absolute; left: 57%; top: 7%; width: 37%; height: 47%; border-radius: 5px; background: #2b3346; border: .5px solid rgba(255,255,255,.2); box-shadow: 0 4px 12px rgba(0,0,0,.45); }
+  .yours::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 9px; border-bottom: .5px solid rgba(255,255,255,.12); }
+  .yours i { position: absolute; left: 8px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.2); }
+  .yours .pointer { left: 62%; top: 50%; }
   .gloss { font-size: 11px; color: var(--faint); margin-top: -4px; }
   .gloss:empty { display: none; }
-  .stopline { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .cap { font-size: 12px; color: var(--muted); }
+  .cap b { color: var(--fg); font-weight: 600; }
+  .cap kbd { margin: 0 1px; }
+  .cap + .screen { margin-top: 3px; }
   .loop { margin-top: 30px; }
   .loop-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 9px; }
   .loop-head h3 { font-size: 13.5px; font-weight: 600; }
@@ -62,6 +87,11 @@
     add dsh-computer-use-win</pre>
       <p class="hint" data-t="s1Restart"></p>
       <p class="hint" data-t="s1Settings"></p>
+      <div class="settings">
+        <p class="set-title" data-t="setTitle"></p>
+        <p class="set-row"><span data-t="setFirst"></span><i class="switch"></i></p>
+        <p class="set-row"><span data-t="setVisible"></span><i class="switch"></i></p>
+      </div>
     </article>
     <article class="card step" id="s2" data-solid>
       <header><span class="num">2</span><h3 data-t="s2Title"></h3></header>
@@ -78,13 +108,18 @@
     <article class="card step" id="s3" data-solid>
       <header><span class="num">3</span><h3 data-t="s3Title"></h3></header>
       <div class="screen">
+        <div class="browser"><span class="bar"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4176e6" stroke="#ffffff" stroke-opacity=".7" stroke-width="2"/><path d="M10 6.5v18.2l4.6-4.4 3.2 7 3.2-1.4-3.1-6.8h6.5z" fill="#fff"/></svg></span><i class="link" style="top:22px;width:38%"></i><i style="top:30px;width:72%"></i><i style="top:37px;width:60%"></i><i class="link" style="top:48px;width:32%"></i><i style="top:56px;width:66%"></i><span class="dsh" style="left:calc(9px + 22%);top:49px"><svg viewBox="0 0 12 16" aria-hidden="true"><path d="M1.2 1v11.2l3-2.8 2.1 4.6 2-.9-2.1-4.5h4z" fill="#4176e6" stroke="#fff" stroke-width="1.1" stroke-linejoin="round"/></svg></span></div>
+        <div class="yours"><i style="top:15px;width:58%"></i><i style="top:21px;width:40%"></i><span class="pointer"><svg viewBox="0 0 12 18" aria-hidden="true"><path d="M1 1v13.5l3.4-3.1 2.2 5 2.2-1-2.1-4.8H11L1 1Z" fill="#fff" stroke="#111" stroke-width="1" stroke-linejoin="round"/></svg></span></div>
+      </div>
+      <p class="gloss" data-t="s3WebGloss"></p>
+      <p class="cap" data-t="s3Web"></p>
+      <div class="screen glow">
         <div class="window"></div>
         <div class="pill"><span class="dot"></span><span>DSH 正在控制电脑</span><span class="sep"></span><kbd>Esc</kbd><span class="hint-stop">停止</span></div>
-        <span class="pointer"><svg viewBox="0 0 12 18" aria-hidden="true"><path d="M1 1v13.5l3.4-3.1 2.2 5 2.2-1-2.1-4.8H11L1 1Z" fill="#fff" stroke="#111" stroke-width="1" stroke-linejoin="round"/></svg><span class="pointer-tag">DSH</span></span>
+        <span class="pointer agent"><svg viewBox="0 0 12 18" aria-hidden="true"><path d="M1 1v13.5l3.4-3.1 2.2 5 2.2-1-2.1-4.8H11L1 1Z" fill="#fff" stroke="#111" stroke-width="1" stroke-linejoin="round"/></svg><span class="pointer-tag">DSH</span></span>
       </div>
-      <p class="gloss" data-t="s3Gloss"></p>
-      <p class="hint" data-t="s3Hint"></p>
-      <p class="stopline"><kbd>Esc</kbd><span data-t="s3Stop"></span></p>
+      <p class="gloss" data-t="s3DeskGloss"></p>
+      <p class="cap" data-t="s3Desk"></p>
     </article>
   </section>
   <section class="loop">
@@ -105,20 +140,22 @@ Diagram.render({
     s1Title: '安装一次',
     s1Open: '托盘图标右键 →“打开 DSH 终端”，运行：',
     s1Restart: '再右键托盘图标 →“退出”，然后重新打开 DSH Desktop。',
-    s1Settings: '在“设置 → 电脑操控”里可以选工具、调提示，不改也能直接用。',
+    s1Settings: '“设置 → 电脑操控”里可以调浏览器操控、接管提示和工具。不改也能直接用：',
+    setTitle: '浏览器操控（Browser Use）', setFirst: '网页优先用浏览器操控', setVisible: '显示浏览器窗口',
     s2Title: '在对话里布置任务',
     s2Ask: '在浏览器的新窗口中搜索<span class="nb">“晴天”</span>，确认结果页出现<span class="nb">“周杰伦”</span>。',
     rowType: '输入了文本', rowKey: '发送了按键', rowCheck: '检查了操作结果', done: '已完成',
     details: '查看步骤和截图',
     s3Title: '看它操作，随时叫停',
-    s3Gloss: '',
-    s3Hint: '屏幕边缘发亮，提示条和鼠标旁的 DSH 标签说明 agent 正在操作。',
-    s3Stop: '立即停止这一轮',
+    s3WebGloss: '',
+    s3Web: '<b>网页</b>在蓝框的 DSH 浏览器里后台操作：标签页图标和小箭头标出它点哪里，不动你的鼠标；点 DSH 的停止按钮停止。',
+    s3DeskGloss: '',
+    s3Desk: '<b>桌面程序</b>用到鼠标键盘时，屏幕边缘发亮，鼠标旁有 DSH 标签；按 <kbd>Esc</kbd> 立即停止这一轮。',
     loopTitle: 'agent 每一步都这样做',
-    loopNote: '对话里的每行记录，就是其中一步',
-    n1: '观察', n1d: '看有哪些窗口、控件和文字',
+    loopNote: '网页和桌面程序用同一套工具，对话里每行记录就是其中一步',
+    n1: '观察', n1d: '看有哪些窗口、网页、控件和文字',
     n2: '定位', n2d: '找到要操作的目标',
-    n3: '执行', n3d: '直接操作控件，不行再用鼠标键盘',
+    n3: '执行', n3d: '在后台操作控件或网页元素，不行再借用鼠标键盘',
     n4: '确认', n4d: '等预期的变化出现',
     loopBack: '还没达到目标，就再观察一次'
   },
@@ -126,20 +163,22 @@ Diagram.render({
     s1Title: 'Install once',
     s1Open: 'Right-click the tray icon → Open DSH Terminal, then run:',
     s1Restart: 'Right-click the tray icon → Quit, then open DSH Desktop again.',
-    s1Settings: 'Settings → Computer Use lets you pick tools and indicators. The defaults work as they are.',
+    s1Settings: 'Settings → Computer Use covers Browser Use, indicators and tools. The defaults work as they are:',
+    setTitle: 'Browser Use', setFirst: 'Prefer Browser Use for web pages', setVisible: 'Show the browser window',
     s2Title: 'Ask in a conversation',
     s2Ask: 'Open a browser, search for <span class="nb">“Windows UI Automation”</span> and confirm that results appear.',
     rowType: 'Entered text', rowKey: 'Sent a key press', rowCheck: 'Checked the result', done: 'Completed',
     details: 'Steps and screenshots',
     s3Title: 'Watch it work, stop anytime',
-    s3Gloss: '“DSH is controlling the computer · Esc to stop”',
-    s3Hint: 'The glowing edge, the status bar and the DSH tag show that the agent is at work.',
-    s3Stop: 'stops this turn at once',
+    s3WebGloss: '',
+    s3Web: '<b>Web pages</b>: the blue-framed DSH browser works in the background; its tab icon and a small arrow show where it clicks, and your pointer stays put. DSH’s stop button stops it.',
+    s3DeskGloss: '“DSH is controlling the computer · Esc to stop”',
+    s3Desk: '<b>Desktop apps</b>, once the mouse or keyboard is used: the screen edge glows and a DSH tag follows the pointer. <kbd>Esc</kbd> stops this turn at once.',
     loopTitle: 'Every step the agent takes',
-    loopNote: 'Each row in the conversation is one of these steps',
-    n1: 'Look', n1d: 'See which windows, controls and text are there',
+    loopNote: 'Pages and desktop apps share these tools; each row in the conversation is one step',
+    n1: 'Look', n1d: 'See which windows, pages, controls and text are there',
     n2: 'Locate', n2d: 'Find the target',
-    n3: 'Act', n3d: 'Use the control directly, or the mouse and keyboard',
+    n3: 'Act', n3d: 'Use the control or page element in the background, or borrow the mouse and keyboard',
     n4: 'Confirm', n4d: 'Wait until the expected change appears',
     loopBack: 'Not there yet? Look again'
   }

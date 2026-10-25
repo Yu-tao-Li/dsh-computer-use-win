@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { TakeoverControl, STOPPED } from './takeover.mjs';
-import { TOOL_NAMES, normalizeEnabledTools } from './settings.mjs';
-import { BrowserLane, isBrowserElementId } from './browser.mjs';
+import { TOOL_NAMES, normalizeEnabledTools, browserRoutingInstructions } from './settings.mjs';
+import { BrowserLane, isBrowserCall, isQuietCall, BACKGROUND_FIRST } from './browser.mjs';
 
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -65,22 +65,22 @@ const wikiResources = [
 const windowTargetProperties = {
   windowTitle: {
     type: "string",
-    description: "Substring of a top-level window title to target instead of the foreground window."
+    description: "Substring of a top-level window title to target instead of the active window."
   },
   processId: {
     type: "integer",
     minimum: 1,
-    description: "Process id of a top-level window to target instead of the foreground window."
+    description: "Process id of a top-level window to target instead of the active window."
   },
   nativeWindowHandle: {
     type: "integer",
     minimum: 1,
-    description: "Native HWND of a top-level window to target instead of the foreground window."
+    description: "Native HWND of a top-level window to target instead of the active window."
   },
   activate: {
     type: "boolean",
     default: false,
-    description: "Bring the targeted window to the foreground before acting. Honoured by: drag, type_text and keypress (input needs the foreground); element-target resolution in snapshot/accessibility_tree/find/element_info/focus/invoke/set_value; the x/y coordinate paths of click/double_click/move/scroll and element_info; window capture in ocr; move_window (activates the moved window). Ignored by close_window (WM_CLOSE works in the background); activate_window always activates regardless of this flag."
+    description: "Bring the target to the foreground and keep it there. Otherwise reads and element actions leave the foreground alone, and real input borrows it: the target comes forward for the action, then the foreground and pointer go back, unless a menu, list or dialog it opened is showing. Without a window target, the active window is the one this operation series last gave input to, else the foreground window. close_window ignores this; activate_window always activates."
   }
 };
 
@@ -147,7 +147,7 @@ const tools = [
         captureWindow: {
           type: "boolean",
           default: false,
-          description: "Capture only the target (or foreground) window instead of the whole virtual screen. An unobstructed foreground window uses a checked screen crop; other windows use PrintWindow/WGC, then a screen fallback flagged occludedPossible. Much smaller image."
+          description: "Capture only the target (or active) window instead of the whole virtual screen; an active window behind another window is captured this way anyway. An unobstructed foreground window uses a checked screen crop; other windows use PrintWindow/WGC, then a screen fallback flagged occludedPossible. Much smaller image."
         },
         maxWidth: {
           type: "integer",
@@ -231,7 +231,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_click",
-    description: "Click a screen coordinate or the center of a UI Automation element. dispatch:'auto' (default) = element clicks use the UIA Invoke/Toggle pattern in the background (no foreground steal), coordinate clicks use foreground SendInput; dispatch:'background' = PostMessage into the target window's queue (no foreground steal, delivery unverified — Chromium/Electron/UWP may drop it, then retry with foreground); dispatch:'foreground' = always foreground SendInput. Raw-coordinate clicks home-correct if the target window moved since it was observed (reported as 'homed'). A browser-lane page element id (t1a2b:57) is clicked inside the page itself, in the background; a covered element is refused and the covering element is named.",
+    description: "Click a screen coordinate or the center of a UI Automation element. dispatch:'auto' (default) = a left click on an element runs in the background (BM_CLICK on a Win32 button, else its UIA Invoke/Toggle pattern); a coordinate click is real SendInput input: the target comes forward for it, a point that shows another window is refused (POINT_COVERED), then the pointer and the foreground go back; dispatch:'background' = PostMessage into the target window's queue (no foreground steal, delivery unverified — Chromium/Electron/UWP may drop it, then retry with foreground); dispatch:'foreground' = always foreground SendInput. Raw-coordinate clicks home-correct if the target window moved since it was observed (reported as 'homed'). A browser-lane page element id (t1a2b:57) is clicked inside the page itself, in the background; a covered element is refused and the covering element is named.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -306,7 +306,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_scroll",
-    description: "Scroll at a screen coordinate or element center. Positive deltaY scrolls down. With browserTab (the page) or a browser-lane page element id, scroll inside the page in the background.",
+    description: "Scroll at a screen coordinate or an element. An element scrolls in the background first (WM_VSCROLL on a Win32 scroll bar, else the UIA ScrollPattern of the element or of its nearest scrolling ancestor) and reports scrollPercent before/after; otherwise the wheel is real input at the point, with the foreground and pointer given back. Positive deltaY scrolls down; 120 is one wheel notch. With browserTab (the page) or a browser-lane page element id, scroll inside the page in the background.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -324,7 +324,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_type_text",
-    description: "Type text into the focused control. method:'clipboard' (default) uses clipboard paste (reliable for CJK, restores the clipboard) and needs the target in the foreground; method:'sendinput' sends each character as a KEYEVENTF_UNICODE SendInput event (no clipboard, needs the target in the foreground, best for ASCII/short text); method:'background' posts WM_CHAR straight into the target window's message queue — no clipboard, no foreground steal, delivery unverified. With a window target the result includes verifyValue (the text control's value after typing, truncated to 200 chars). With browserTab, insert the text at that page's focused field inside the browser: no clipboard, pointer or foreground change.",
+    description: "Type text into the focused control of the target (or active) window. method:'auto' (default) = a focused Win32 edit takes the text in the background (EM_REPLACESEL at the caret: no clipboard, keyboard or foreground; text with line breaks is pasted instead); any other control gets a clipboard paste with the window borrowed for it (reliable for CJK; the clipboard is restored and the paste kept out of clipboard history); method:'clipboard' always pastes; method:'sendinput' sends each character as a KEYEVENTF_UNICODE SendInput event (no clipboard, best for ASCII/short text); method:'background' posts WM_CHAR straight into the target window's message queue — no clipboard, no foreground steal, delivery unverified. After a background write, or with a window target and focusMode:'main', the result includes verifyValue (the text control's value after typing, truncated to 200 chars). With browserTab, insert the text at that page's focused field inside the browser: no clipboard, pointer or foreground change.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -333,7 +333,7 @@ const tools = [
         ...windowTargetProperties,
         ...browserTabProperty,
         text: { type: "string" },
-        method: { type: "string", enum: ["clipboard", "sendinput", "background"], default: "clipboard" },
+        method: { type: "string", enum: ["auto", "clipboard", "sendinput", "background"], default: "auto" },
         focusMode: { type: "string", enum: ["preserve", "main"], default: "preserve", description: "preserve keeps the focus established by a previous click, essential for OCR/visual targets. main explicitly tries to focus the window's largest Edit/Document control." },
         restoreClipboard: { type: "boolean", default: true }
       }
@@ -341,7 +341,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_keypress",
-    description: "Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. dispatch:'background' supports only a single printable character (posted as WM_CHAR into the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendKeys). With browserTab, the key goes to that page inside the browser: Alt+Left/Alt+Right/F5 go back/forward/reload, Enter/Escape answer an open JavaScript dialog, and browser-window shortcuts such as Ctrl+L or Ctrl+T are refused.",
+    description: "Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. The keys go to the target (or active) window, which comes forward for them and then gives the foreground back, unless a menu or dialog they opened is showing. dispatch:'background' supports only a single printable character (posted as WM_CHAR into the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendKeys). With browserTab, the key goes to that page inside the browser: Alt+Left/Alt+Right/F5 go back/forward/reload, Enter/Escape answer an open JavaScript dialog, and browser-window shortcuts such as Ctrl+L or Ctrl+T are refused.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -374,7 +374,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_invoke",
-    description: "Invoke a UI Automation element through Invoke, Toggle, SelectionItem, or ExpandCollapse patterns, with click fallback. A browser-lane page element id is clicked inside the page.",
+    description: "Invoke a UI Automation element in the background: BM_CLICK on a Win32 button, else its Invoke, Toggle, SelectionItem, or ExpandCollapse pattern, with click fallback. action expands, collapses or scrolls the element into view instead. A browser-lane page element id is clicked inside the page.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -383,13 +383,14 @@ const tools = [
         elementId: { type: "string" },
         ...windowTargetProperties,
         ...treeViewProperties,
+        action: { type: "string", enum: ["default", "expand", "collapse", "scroll_into_view"], default: "default", description: "default = the first of Invoke, Toggle, SelectionItem, ExpandCollapse the element has. expand/collapse = ExpandCollapse only; an element already in that state is left as is. scroll_into_view = ScrollItem: its container scrolls until the element shows, with no pointer. UI Automation elements only." },
         fallbackClick: { type: "boolean", default: true }
       }
     }
   },
   {
     name: "windows_computer_use_set_value",
-    description: "Set a UI Automation ValuePattern value, or focus and type as fallback. Browser lane: a page element id fills that field, selects that option or sets that checkbox inside the page; <tab>:address (for example t1a2b:address) navigates the tab to a web address; new-tab opens the address in a background tab of a separate agent browser without sign-ins, and <browser>:new-tab opens it in that connected browser.",
+    description: "Set a value in the background (EM_REPLACESEL on a Win32 edit, else the UI Automation ValuePattern), or focus and type as fallback. Browser lane: a page element id fills that field, selects that option or sets that checkbox inside the page; <tab>:address (for example t1a2b:address) navigates the tab to a web address; new-tab opens the address in a background tab, in a separate DSH browser without sign-ins or, when the user turned on sign-ins, in their own browser; <browser>:new-tab opens it in that connected browser.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -510,16 +511,16 @@ const conciseDescriptions = {
   list_windows: 'List native top-level windows, HWND/PID and responsiveness; browserLane lists browser tabs for browserTab.',
   find: 'Find UIA controls; empty sparse searches add OCR. OCR hits use SCREEN coordinates, not element IDs.',
   element_info: 'Inspect a UIA element ID, page element ID or physical SCREEN point.',
-  click: 'Click elementId or physical SCREEN x/y. auto prefers UIA for elements; background delivery is unverified. Page ids (t1a2b:57) act inside the page.',
+  click: 'Click elementId (in the background) or physical SCREEN x/y (real click; the foreground and pointer go back). background delivery is unverified. Page ids (t1a2b:57) act inside the page.',
   double_click: 'Double-click elementId or physical SCREEN x/y; background delivery is unverified.',
   move: 'Move pointer to elementId or physical SCREEN x/y.',
-  drag: 'Drag a path of physical SCREEN coordinates; target must be foreground.',
-  scroll: 'Scroll at elementId or physical SCREEN x/y; positive deltaY scrolls down.',
-  type_text: 'Type into current focus; clipboard supports CJK and restores prior contents. Background delivery is unverified.',
+  drag: 'Drag a path of physical SCREEN coordinates; the target comes forward for it.',
+  scroll: 'Scroll elementId (in the background first) or physical SCREEN x/y; positive deltaY scrolls down.',
+  type_text: 'Type into the focus. auto: Win32 edits in the background, else a paste with the window borrowed; restores the clipboard. background (WM_CHAR) is unverified.',
   keypress: 'Send key/chord, e.g. ["ctrl","a"]. Windows key blocked; background supports one printable character only.',
   focus: 'Focus a UIA element.',
-  invoke: 'Invoke/toggle/select/expand a UIA element, with optional click fallback.',
-  set_value: 'Set a UIA value, with optional focus/type fallback. Page ids fill fields; <tab>:address navigates; new-tab opens a URL in a background tab.',
+  invoke: 'Invoke/toggle/select/expand a UIA element in the background, with optional click fallback; action expands, collapses or scrolls it into view.',
+  set_value: 'Set a value in the background, with optional focus/type fallback. Page ids fill fields; <tab>:address navigates; new-tab opens a URL in a background tab.',
   activate_window: 'Activate target window; activation cannot be suppressed.',
   wait: 'Pause briefly before observing again.',
   ocr: 'Read visible text without UIA. Literal query; inspect lines on misses. Click word.x/y in SCREEN coordinates.',
@@ -530,7 +531,7 @@ const conciseDescriptions = {
 };
 const concisePropertyDescriptions = {
   windowTitle: 'Target title substring.', processId: 'Target PID.', nativeWindowHandle: 'Target HWND.',
-  activate: 'Request foreground; close_window ignores this.',
+  activate: 'Bring forward and keep in front.',
   viewMode: 'UIA view; runtime IDs bypass view filtering.',
   includeOffscreen: 'Include offscreen UIA nodes.', detailLevel: 'compact omits heavy/empty node metadata.',
   treeTimeoutMs: 'Budget between UIA calls; a provider call may overrun.',
@@ -574,7 +575,9 @@ const capabilityInstructions = 'Windows Computer Use reads and operates real Win
 // enabling one is refused, and saying otherwise contradicts the user's setting.
 const managementOnly = initialNames.length === 1 && initialNames[0] === discoveryName
   && [...allowedTools].some(name => name !== discoveryName);
-const serverInstructions = managementOnly ? capabilityInstructions : undefined;
+const routingInstructions = browserRoutingInstructions(process.env.WCU_SETTINGS_JSON ? JSON.parse(process.env.WCU_SETTINGS_JSON) : {}, [...allowedTools].map(name => name.slice(prefix.length)));
+const serverInstructions = [...allowedTools].some(name => name !== discoveryName)
+  ? (managementOnly ? capabilityInstructions + '\n\n' : '') + routingInstructions : undefined;
 const discoveryTool = {
   name: discoveryName,
   // Desktop tools carry their own capability names. A management-only startup
@@ -686,14 +689,18 @@ const takeover = new TakeoverControl({ powershell, config: process.env.WCU_SETTI
 } });
 
 const browserLane = new BrowserLane();
+// A tab DSH works in keeps its badge until the host ends the operation series.
+browserLane.seriesActive = () => takeover.seriesHeld && !takeover.paused;
 
-// Browser-lane calls share the takeover lease with backend actions, so the
-// indicator, Esc and the stopped state cover them the same way.
+// Browser-lane calls work inside the page in the background; the user keeps
+// the pointer, the keyboard and the foreground. They take a quiet lease: it
+// honours a stopped series and holds settings reconnects, but shows no screen
+// indicator and arms no global Esc. DSH's stop button cancels them.
 async function runBrowser(action, args, request) {
   let acquired = false;
   const prepared = takeoverSetup.then(async () => {
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
-    await takeover.begin(); acquired = true;
+    await takeover.begin({ quiet: true }); acquired = true;
   });
   takeoverSetup = prepared.catch(() => {});
   try {
@@ -707,7 +714,7 @@ async function runBrowser(action, args, request) {
     }
     content[0].text = safeJson(result.meta);
     return { content, ...(result.meta.ok === false ? { isError: true } : {}) };
-  } finally { if (acquired) await takeover.end(); }
+  } finally { if (acquired) await takeover.end({ quiet: true }); }
 }
 
 function dispatchNextBackend(proc) {
@@ -843,21 +850,37 @@ function killBackend(error = new Error("Backend process stopped"), proc = backen
 }
 
 let takeoverSetup = Promise.resolve();
+// Element actions start in the background, with no indicator and no Esc stop.
+// One that needs the real pointer or keyboard says so before sending any
+// (WCU_NEEDS_INPUT) and runs again with both.
 async function runBackend(action, args = {}, timeoutMs = 30000, request) {
+  const quiet = isQuietCall(action, args);
+  const mayUpgrade = BACKGROUND_FIRST.has(action) || (action === 'click' && (args.dispatch ?? 'auto') === 'auto' && args.elementId != null);
+  if (quiet && mayUpgrade) {
+    try { return await runBackendOnce(action, { ...args, _wcuQuiet: true }, timeoutMs, request, true); }
+    catch (error) { if (!/^WCU_NEEDS_INPUT\b/.test(error.message) || request?.cancelled) throw error; }
+    return runBackendOnce(action, args, timeoutMs, request, false);
+  }
+  return runBackendOnce(action, { ...args, _wcuQuiet: quiet }, timeoutMs, request, quiet);
+}
+
+async function runBackendOnce(action, args, timeoutMs, request, quiet) {
   const changesDesktop = action!=='health';
   let acquired = false;
   // Reserve preparation in arrival order. Otherwise awaiting the native
   // indicator can let a later observation reach the backend before its input.
   const prepared = takeoverSetup.then(async () => {
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
-    if (changesDesktop) { await takeover.begin(); acquired = true; }
+    if (changesDesktop) { await takeover.begin({ quiet }); acquired = true; }
   });
   takeoverSetup = prepared.catch(() => {});
   try {
     await prepared;
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
-    return await dispatchBackend(action, { ...args, _wcuCornerFailsafe: false, _wcuTakeoverPid: takeover.child?.pid ?? 0 }, timeoutMs, request);
-  } finally { if (acquired) await takeover.end(); }
+    // The series lets typing without a window target follow the window the
+    // series last gave input to, after the user got the foreground back.
+    return await dispatchBackend(action, { ...args, _wcuCornerFailsafe: false, _wcuTakeoverPid: takeover.child?.pid ?? 0, _wcuSeries: takeover.seriesKey ?? null }, timeoutMs, request);
+  } finally { if (acquired) await takeover.end({ quiet }); }
 }
 
 function dispatchBackend(action, args = {}, timeoutMs = 30000, request) {
@@ -889,7 +912,7 @@ async function callTool(name, args, request) {
   if (!definition) throw new Error(`Unknown tool: ${name}`);
   args = validateArguments(definition.inputSchema, args);
   const actionName = name.replace("windows_computer_use_", "");
-  const browser = args.browserTab !== undefined || isBrowserElementId(args.elementId);
+  const browser = isBrowserCall(args);
   // A browser tab alone names the page, which is what scroll needs.
   if (["click", "double_click", "move", "scroll", "element_info"].includes(actionName) && !args.elementId && (args.x === undefined || args.y === undefined) && !(browser && actionName === "scroll")) throw new Error("INVALID_ARGUMENTS: provide elementId or both x and y");
   if (actionName === "wait_for") {
@@ -901,7 +924,7 @@ async function callTool(name, args, request) {
   switch (name) {
     case "windows_computer_use_health": {
       const result = await runBackend("health", args, undefined, request);
-      result.browserLane = browserLane.health();
+      result.browserLane = await browserLane.health();
       return { content: [{ type: "text", text: safeJson(result) }] };
     }
     case "windows_computer_use_snapshot": {
@@ -1235,7 +1258,8 @@ let stdinEnded = false;
 
 function maybeExitAfterStdinEnd() {
   if (stdinEnded && pendingRequests === 0) {
-    takeover.close().finally(() => process.exit(0));
+    // A kept-profile DSH browser closes itself first, saving its last cookies.
+    Promise.allSettled([takeover.close(), browserLane.shutdown()]).finally(() => process.exit(0));
   }
 }
 

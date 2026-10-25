@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_SETTINGS, normalizeSettings } from './settings.mjs';
@@ -45,8 +44,8 @@ export class TakeoverControl {
   constructor({ powershell = 'powershell.exe', onStop = () => {}, configFile = process.env.WCU_CONFIG_FILE,
     stateFile = process.env.WCU_STATE_FILE, activityFile=process.env.WCU_ACTIVITY_FILE,testMode = false, config = {} } = {}) {
     this.powershell = powershell; this.onStop = onStop; this.configFile = configFile; this.stateFile = stateFile;
-    this.testMode = testMode; this.config = normalizeSettings(config); this.active = 0; this.paused = false;
-    this.activityFile=activityFile;this.seriesHeld=false;this.seriesKey=null;this.stoppedSeriesKey=null;this.blockedSeries=new Map();
+    this.testMode = testMode; this.config = normalizeSettings(config); this.active = 0; this.shown = 0; this.paused = false;
+    this.activityFile=activityFile;this.seriesHeld=false;this.seriesIndicator=false;this.seriesKey=null;this.stoppedSeriesKey=null;this.blockedSeries=new Map();
     this.eventName = `Local\\DSH-WCU-${randomUUID()}`; this.waiters = new Map(); this.nextId = 0;
     this.resumeToken = this.config.resumeToken; this.previewToken = this.config.previewToken; this.pauseMessage = STOPPED;
     this.disabledForTest = process.env.NODE_ENV === 'test' && process.env.WCU_TEST_NO_TAKEOVER === '1';
@@ -81,32 +80,38 @@ export class TakeoverControl {
   }
   async syncInner() {
     if (this.closed) return;
-    if (this.configFile) this.config = normalizeSettings(JSON.parse(await readFile(this.configFile, 'utf8')));
+    // One synchronous read each: an async read keeps the file open across
+    // event-loop turns, and a writer in the same process (tests run the host's
+    // publisher here) retrying its replace synchronously would wait it out.
+    if (this.configFile) this.config = normalizeSettings(JSON.parse(readFileSync(this.configFile, 'utf8')));
     if(this.activityFile){
-      const activity=JSON.parse(await readFile(this.activityFile,'utf8'));
+      const activity=JSON.parse(readFileSync(this.activityFile,'utf8'));
       const held=activity.active===true&&Number.isFinite(activity.expiresAt)&&activity.expiresAt>Date.now();
       const key=held?JSON.stringify([activity.sessionId,activity.turn]):this.seriesKey;
+      // A series of browser-lane calls is held for turn tracking but shows
+      // nothing; the indicator starts with the series' first desktop call.
+      const indicator=held&&activity.indicator!==false;
       if(held&&!this.blockedSeries.has(key)&&this.paused&&this.active===0)await this.resumeOperation();
-      if(held!==this.seriesHeld||key!==this.seriesKey){
+      if(held!==this.seriesHeld||key!==this.seriesKey||indicator!==this.seriesIndicator){
         this.seriesKey=key;
-        this.seriesHeld=held;
+        this.seriesHeld=held;this.seriesIndicator=indicator;
         if(!this.paused&&!this.blockedSeries.has(key)&&!this.disabledForTest){
-          if(held)await this.command('begin',this.config);
-          else if(this.active===0&&this.child)await this.command('end');
+          if(indicator)await this.command('begin',this.config);
+          else if(this.shown===0&&this.child)await this.command('end');
         }
         this.persist();
       }
     }
     const presentation=JSON.stringify([this.config.indicatorEnabled,this.config.cursorIndicatorEnabled,this.config.remoteIndicatorVisible,this.config.indicatorText,this.config.indicatorPosition,this.config.indicatorIdleMs,this.config.stopShortcut]);
     if (this.child && this.sentPresentation!==presentation) {
-      await this.command((this.seriesHeld||this.active>0)&&!this.paused&&!this.blockedSeries.has(this.seriesKey)?'begin':'configure', this.config);
+      await this.command(((this.seriesHeld&&this.seriesIndicator)||this.shown>0)&&!this.paused&&!this.blockedSeries.has(this.seriesKey)?'begin':'configure', this.config);
       this.sentPresentation=presentation;
       this.sentShortcut = this.config.stopShortcut; this.sentCursorIndicator = this.config.cursorIndicatorEnabled;this.sentRemoteVisible=this.config.remoteIndicatorVisible;
     }
     if (this.config.resumeToken !== this.resumeToken && this.active === 0) {
       if (this.child) await this.command('resume');
       this.resumeToken = this.config.resumeToken; this.paused = false;this.stoppedSeriesKey=null;this.blockedSeries.clear(); this.persist('resumed-by-user');
-      if(this.seriesHeld&&!this.disabledForTest)await this.command('begin',this.config);
+      if(this.seriesHeld&&this.seriesIndicator&&!this.disabledForTest)await this.command('begin',this.config);
     }
     if (this.config.previewToken !== this.previewToken) {
       this.previewToken = this.config.previewToken;
@@ -114,22 +119,24 @@ export class TakeoverControl {
       if (!this.paused && this.active === 0 && !this.disabledForTest) await this.command('preview', this.config);
     }
   }
-  async begin() {
+  // A quiet lease (browser-lane calls) checks the stopped state and counts as an
+  // action in progress, but neither shows the indicator nor arms the stop keys.
+  async begin({ quiet = false } = {}) {
     await this.sync();
     if(this.seriesHeld&&this.blockedSeries.has(this.seriesKey))throw new Error(this.blockedSeries.get(this.seriesKey));
     if(this.paused&&!this.activityFile&&this.active===0)await this.resumeOperation();
     if (this.paused) throw new Error(this.pauseMessage);
     if (this.closed) throw new Error('COMPUTER_USE_STOPPING');
-    if (!this.disabledForTest&&(!this.seriesHeld||!this.child)) {
+    if (!quiet&&!this.disabledForTest&&(!this.seriesHeld||!this.seriesIndicator||!this.child)) {
       try { await this.command('begin', this.config); this.sentShortcut = this.config.stopShortcut; this.sentCursorIndicator = this.config.cursorIndicatorEnabled;this.sentRemoteVisible=this.config.remoteIndicatorVisible; }
       catch (error) { this.fail(error); throw error; }
     }
     if (this.paused) throw new Error(this.pauseMessage);
-    this.active++; this.persist();
+    this.active++; if (!quiet) this.shown++; this.persist();
   }
-  async end() {
-    this.active = Math.max(0, this.active - 1); this.persist(this.paused ? 'stopped-by-user' : null);
-    if (this.active === 0 && !this.seriesHeld&&this.child && !this.paused) await this.command('end').catch(error => this.fail(error));
+  async end({ quiet = false } = {}) {
+    this.active = Math.max(0, this.active - 1); if (!quiet) this.shown = Math.max(0, this.shown - 1); this.persist(this.paused ? 'stopped-by-user' : null);
+    if (!quiet && this.shown === 0 && !(this.seriesHeld&&this.seriesIndicator)&&this.child && !this.paused) await this.command('end').catch(error => this.fail(error));
   }
   fail(error) {
     if (this.closed || this.paused) return;

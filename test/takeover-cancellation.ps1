@@ -26,6 +26,12 @@ function Has-WindowTarget {param($InputObject) return $false}
 function Assert-TargetIsForeground {param($InputObject)}
 function Activate-TargetIfRequested {param($InputObject)}
 function Resolve-Element {param($ElementId,$InputObject) [WindowsComputerUseNative]::Cancelled=$true;return (New-Object FixtureElement)}
+# Borrowing and giving back the foreground has its own contract test
+# (less-takeover-contract.ps1); here it is a no-op.
+function Get-RootWindowAt {param([int]$X,[int]$Y) return [int64]0}
+function Get-ElementWindow {param($Element) return [int64]0}
+function Start-Input {param($InputObject,[long]$Hwnd,[switch]$NoActivate) return @{moved=$null}}
+function Complete-Input {param($State,$Result)}
 function Expect-Cancel {param([scriptblock]$Body) $caught=$false;try{& $Body}catch{$caught=$true;if($_.Exception.Message -notmatch 'COMPUTER_USE_STOPPED_BY_USER'){throw}};if(-not $caught){throw 'Expected cooperative cancellation'}}
 [WindowsComputerUseNative]::Reset();[WindowsComputerUseNative]::CancelAfterMove=3
 Expect-Cancel {Invoke-Action drag ([pscustomobject]@{path=@(@{x=1;y=1},@{x=2;y=2},@{x=3;y=3},@{x=4;y=4})})}

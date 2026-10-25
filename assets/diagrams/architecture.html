@@ -20,14 +20,16 @@
   .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .presets span { font-size: 11px; line-height: 19px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--own-line); color: var(--own-code); white-space: nowrap; }
   .wide { grid-column: 1 / -1; }
-  .caps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+  /* Two lanes leave the server: Browser Use on the left, Computer Use on the
+     right, under the takeover helper whose Esc interrupts its input. */
+  .lanes { display: grid; grid-template-columns: 340px 1fr; column-gap: 28px; row-gap: 46px; margin-top: 14px; }
+  .caps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
   .cap { border-radius: 8px; padding: 6px 10px 7px; border: 1px solid var(--own-line); background: var(--chip); }
   .cap b { display: block; font-size: 12px; font-weight: 600; }
   .cap span { display: block; font-size: 11px; color: var(--muted); }
-  .desk { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 11px 14px; }
-  .desk h3 { margin-right: 4px; }
-  .apps { display: flex; gap: 6px; flex-wrap: wrap; }
+  .apps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .apps span { font-size: 11.5px; line-height: 22px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ext-line); background: var(--chip); color: var(--muted); }
+  .alt { margin-top: 8px; padding-top: 7px; border-top: 1px dashed var(--ext-line); color: var(--muted); }
   .legend { margin-top: 14px; }
 </style>
 </head>
@@ -68,28 +70,41 @@
       <h3><span data-t="server"></span><span class="tag" data-t="serverTag"></span></h3>
       <span class="file mono">mcp/server.mjs</span>
       <p class="presets"><span data-t="presetAll"></span><span data-t="presetLite"></span><span data-t="presetLazy"></span><span data-t="presetCustom"></span></p>
-      <ul><li data-t="server1"></li><li data-t="server2"></li><li data-t="server3"></li></ul>
+      <ul><li data-t="server1"></li><li data-t="server2"></li><li data-t="server3"></li><li data-t="server4"></li></ul>
     </article>
     <article class="card own" id="helper" data-solid>
       <h3><span data-t="helper"></span><span class="tag" data-t="helperTag"></span></h3>
       <span class="file mono">scripts/windows-takeover.ps1</span>
       <ul><li data-t="helper1"></li><li data-t="helper2"></li><li data-t="helper3"></li></ul>
     </article>
-    <article class="card own wide" id="backend" data-solid>
-      <h3><span data-t="backend"></span><span class="tag" data-t="backendTag"></span></h3>
-      <span class="file mono">scripts/windows-uia.ps1</span>
-      <div class="caps">
-        <div class="cap" data-fit><b>UI Automation</b><span data-t="capUia"></span></div>
-        <div class="cap" data-fit><b data-t="capInput"></b><span data-t="capInput1"></span></div>
-        <div class="cap" data-fit><b data-t="capWindow"></b><span data-t="capWindow1"></span></div>
-        <div class="cap" data-fit><b data-t="capCapture"></b><span data-t="capCapture1"></span></div>
-        <div class="cap" data-fit><b data-t="capOcr"></b><span>Windows OCR</span></div>
-      </div>
-    </article>
-    <article class="card desk wide" id="desktop" data-solid>
-      <h3 data-t="desktop"></h3>
-      <p class="apps"><span data-t="app1"></span><span data-t="app2"></span><span data-t="app3"></span><span data-t="app4"></span><span data-t="app5"></span></p>
-    </article>
+    <div class="lanes wide">
+      <article class="card own" id="lane" data-solid>
+        <h3><span data-t="lane"></span><span class="tag" data-t="laneTag"></span></h3>
+        <span class="file mono">mcp/browser.mjs</span>
+        <ul><li data-t="lane1"></li><li data-t="lane2"></li><li data-t="lane3"></li><li data-t="lane4"></li><li data-t="lane5"></li></ul>
+      </article>
+      <article class="card own" id="backend" data-solid>
+        <h3><span data-t="backend"></span><span class="tag" data-t="backendTag"></span></h3>
+        <span class="file mono">scripts/windows-uia.ps1</span>
+        <div class="caps">
+          <div class="cap" data-fit><b>UI Automation</b><span data-t="capUia"></span></div>
+          <div class="cap" data-fit><b data-t="capInput"></b><span data-t="capInput1"></span></div>
+          <div class="cap" data-fit><b data-t="capWindow"></b><span data-t="capWindow1"></span></div>
+          <div class="cap" data-fit><b data-t="capCapture"></b><span data-t="capCapture1"></span></div>
+          <div class="cap" data-fit><b data-t="capOcr"></b><span>Windows OCR</span></div>
+        </div>
+      </article>
+      <article class="card" id="browser" data-solid>
+        <h3 data-t="browser"></h3>
+        <ul><li data-t="browser1"></li><li data-t="browser2"></li><li data-t="browser3"></li></ul>
+        <p class="alt" data-t="browserOwn"></p>
+      </article>
+      <article class="card" id="desktop" data-solid>
+        <h3 data-t="desktop"></h3>
+        <p class="apps"><span data-t="app1"></span><span data-t="app2"></span><span data-t="app3"></span><span data-t="app4"></span><span data-t="app5"></span></p>
+        <ul><li data-t="desktop1"></li><li data-t="desktop2"></li></ul>
+      </article>
+    </div>
   </div>
   <p class="legend"><span><i class="own"></i><span data-t="legendOwn"></span></span><span><i></i><span data-t="legendExt"></span></span></p>
 </main>
@@ -105,14 +120,22 @@ Diagram.render({
     bridge: '官方 MCP 桥', bridge1: '启动服务进程，转发工具调用',
     server: 'MCP 服务', serverTag: 'Node 进程',
     presetAll: '全部 24', presetLite: '精简 10', presetLazy: '懒启动 1', presetCustom: '自定义',
-    server1: '检查参数，请求排队、一次执行一个', server2: '输入类操作标为“已发送”，再用 wait_for 确认效果', server3: '超时或按 Esc 时取消请求',
+    server1: '检查参数，再把每次调用交给对应的通道', server2: '输入类操作标为“已发送”，再用 wait_for 确认效果', server3: '超时、按 Esc 或点 DSH 的停止按钮时取消请求', server4: '打开“网页优先用浏览器操控”时，提示 agent 网页先走浏览器通道',
     helper: '接管助手', helperTag: '独立进程',
-    helper1: '屏幕边缘光晕、提示条，<br>鼠标旁的 DSH 标签', helper2: '监听 Esc 和你设的快捷键', helper3: '后端正忙时也能收到 Esc',
-    backend: 'PowerShell 后端', backendTag: '常驻运行，省去每次启动',
+    helper1: '用到键鼠时显示边缘光晕、<br>提示条和鼠标旁的 DSH 标签', helper2: '监听 Esc 和你设的快捷键', helper3: '后端正忙时也能收到 Esc',
+    lane: '浏览器通道', laneTag: '在 MCP 服务里运行',
+    lane1: '把网页读成大纲，每个元素带 ID', lane2: '在网页里点击、填写和选择，后台标签页也行', lane3: '新开标签页、打开网址、截取网页', lane4: '不动鼠标、不用剪贴板、不抢前台', lane5: '不显示接管提示，用 DSH 的停止按钮停止',
+    backend: 'PowerShell 后端', backendTag: '常驻运行，一次执行一个请求',
     capUia: '读控件、按按钮、填内容', capInput: '鼠标和键盘', capInput1: '点击、按键、粘贴文字', capWindow: '窗口', capWindow1: '列出、切换、移动、关闭', capCapture: '截图', capCapture1: '整个屏幕或单个窗口', capOcr: '文字识别',
+    browser: 'DSH 专用浏览器', browser1: '用你的默认浏览器，也可选 Edge 或 Chrome', browser2: '默认用临时空白配置，不带你的登录和 Cookie', browser3: '默认显示窗口但不抢前台，也可以只在后台运行',
+    browserOwn: '打开“记住登录”后保留一个配置：<br>在它窗口里登录过的网站一直保持登录',
     desktop: '你的 Windows 桌面', app1: '记事本', app2: '浏览器', app3: '计算器', app4: '网易云音乐', app5: '其他程序',
-    legendOwn: '本插件的代码', legendExt: 'DSH 或 Windows 提供',
-    wireMcp: '<b>MCP</b> · stdio　调用 ↓　结果和截图 ↑', wireJson: '一行一个 JSON 请求，按顺序执行', wireApi: 'Windows 接口：读界面、发输入、截图',
+    desktop1: '优先在后台操作控件；要用鼠标键盘时只借用前台，用完还给你', desktop2: '浏览器的工具栏，以及浏览器通道读不到的网页内容（如 iframe），<br>也由电脑操控在这里完成',
+    legendOwn: '本插件的代码', legendExt: 'DSH、Windows 或浏览器提供',
+    wireMcp: '<b>MCP</b> · stdio　调用 ↓　结果和截图 ↑',
+    wireBrowser: '<b>浏览器操控</b>（Browser Use）<br>带 browserTab 或网页元素 ID 的调用',
+    wireDesktop: '<b>电脑操控</b>（Computer Use）<br>其余调用，一行一个 JSON 请求',
+    wireCdp: 'Chrome DevTools 协议（CDP）<br>读网页，在网页里操作', wireApi: 'Windows 接口：读界面、发输入、截图',
     wireShow: '显示提示', wireStop: '停止', wireCancel: '中断输入', wireEsc: '直接监听键盘<br>不经过 DSH'
   },
   en: {
@@ -124,14 +147,22 @@ Diagram.render({
     bridge: 'Official MCP bridge', bridge1: 'starts the server, forwards tool calls',
     server: 'MCP server', serverTag: 'Node process',
     presetAll: 'All 24', presetLite: 'Lite 10', presetLazy: 'Lazy 1', presetCustom: 'Custom',
-    server1: 'Checks arguments, queues requests and runs one at a time', server2: 'Marks input as “sent”, and wait_for confirms the effect', server3: 'Cancels a request on timeout or Esc',
+    server1: 'Checks arguments, then hands each call to its lane', server2: 'Marks input as “sent”, and wait_for confirms the effect', server3: 'Cancels a request on timeout, Esc or DSH’s stop button', server4: 'With Prefer Browser Use on, tells the agent to try the browser lane first for web pages',
     helper: 'Takeover helper', helperTag: 'own process',
-    helper1: 'Edge glow, status bar,<br>pointer tag', helper2: 'Listens for Esc or<br>your own shortcut', helper3: 'Hears Esc even while<br>the backend is busy',
-    backend: 'PowerShell backend', backendTag: 'stays running, so calls skip startup',
+    helper1: 'On mouse or keyboard input:<br>edge glow, status bar, DSH tag', helper2: 'Listens for Esc or<br>your own shortcut', helper3: 'Hears Esc even while<br>the backend is busy',
+    lane: 'Browser lane', laneTag: 'inside the MCP server',
+    lane1: 'Reads a page as an outline; every element has an ID', lane2: 'Clicks, fills in and selects inside the page, background tabs too', lane3: 'Opens tabs and addresses, captures the page', lane4: 'No pointer, no clipboard, no window brought to the front', lane5: 'No takeover indicator; DSH’s stop button stops it',
+    backend: 'PowerShell backend', backendTag: 'stays running, one request at a time',
     capUia: 'read, press, fill in', capInput: 'Mouse and keys', capInput1: 'click, press keys, paste', capWindow: 'Windows', capWindow1: 'list, switch, move, close', capCapture: 'Capture', capCapture1: 'screen or one window', capOcr: 'Text recognition',
+    browser: 'The DSH browser', browser1: 'Your default browser, or Edge or Chrome', browser2: 'By default a fresh temporary profile: none of your sign-ins or cookies', browser3: 'A visible window that does not take the foreground, or background only',
+    browserOwn: 'With Keep sign-ins on, it keeps one profile:<br>sites you sign in to there stay signed in',
     desktop: 'Your Windows desktop', app1: 'Notepad', app2: 'Browser', app3: 'Calculator', app4: 'NetEase Cloud Music', app5: 'Other apps',
-    legendOwn: 'This plugin’s code', legendExt: 'Provided by DSH or Windows',
-    wireMcp: '<b>MCP</b> over stdio: calls ↓  results and screenshots ↑', wireJson: 'One JSON request per line, run in order', wireApi: 'Windows APIs: read the UI, send input, capture',
+    desktop1: 'Uses controls in the background where it can; mouse and keyboard input only borrows the foreground', desktop2: 'Computer Use also handles the browser toolbar and page content the browser lane cannot read, such as iframes',
+    legendOwn: 'This plugin’s code', legendExt: 'Provided by DSH, Windows or the browser',
+    wireMcp: '<b>MCP</b> over stdio: calls ↓  results and screenshots ↑',
+    wireBrowser: '<b>Browser Use</b><br>calls with browserTab or a page element ID',
+    wireDesktop: '<b>Computer Use</b><br>all other calls, one JSON request per line',
+    wireCdp: 'Chrome DevTools Protocol (CDP):<br>read and act inside the page', wireApi: 'Windows APIs: read the UI, send input, capture',
     wireShow: 'show', wireStop: 'stop', wireCancel: 'interrupt input', wireEsc: 'Watches the keyboard<br>itself, not through DSH'
   }
 }, ({ box, wire, label, centerOn, text }) => {
@@ -139,9 +170,12 @@ Diagram.render({
   centerOn('#setChip', box('#client').cx);
   centerOn('#escChip', box('#helper').cx);
   const agent = box('#agent'), adapter = box('#adapter'), client = box('#client'), bridge = box('#bridge');
-  const server = box('#server'), helper = box('#helper'), backend = box('#backend'), desktop = box('#desktop');
+  const server = box('#server'), helper = box('#helper'), lane = box('#lane'), backend = box('#backend');
+  const browser = box('#browser'), desktop = box('#desktop');
   const ask = box('#askChip'), set = box('#setChip'), esc = box('#escChip');
-  const x = agent.cx;
+  // x runs from the agent down through the browser lane; desk is the
+  // Computer Use lane, inside both the server and the backend.
+  const x = agent.cx, desk = backend.left + 46;
   wire([[x, ask.bottom], [x, agent.top]]);
   wire([[client.cx, set.bottom], [client.cx, client.top]]);
   wire([[esc.cx, esc.bottom], [esc.cx, helper.top]], { stop: true });
@@ -150,10 +184,14 @@ Diagram.render({
   wire([[adapter.cx, adapter.bottom], [adapter.cx, bridge.top]]);
   wire([[x, bridge.bottom], [x, server.top]], { heads: 'both' });
   label(text.wireMcp, x + 12, (bridge.bottom + server.top) / 2 + 3);
-  wire([[x, server.bottom], [x, backend.top]], { heads: 'both' });
-  label(text.wireJson, x + 12, (server.bottom + backend.top) / 2);
-  wire([[x, backend.bottom], [x, desktop.top]], { heads: 'both' });
-  label(text.wireApi, x + 12, (backend.bottom + desktop.top) / 2);
+  wire([[x, server.bottom], [x, lane.top]], { heads: 'both' });
+  label(text.wireBrowser, x + 12, (server.bottom + lane.top) / 2);
+  wire([[desk, server.bottom], [desk, backend.top]], { heads: 'both' });
+  label(text.wireDesktop, desk + 12, (server.bottom + backend.top) / 2);
+  wire([[x, lane.bottom], [x, browser.top]], { heads: 'both' });
+  label(text.wireCdp, x + 12, (lane.bottom + browser.top) / 2);
+  wire([[desk, backend.bottom], [desk, desktop.top]], { heads: 'both' });
+  label(text.wireApi, desk + 12, (backend.bottom + desktop.top) / 2);
   const mid = (server.right + helper.left) / 2, show = helper.top + 34, stop = helper.top + 74;
   wire([[server.right, show], [helper.left, show]]);
   label(text.wireShow, mid, show - 11, { anchor: 'center' });

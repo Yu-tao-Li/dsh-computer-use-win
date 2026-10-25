@@ -6,7 +6,11 @@ app.whenReady().then(async()=>{
   const win=new BrowserWindow({show:false,width:940,height:1280,webPreferences:{nodeIntegration:true,contextIsolation:false,sandbox:false,offscreen:true,backgroundThrottling:false}});
   let paintedImage,paintCount=0;win.webContents.on('paint',(_e,_d,image)=>{paintedImage=image;paintCount++});
   const evaluate=code=>win.webContents.executeJavaScript(code);
-  const until=async code=>{const end=Date.now()+7000;const settled='!!(('+code+') && (!window.snapshot?.writable || document.querySelector("[data-recording=true]") || !document.getElementById("wincu-page-remoteIndicatorVisible")?.disabled))';while(!await evaluate(settled)){if(Date.now()>end)throw Error('Settings condition timed out: '+code);await new Promise(r=>setTimeout(r,20))}};
+  // The saved pictures are for people, not assertions: an offscreen capture can
+  // fail with UnknownVizError now and then, which must not fail the suite.
+  const savePicture=async name=>{for(let attempt=1;;attempt++){try{fs.writeFileSync(path.join(process.env.WCU_SETTINGS_TEST_ROOT,name),(await win.webContents.capturePage()).toPNG());return;}catch(error){if(attempt===3){console.error('capturePage failed for '+name+': '+error.message);return;}await new Promise(r=>setTimeout(r,200));}}};
+  // A save waits for the host's reconnect; 7 s timed out once while other suites ran.
+  const until=async code=>{const end=Date.now()+15000;const settled='!!(('+code+') && (!window.snapshot?.writable || document.querySelector("[data-recording=true]") || !document.getElementById("wincu-page-remoteIndicatorVisible")?.disabled))';while(!await evaluate(settled)){if(Date.now()>end)throw Error('Settings condition timed out: '+code);await new Promise(r=>setTimeout(r,20))}};
   await win.loadURL('data:text/html,<html><meta charset="utf-8"><body style="font-family:Arial;padding:24px;background:white;color:%23203040"><div id="app"></div></body></html>');
   await evaluate(
     'const nativeRequire=window.require;'+
@@ -37,6 +41,50 @@ app.whenReady().then(async()=>{
   await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('10 / 24')");
   await evaluate("window.clickButton('放弃更改')");
   await until("document.getElementById('wincu-page-toolPreset-full').checked");
+  assert.equal(await evaluate("document.getElementById('wincu-page-browserFirst').checked"),true);
+  assert.equal(await evaluate("document.getElementById('wincu-page-browserVisible').checked"),true);
+  await evaluate("document.getElementById('wincu-page-browserVisible').click()");
+  await until("!document.getElementById('wincu-page-browserVisible').checked");
+  await evaluate("window.clickButton('放弃更改')");
+  await until("document.getElementById('wincu-page-browserVisible').checked");
+  // Browser choice follows the Windows default and sign-ins are not kept.
+  // Turning them on shows, before anything is saved, how to sign in, where
+  // the sign-ins stay and the risks: nothing to set up in the user's browser.
+  // The copy button is not clicked: it writes the real clipboard.
+  const chooseApp=value=>evaluate("(()=>{const s=document.getElementById('wincu-page-browserApp');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(s,"+JSON.stringify(value)+");s.dispatchEvent(new Event('change',{bubbles:true}))})()");
+  const readNotice=()=>evaluate("(()=>{const n=document.querySelector('[data-wincu-signin-notice]'),r=n.getBoundingClientRect(),s=document.querySelector('[data-wincu-settings]').getBoundingClientRect();return {text:n.textContent,codes:[...n.querySelectorAll('code')].map(c=>c.textContent),copies:n.querySelectorAll('.wcu-address button').length,edge:!!n.querySelector('[data-wincu-signin-edge]'),hidden:!!n.querySelector('[data-wincu-signin-hidden]'),inside:r.left>=s.left-1&&r.right<=s.right+1,fits:n.scrollWidth<=n.clientWidth+1}})()");
+  assert.equal(await evaluate("document.getElementById('wincu-page-browserApp').value"),'default');
+  assert.equal(await evaluate("document.getElementById('wincu-page-browserSignIn').checked"),false);
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-signin-notice]')"),false,'No sign-in notice while sign-ins are not kept');
+  await evaluate("document.getElementById('wincu-page-browserSignIn').click()");
+  await until("!!document.querySelector('[data-wincu-signin-notice]')");
+  let notice=await readNotice();
+  assert.deepEqual(notice.codes,['%LOCALAPPDATA%\\dsh-computer-use-win\\agent-browser'],'The notice shows the folder that keeps the sign-ins');
+  assert.equal(notice.copies,1);
+  assert.ok(notice.text.includes('登录一次')&&notice.text.includes('不代填')&&notice.text.includes('以你的身份')&&notice.text.includes('调试端口'),'The notice says how to sign in and names the risks');
+  assert.ok(!/inspect|remote-debugging|允许提示/.test(notice.text.replace('也不会弹出允许提示','')),'Nothing to set up in the user\'s own browser');
+  assert.ok(notice.edge&&!notice.hidden,'The default browser may be Edge, so its Microsoft account sign-in is named');
+  assert.ok(notice.inside&&notice.fits,'The notice fits the page');
+  await chooseApp('chrome');
+  await until("!document.querySelector('[data-wincu-signin-edge]')");
+  await evaluate("document.getElementById('wincu-page-browserVisible').click()");
+  await until("!!document.querySelector('[data-wincu-signin-hidden]')");
+  await evaluate("document.getElementById('wincu-page-browserVisible').click()");
+  await until("!document.querySelector('[data-wincu-signin-hidden]')");
+  await chooseApp('edge');
+  await until("!!document.querySelector('[data-wincu-signin-edge]')");
+  await evaluate("window.clickButton('保存更改')");
+  await until("window.snapshot.value.browserSignIn===true&&window.snapshot.value.browserApp==='edge'");
+  await evaluate("window.renderPage('en')");
+  await until("(document.querySelector('[data-wincu-signin-notice]')?.textContent||'').includes('Risks')");
+  await evaluate("window.renderPage('zh')");
+  await evaluate("document.getElementById('wincu-page-browserSignIn').click()");
+  await until("!document.querySelector('[data-wincu-signin-notice]')");
+  await chooseApp('default');
+  await evaluate("window.clickButton('保存更改')");
+  await until("window.snapshot.value.browserSignIn===false&&window.snapshot.value.browserApp==='default'");
+  // The draft checks below count host writes from here on.
+  await evaluate('window.writes=[]');
   const community=await evaluate("({links:[...document.querySelectorAll('[data-wincu-community] a')].map(a=>({href:a.href,target:a.target,rel:a.rel})),text:document.querySelector('[data-wincu-settings]').textContent,first:document.querySelector('.wcu-header').firstElementChild.hasAttribute('data-wincu-community')})");
   assert.deepEqual(community.links.map(a=>a.href),['https://github.com/Yu-tao-Li/dsh-computer-use-win','https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new']);
   assert.ok(community.first&&community.links.every(a=>a.target==='_blank'&&a.rel.includes('noopener')));
@@ -46,6 +94,27 @@ app.whenReady().then(async()=>{
   assert.ok(community.text.includes('自定义停止方式')&&!community.text.includes('急停')&&!community.text.includes('用鼠标停止操作'));
   assert.equal(await evaluate('window.namespace'),process.env.WCU_SETTINGS_TEST_API==='legacy'?'windows-computer-use':'mcp-dsh-computer-use-win');
   assert.equal(await evaluate('window.page.entry.id'),'computer-use');
+  // Hints open above their icon: a pointer of any size hangs below and to the
+  // right of its tip. The pointer can rest on an open hint, a click keeps it
+  // open after the pointer leaves, and Escape closes it.
+  const hint=()=>evaluate("(()=>{const icon=document.querySelector('[data-wincu-browser-policy] .wcu-item .wcu-info'),tip=icon.querySelector('.wcu-tip'),a=icon.getBoundingClientRect(),b=tip.getBoundingClientRect();return {x:Math.round(a.x+a.width/2),y:Math.round(a.y+a.height/2),open:tip.matches(':popover-open'),above:b.bottom<=a.top,tipX:Math.round(b.x+b.width/2),tipY:Math.round(b.y+b.height/2),switchOn:document.getElementById('wincu-page-browserFirst').checked}})()");
+  const pointer=(type,{x,y})=>win.webContents.sendInputEvent({type,x,y,button:'left',clickCount:1});
+  const icon=await hint();
+  pointer('mouseMove',icon);
+  await until("document.querySelector('[data-wincu-browser-policy] .wcu-item .wcu-tip').matches(':popover-open')");
+  const opened=await hint();
+  assert.ok(opened.above,'A hint must open above its icon, where the pointer does not cover it');
+  pointer('mouseMove',{x:opened.tipX,y:opened.tipY});
+  await new Promise(r=>setTimeout(r,500));
+  assert.equal((await hint()).open,true,'The pointer can rest on an open hint');
+  pointer('mouseMove',{x:2,y:2});
+  await until("!document.querySelector('[data-wincu-browser-policy] .wcu-item .wcu-tip').matches(':popover-open')");
+  pointer('mouseDown',icon);pointer('mouseUp',icon);pointer('mouseMove',{x:2,y:2});
+  await new Promise(r=>setTimeout(r,500));
+  const pinned=await hint();
+  assert.ok(pinned.open&&pinned.switchOn,'A clicked hint stays open and leaves its switch alone');
+  win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
+  await until("!document.querySelector('[data-wincu-browser-policy] .wcu-item .wcu-tip').matches(':popover-open')");
   assert.equal(await evaluate('window.page.entry.label()'),'电脑操控');
   assert.equal(await evaluate('window.dictionary.en.nav'),'Computer Use','The English tab keeps its name');
   // DSH draws a gear for plugin sections. Only this section's nav button swaps it for the mouse.
@@ -142,7 +211,7 @@ app.whenReady().then(async()=>{
   await evaluate("window.renderPage('zh')");
   await until("document.getElementById('wincu-page-toolPreset-lazy').checked&&document.body.textContent.includes('懒启动')");
   await new Promise(resolve=>setTimeout(resolve,100));
-  fs.writeFileSync(path.join(process.env.WCU_SETTINGS_TEST_ROOT,'settings-lazy.png'),(await win.webContents.capturePage()).toPNG());
+  await savePicture('settings-lazy.png');
   await evaluate("document.getElementById('wincu-page-toolPreset-custom').click()");
   await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('23 / 24')");
   assert.equal(await evaluate("document.getElementById('wincu-page-tool-drag').checked"),false);
@@ -150,7 +219,7 @@ app.whenReady().then(async()=>{
   await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('24 / 24')");
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.toolPreset==='custom'&&window.snapshot.value.enabledTools.length===24");
-  await evaluate("window.clickButton('预览接管提示')");
+  await evaluate("window.clickButton('预览')");
   await until("window.snapshot.value.previewToken>0");
   assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='恢复桌面控制')"),false,'A new task resumes automatically; no settings resume button is needed');
   await evaluate("window.key=init=>window.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,cancelable:true,...init}));window.clickButton('录制快捷键')");
@@ -205,6 +274,15 @@ app.whenReady().then(async()=>{
   await until("window.snapshot.value.communityNote==='full'&&document.querySelector('[data-wincu-community]').textContent.includes('您来许愿，我来实现')");
   await evaluate("window.clickButton('放弃更改')");
   await until("document.getElementById('wincu-page-indicatorEnabled').checked");
+  await evaluate("document.getElementById('wincu-page-browserFirst').click()");
+  await until("!document.getElementById('wincu-page-browserFirst').checked");
+  await evaluate("document.getElementById('wincu-page-browserVisible').click()");
+  await until("!document.getElementById('wincu-page-browserVisible').checked");
+  await evaluate("window.clickButton('保存更改')");
+  await until("window.snapshot.value.browserFirst===false&&window.snapshot.value.browserVisible===false");
+  await evaluate("window.renderPage('en')");
+  await until("!document.getElementById('wincu-page-browserVisible').checked");
+  await evaluate("window.renderPage('zh')");
   // Theme tokens are the values read from the real Desktop host. Check both
   // foreground/background contrast and native control theme propagation.
   await evaluate("document.querySelectorAll('[data-wincu-settings] details').forEach(d=>d.open=true)");
@@ -269,12 +347,12 @@ app.whenReady().then(async()=>{
   const paintDeadline=Date.now()+5000;
   while(paintCount<=before){if(Date.now()>paintDeadline)throw Error('Settings page did not repaint');await new Promise(r=>setTimeout(r,20))}
   assert.ok(paintedImage&&!paintedImage.isEmpty());
-  fs.writeFileSync(path.join(process.env.WCU_SETTINGS_TEST_ROOT,'settings-page.png'),(await win.webContents.capturePage()).toPNG());
+  await savePicture('settings-page.png');
   await evaluate("window.renderPage('en')");
   await until("document.body.textContent.includes('Press Esc to stop')");
   await evaluate("window.snapshot={...window.snapshot,writable:false};for(const fn of window.listeners)fn()");
   await until("document.getElementById('wincu-page-tool-click').disabled");
-  const report={passed:true,api:process.env.WCU_SETTINGS_TEST_API||'modern',navigation:'settings.section/computer-use',compatibilityCard:true,atomicSave:true,draft:true,discard:true,errorPreservesValue:true,readOnly:true,preview:true,noSettingsResumeButton:true,allToolsDefault:true,outerPresets:['lite','full','lazy','custom'],lazySaveAndRemount:true,customSelectionPreserved:true,toolsCollapsedByDefault:true,individualAndGroupSelection:true,emptySelection:true,restoreAllTools:true,shortcutRecording:true,shortcutCombination:true,shortcutCancelAndBlurCleanup:true,shortcutClearDraft:true,restoreDefaultEsc:true,externalLinkButtons:true,cursorIndicatorIndependent:true,cursorIndicatorSaved:true,remoteVisibilityDefault:true,remoteVisibilitySaveAndRestore:true,themes:['light','dark'],nativeControlContrast:contrasts,languages:['zh','en'],physicalInputSent:false,screenshot:path.join(process.env.WCU_SETTINGS_TEST_ROOT,'settings-page.png')};
+  const report={passed:true,hintAbovePointer:true,api:process.env.WCU_SETTINGS_TEST_API||'modern',navigation:'settings.section/computer-use',compatibilityCard:true,atomicSave:true,draft:true,discard:true,errorPreservesValue:true,readOnly:true,preview:true,noSettingsResumeButton:true,allToolsDefault:true,outerPresets:['lite','full','lazy','custom'],lazySaveAndRemount:true,customSelectionPreserved:true,toolsCollapsedByDefault:true,individualAndGroupSelection:true,emptySelection:true,restoreAllTools:true,shortcutRecording:true,shortcutCombination:true,shortcutCancelAndBlurCleanup:true,shortcutClearDraft:true,restoreDefaultEsc:true,externalLinkButtons:true,cursorIndicatorIndependent:true,cursorIndicatorSaved:true,remoteVisibilityDefault:true,remoteVisibilitySaveAndRestore:true,themes:['light','dark'],nativeControlContrast:contrasts,languages:['zh','en'],physicalInputSent:false,screenshot:path.join(process.env.WCU_SETTINGS_TEST_ROOT,'settings-page.png')};
   fs.writeFileSync(path.join(process.env.WCU_SETTINGS_TEST_ROOT,'results.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report));win.destroy();app.quit();
 }).catch(error=>{console.error(error.stack);app.exit(1)});

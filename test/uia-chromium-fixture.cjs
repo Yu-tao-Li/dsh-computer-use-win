@@ -11,7 +11,8 @@ if(!sparse&&!lazy)app.commandLine.appendSwitch('force-renderer-accessibility');
 let window;
 app.on('child-process-gone',(_event,details)=>console.error('child-process-gone',JSON.stringify(details)));
 app.whenReady().then(async () => {
-  window = new BrowserWindow({width:900,height:650,show:false,frame:!sparse,webPreferences:{sandbox:true}});
+  const position = process.env.WCU_TEST_WINDOW_X ? {x:Number(process.env.WCU_TEST_WINDOW_X),y:80} : {};
+  window = new BrowserWindow({...position,width:900,height:650,show:false,frame:!sparse,webPreferences:{sandbox:true}});
   window.webContents.on('render-process-gone',(_event,details)=>console.error('render-process-gone',JSON.stringify(details)));
   const file=path.join(path.dirname(process.argv[2]),'fixture.html');
   const canvas=`<!doctype html><title>WCU isolated sparse canvas fixture</title><canvas id="panel" width="800" height="500" tabindex="0"></canvas><script>

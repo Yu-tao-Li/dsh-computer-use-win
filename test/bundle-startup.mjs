@@ -48,6 +48,9 @@ async function evaluateBundle(profile, patchPath) {
   assert.equal(entries[0].name, 'dsh-computer-use-win');
   const require = createRequire(new URL('package.json', baseUrl));
   const adapter = await import(pathToFileURL(require.resolve(entries[0].name)).href);
+  assert.equal(adapter.bridgeConfig({}).toolCallTimeoutMs, 90000);
+  assert.equal(adapter.bridgeConfig(adapter.Config({})).toolCallTimeoutMs, 90000);
+  assert.equal(adapter.bridgeConfig({toolCallTimeoutMs:12345}).toolCallTimeoutMs, 12345, 'Preserve explicit host timeout');
   return {
     config: adapter.bridgeConfig(adapter.Config(entries[0].config)),
     runtime: { execPath: process.execPath, node: process.versions.node, electron: process.versions.electron || null }

@@ -27,7 +27,7 @@ for(const [preset,selection] of [['lazy',TOOL_NAMES],['lazy',null],['lite',enabl
     // checklist that allows no desktop tool is excluded: enabling one is refused,
     // so claiming the capability would contradict the user's setting.
     const managementOnly=initial.length===1&&initial[0].name===prefix+'tools'&&allowed.length>0;
-    assert.equal(Object.hasOwn(init,'instructions'),managementOnly,'Instructions appear exactly when the startup set is management only and a desktop tool is allowed');
+    assert.equal(Object.hasOwn(init,'instructions'),allowed.length>0,'Routing guidance accompanies every usable preset, including lazy startup');
     if(managementOnly){
       assert.match(init.instructions,/screenshots/i);
       assert.match(init.instructions,/OCR/i);
