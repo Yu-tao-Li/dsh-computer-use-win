@@ -14,9 +14,9 @@
 
 ## 简体中文
 
-这个插件让 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里的 agent 看到并操作你电脑上真实的 Windows 程序：找到按钮和输入框，读出屏幕上的文字，点击、打字，切换和管理窗口。
+这个插件让 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里的 agent 看到并操作你电脑上真实的 Windows 程序和网页：找到按钮和输入框，读出屏幕上的文字，点击、打字，切换和管理窗口。网页默认在 DSH 自己的浏览器里后台完成，不动你的鼠标，也不抢前台。
 
-**23 个桌面工具 + 1 个管理入口 · 操作时有明显提示 · 按 Esc 随时停止 · 中英文设置界面**
+**网页在后台完成 · 23 个桌面工具 + 1 个管理入口 · 用到鼠标键盘时有明显提示 · 按 Esc 随时停止 · 中英文设置界面**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/how-it-works-zh-dark.png">
@@ -325,9 +325,9 @@ MIT 许可。本项目基于 [cgissing/windows-computer-use](https://github.com/
 
 ## English
 
-This plugin lets a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) agent see and use the real Windows apps on your computer. It can find buttons and text fields, read text on the screen, click, type, and switch or manage windows.
+This plugin lets a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) agent see and use the real Windows apps and web pages on your computer. It can find buttons and text fields, read text on the screen, click, type, and switch or manage windows. Web pages are worked on in DSH's own browser in the background by default, without moving your pointer or taking the foreground.
 
-**23 desktop tools + 1 management entry · Clear on-screen indicators · Press Esc to stop at any time · Chinese and English settings**
+**Web pages in the background · 23 desktop tools + 1 management entry · Clear indicators when the mouse or keyboard is used · Press Esc to stop at any time · Chinese and English settings**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/how-it-works-en-dark.png">

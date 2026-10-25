@@ -19,7 +19,7 @@
    安装命令形如 `dsh plugin --profile web add github:<owner>/<repo>`。
 4. **推荐**：发布 npm 包（预构建安装免 `allowBuilds` 构建授权）；
    或把预构建 tarball 挂 GitHub Release + 条目里加 `tarball:` 字段。
-5. **可选**：`data/screenshots.json` 配 1-8 张 GitHub 托管的截图
+5. **可选**：在插件仓库根目录放 `screenshots.json`，列出 1-8 张仓库里的截图（列表仓库的 `data/screenshots.json` 只留给旧条目，不再接受新键）
    （商城详情页 AppStore 风格展示）。
 
 ## 我们的流程
@@ -37,7 +37,7 @@
 | `.github/workflows/ci.yml` | windows-latest 上跑 self-test + 协议测试 |
 | `assets/market/` | 商城配图：market-1…6.png（1500×1000）、icon-180.png 卡片图标，源码和来源说明在同一目录（raw.githubusercontent 可直链） |
 | `publish/awesome-list-entry.yml` | 收录条目（PR 里直接用） |
-| `publish/screenshots.json` | 截图清单片段（PR 里合并进列表仓库） |
+| `screenshots.json` | 商城截图清单（仓库根目录，路径相对于它本身；插件市场从这里读取） |
 
 ### 第 1 步：推 GitHub（✅ 已完成 2026-08-16）
 
@@ -69,12 +69,12 @@ cd awesome-dsh-plugin
 # 1) 收录条目（内容见本仓库 publish/awesome-list-entry.yml）
 mkdir -p data/plugins
 cp <本仓库>/publish/awesome-list-entry.yml data/plugins/Yu-tao-Li__dsh-computer-use-win.yml
-# 2)（可选）截图：把 publish/screenshots.json 的内容合并进 data/screenshots.json
-# 3) 重新生成 README（必须，CI 会校验）
+# 2) 截图不用改列表仓库：本仓库根目录的 screenshots.json 会被直接读取
+# 3)（可选）本地预览生成的 README；不提交也行，合并后会在 main 上自动重新生成
 npm ci
 node scripts/generate-readme.mjs
 # 4) 提交 + 推送 + 开 PR
-git add data/plugins/Yu-tao-Li__dsh-computer-use-win.yml data/screenshots.json README.md README.zh.md
+git add data/plugins/Yu-tao-Li__dsh-computer-use-win.yml
 git commit -m "Add Yu-tao-Li/dsh-computer-use-win"
 git push origin HEAD
 gh pr create --repo awesome-dsh-plugin/awesome-dsh-plugin \
