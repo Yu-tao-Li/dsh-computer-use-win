@@ -578,6 +578,10 @@ const managementOnly = initialNames.length === 1 && initialNames[0] === discover
 const routingInstructions = browserRoutingInstructions(process.env.WCU_SETTINGS_JSON ? JSON.parse(process.env.WCU_SETTINGS_JSON) : {}, [...allowedTools].map(name => name.slice(prefix.length)));
 const serverInstructions = [...allowedTools].some(name => name !== discoveryName)
   ? (managementOnly ? capabilityInstructions + '\n\n' : '') + routingInstructions : undefined;
+// Saved settings the DSH adapter reset to their defaults (dsh-plugin.mjs)
+// surface in health and the tools list (#39).
+let adapterNotices = null;
+try { adapterNotices = process.env.WCU_ADAPTER_NOTICES ? JSON.parse(process.env.WCU_ADAPTER_NOTICES) : null; } catch {}
 const discoveryTool = {
   name: discoveryName,
   // Desktop tools carry their own capability names. A management-only startup
@@ -610,7 +614,7 @@ function manageTools(args) {
   });
   let result;
   if (args.operation === 'list') {
-    result = { mode: selectionMode, tools: tools.map(tool => ({
+    result = { mode: selectionMode, ...(adapterNotices ? { notices: adapterNotices } : {}), tools: tools.map(tool => ({
       name: tool.name.slice(prefix.length), description: conciseDescriptions[tool.name.slice(prefix.length)], enabled: enabledTools.has(tool.name), available: allowedTools.has(tool.name)
     })) };
   } else if (args.operation === 'describe') {
@@ -925,6 +929,7 @@ async function callTool(name, args, request) {
     case "windows_computer_use_health": {
       const result = await runBackend("health", args, undefined, request);
       result.browserLane = await browserLane.health();
+      if (adapterNotices) result.adapterNotices = adapterNotices;
       return { content: [{ type: "text", text: safeJson(result) }] };
     }
     case "windows_computer_use_snapshot": {

@@ -276,6 +276,8 @@ Most often, DSH Desktop was not fully restarted. Closing the window leaves DSH r
 
 Also check that the plugin went into the profile DSH is actually using. The version appears in the MCP `initialize.serverInfo.version`; with All selected, the agent can also call `health` to check the connection. Each profile should have only one `serverName: wincu` service. If an older version left a duplicate manual entry, back it up first, then follow the [upgrade notes](docs/computer-use-settings.md).
 
+When you save settings, DSH writes a row with `id: mcp-dsh-computer-use-win` into the profile's `cordis.patch.yml`. That row holds your settings, so keep it. With Lite or Lazy selected, tools outside the preset, such as `health`, are not listed, and calling one directly returns unknown tool. Ask the agent to call the management entry `windows_computer_use_tools` with `{"operation":"list"}` to see which tools are loaded and which can be loaded. If a saved setting holds a value this version does not offer, for example after switching versions, the plugin uses the default for that setting, loads as usual, and names the reset value under `notices` in the tools list and in `health`.
+
 When you report an issue, include the DSH Desktop, dsh core and plugin versions, plus the error text with private details removed.
 
 #### 8.2 Why did a click or typed text have no effect?
@@ -584,6 +586,8 @@ Electron 程序、Chrome 和 Edge 都用 Chromium 内核。这类程序要等有
 最常见的原因是 DSH Desktop 没有完全重启：只关窗口时，DSH 还在托盘里运行旧版插件。请右键托盘图标选“退出”，再重新打开。
 
 也要确认插件装到了 DSH 正在用的 profile。版本号可以在 MCP 返回的 `initialize.serverInfo.version` 里看；选“全部”方案时，也可以让 agent 调用 `health` 检查连接。同一个 profile 里只应有一个 `serverName: wincu` 服务。如果旧版本留下过重复的手动配置，先备份，再按[升级说明](docs/computer-use-settings.md)处理。
+
+保存设置后，DSH 会在 profile 的 `cordis.patch.yml` 里写一条 `id: mcp-dsh-computer-use-win` 的记录，里面就是你的设置。这条记录是正常的，不要删。选了“精简”或“懒启动”时，不在方案里的工具（比如 `health`）本来就不会出现，直接调用会显示 unknown tool。让 agent 调用管理入口 `windows_computer_use_tools`（`{"operation":"list"}`），就能看到哪些工具已经加载、哪些还能加载。如果保存的设置里有这个版本不认识的值，比如换过版本以后，插件会对这一项改用默认值、照常加载，并在 `tools` 列表的 `notices` 和 `health` 里写明改了哪一项。
 
 提交问题时，请附上 DSH Desktop、dsh 内核和插件的版本号，以及去掉隐私后的报错文字。
 

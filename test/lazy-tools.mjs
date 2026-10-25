@@ -73,4 +73,20 @@ for(const [preset,selection] of [['lazy',TOOL_NAMES],['lazy',null],['lite',enabl
     reports.push({preset,explicitSelection:selection!==null,startupTools:initial.length,characters:JSON.stringify({tools:initial}).length,allowedDesktopTools:allowed.length,batchAtomicity:true,wildcard:true,reset:true});
   }finally{client.close()}
 }
-console.log(JSON.stringify({passed:true,reports},null,2));
+// #39: settings the adapter reset to defaults reach the agent through the
+// tools list, and stay out of it when nothing was reset.
+const notice={settingsRepaired:['enabledTools: "removed_tool"']};
+assert.deepEqual(JSON.parse(bridgeConfig({},{notices:notice}).env.WCU_ADAPTER_NOTICES),notice);
+assert.equal(bridgeConfig({},{}).env.WCU_ADAPTER_NOTICES,undefined);
+for(const notices of [notice,null]){
+  const env={...process.env,WCU_TOOL_MODE:'full',WCU_TEST_NO_TAKEOVER:'1'};
+  delete env.WCU_ENABLED_TOOLS;delete env.WCU_ADAPTER_NOTICES;
+  if(notices)env.WCU_ADAPTER_NOTICES=JSON.stringify(notices);
+  const client=new McpTestClient(process.execPath,[fileURLToPath(new URL('../mcp/server.mjs',import.meta.url))],{env});
+  try{
+    await client.init();
+    const listed=data(await client.call(prefix+'tools',{operation:'list'}));
+    assert.deepEqual(listed.notices,notices??undefined);
+  }finally{client.close()}
+}
+console.log(JSON.stringify({passed:true,reports,adapterNotices:true},null,2));

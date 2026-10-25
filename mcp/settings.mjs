@@ -33,6 +33,33 @@ export function normalizeStopShortcut(value) {
   return [...modifiers.filter(part => parts.includes(part)), key].join('+');
 }
 
+// A saved value this version does not offer (a tool, preset, browser or
+// position chosen in another version, or edited by hand) must not keep the
+// plugin from loading: DSH refuses the whole entry when one value fails, and
+// every tool then disappears with no visible error (#39). Such choices fall
+// back to their defaults and unknown tool names are dropped; each change is
+// returned so it can be reported. Values typed on the settings page (shortcut,
+// text, numbers) stay strict, so a mistyped one is still refused when saved.
+const SETTING_CHOICES = { mode: ['lite', 'full'], toolPreset: ['auto', 'full', 'lite', 'lazy', 'custom'], browserApp: BROWSER_APPS, indicatorPosition: ['top', 'bottom'], communityNote: ['full', 'link'] };
+const SETTING_SWITCHES = ['browserFirst', 'browserVisible', 'browserSignIn', 'indicatorEnabled', 'cursorIndicatorEnabled', 'remoteIndicatorVisible'];
+export function repairStaleSettings(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { value: input, repaired: [] };
+  const value = { ...input }, repaired = [];
+  const read = key => typeof value[key]?.get === 'function' ? value[key].get() : value[key];
+  const reset = key => { repaired.push(`${key}: ${JSON.stringify(read(key))}`); delete value[key]; };
+  for (const [key, allowed] of Object.entries(SETTING_CHOICES)) if (read(key) != null && !allowed.includes(read(key))) reset(key);
+  for (const key of SETTING_SWITCHES) if (read(key) != null && typeof read(key) !== 'boolean') reset(key);
+  const tools = read('enabledTools');
+  if (tools != null && !Array.isArray(tools)) reset('enabledTools');
+  else if (tools?.some(name => !TOOL_NAMES.includes(name))) {
+    const known = [...new Set(tools.filter(name => TOOL_NAMES.includes(name)))];
+    repaired.push(`enabledTools: ${tools.filter(name => !TOOL_NAMES.includes(name)).map(name => JSON.stringify(name)).join(', ')}`);
+    // A list made only of unknown names would leave no tool at all.
+    if (known.length) value.enabledTools = known; else delete value.enabledTools;
+  }
+  return { value, repaired };
+}
+
 export function normalizeSettings(input = {}) {
   const value = { ...DEFAULT_SETTINGS, ...Object.fromEntries(Object.entries(input).map(([key,value])=>[key,typeof value?.get === 'function' ? value.get() : value])) };
   if (!['lite', 'full'].includes(value.mode)) throw new Error('mode must be lite or full');
