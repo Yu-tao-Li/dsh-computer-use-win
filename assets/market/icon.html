@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- Storefront tile: the badge DSH puts on the tab it works in, on a
+     DSH-blue rounded square. render.mjs draws it at 90x90 CSS px, 2x. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: transparent; }
+  svg { display: block; width: 90px; height: 90px; }
+</style>
+</head>
+<body>
+<svg viewBox="0 0 90 90" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a8cf5"/><stop offset="1" stop-color="#2b55c4"/></linearGradient>
+  </defs>
+  <rect width="90" height="90" rx="20" fill="url(#bg)"/>
+  <rect x="17" y="21" width="56" height="42" rx="6" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3.2"/>
+  <path d="M17 29h56" stroke="#fff" stroke-opacity=".55" stroke-width="3.2"/>
+  <path d="M39 33v36.4l9.2-8.8 6.4 14 6.4-2.8-6.2-13.6h13z" fill="#fff" stroke="#173f94" stroke-width="2.6" stroke-linejoin="round"/>
+</svg>
+</body>
+</html>

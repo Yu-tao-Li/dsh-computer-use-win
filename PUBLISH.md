@@ -35,7 +35,7 @@
 | `test/` | 测试套件（CI 里跑 self-test + 协议测试） |
 | `LICENSE` | MIT |
 | `.github/workflows/ci.yml` | windows-latest 上跑 self-test + 协议测试 |
-| `assets/screenshot-{1,2}.png` | 商城截图（raw.githubusercontent 可直链） |
+| `assets/market/` | 商城配图：market-1…6.png（1500×1000）、icon-180.png 卡片图标，源码和来源说明在同一目录（raw.githubusercontent 可直链） |
 | `publish/awesome-list-entry.yml` | 收录条目（PR 里直接用） |
 | `publish/screenshots.json` | 截图清单片段（PR 里合并进列表仓库） |
 

@@ -1,0 +1,158 @@
+<!doctype html>
+<!-- Storefront images for the DSH plugin market (data/screenshots.json of
+     awesome-dsh-plugin). render.mjs draws each slide (?slide=1..6) at 750x500
+     CSS px and 2x scale. The pictures in src-*.png are real captures; see
+     README.md in this folder for how each one was taken. -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dsh-computer-use-win market images</title>
+<style>
+  :root { --blue: #4176e6; --ink: #13213f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: transparent; }
+  body { font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
+  .slide { display: none; position: relative; width: 750px; height: 500px; overflow: hidden; color: #fff;
+    background: radial-gradient(110% 85% at 88% -8%, rgba(132, 172, 255, .9) 0%, rgba(132, 172, 255, 0) 58%), linear-gradient(158deg, #4b80f1 0%, #3163d8 52%, #2449ad 100%); }
+  .slide.on { display: block; }
+  .head { position: absolute; left: 44px; right: 40px; top: 32px; z-index: 5; }
+  h1 { margin: 0; font-size: 35px; line-height: 1.22; font-weight: 700; letter-spacing: .4px; }
+  .sub { margin: 9px 0 0; font-size: 16.5px; line-height: 1.45; opacity: .94; }
+  .en { margin: 5px 0 0; font: 12.5px/1.4 'Segoe UI', sans-serif; opacity: .72; }
+  .shot { position: absolute; overflow: hidden; border-radius: 12px; background: #fff;
+    box-shadow: 0 20px 48px rgba(6, 18, 58, .42), 0 0 0 1px rgba(255, 255, 255, .28); }
+  .shot img { display: block; width: 100%; }
+  .crop img { position: absolute; width: auto; max-width: none; }
+  .tag { position: absolute; z-index: 6; padding: 5px 11px 5px 9px; border-radius: 999px; background: #fff; color: var(--ink);
+    font-size: 12.5px; font-weight: 600; white-space: nowrap; box-shadow: 0 6px 18px rgba(6, 18, 58, .32); }
+  .tag i { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--blue); vertical-align: 1px; }
+  svg.lines { position: absolute; inset: 0; z-index: 6; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  svg.lines line { stroke: #fff; stroke-width: 1.6; }
+  svg.lines circle { fill: #fff; stroke: var(--blue); stroke-width: 2.4; }
+  svg.lines circle.ring { fill: none; stroke: #fff; stroke-width: 2.6; filter: drop-shadow(0 0 2px rgba(6, 18, 58, .6)); }
+  .inset-title { position: absolute; left: 322px; right: 30px; margin: 0; font-size: 14.5px; font-weight: 600; }
+  .esc { position: absolute; display: flex; gap: 10px; align-items: center; font-size: 14px; line-height: 1.5; }
+  .esc kbd { padding: 5px 10px; border-radius: 8px; background: #fff; color: var(--ink); font: 700 15px/1 'Segoe UI', sans-serif; box-shadow: 0 3px 0 #b8c6e6, 0 8px 18px rgba(6, 18, 58, .3); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip { padding: 5px 12px; border-radius: 999px; font-size: 13px; background: rgba(255, 255, 255, .16); border: 1px solid rgba(255, 255, 255, .38); }
+  /* Usage steps */
+  .steps { position: absolute; left: 44px; right: 44px; top: 168px; display: flex; gap: 22px; }
+  .step { position: relative; flex: 1; height: 272px; padding: 16px 16px 14px; border-radius: 14px; background: #fff; color: var(--ink);
+    box-shadow: 0 14px 34px rgba(6, 18, 58, .32); }
+  .step + .step::before { content: ''; position: absolute; left: -17px; top: 50%; width: 12px; height: 12px; border-top: 3px solid #fff; border-right: 3px solid #fff; transform: translateY(-50%) rotate(45deg); }
+  .num { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--blue); color: #fff; font-weight: 700; font-size: 14px; }
+  .step h2 { display: inline; margin: 0 0 0 8px; font-size: 18px; vertical-align: 1px; }
+  .bubble { margin-top: 14px; padding: 10px 12px; border-radius: 12px 12px 12px 4px; background: #eef2f8; font-size: 14px; line-height: 1.55; }
+  .outline { margin-top: 14px; padding: 9px 10px; border-radius: 10px; background: #f3f6fb; font: 12.5px/1.75 'Cascadia Mono', Consolas, monospace; color: #33415e; }
+  .outline b { color: #2f5fcc; font-weight: 600; }
+  .note { position: absolute; left: 16px; right: 14px; bottom: 14px; font-size: 12.5px; line-height: 1.5; color: #5a6680; }
+  .checks { margin: 14px 0 0; padding: 0; list-style: none; font-size: 14.5px; line-height: 2; }
+  .checks li::before { content: '✓'; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 8px; border-radius: 50%; background: #e3f5ea; color: #1a8a4a; font-size: 12px; font-weight: 700; }
+  .foot { position: absolute; left: 44px; right: 44px; bottom: 20px; font-size: 13px; opacity: .9; }
+  .foot b { font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- 1 What it is -->
+<section class="slide" data-slide="1">
+  <div class="head">
+    <h1>让 DSH 替你操作 Windows</h1>
+    <p class="sub">桌面程序和网页，一句话交给它</p>
+    <p class="en">Let the DSH agent work your Windows apps and web pages</p>
+    <div class="chips"><span class="chip">读控件、点按钮、填内容</span><span class="chip">网页在后台完成，不抢鼠标</span><span class="chip">随时可以叫停</span></div>
+  </div>
+  <div class="shot" style="right: 28px; top: 206px; width: 462px;"><img src="src-browser.png" alt=""></div>
+  <div class="shot crop" style="left: 40px; top: 224px; width: 236px; height: 300px; z-index: 2; background: #e3e8f6;">
+    <img src="src-desktop.png" alt="" style="width: 520px; left: -150px; top: -4px;"></div>
+</section>
+
+<!-- 2 How it is used -->
+<section class="slide" data-slide="2">
+  <div class="head">
+    <h1>说一句话，它自己动手</h1>
+    <p class="sub">先看清界面，再点击、输入、核对，最后告诉你结果</p>
+    <p class="en">Ask in DSH: it reads the screen, acts, checks the result and reports back</p>
+  </div>
+  <div class="steps">
+    <div class="step"><span class="num">1</span><h2>说出任务</h2>
+      <div class="bubble">填好这张出差报销：<br>陈明，研发部，<br>上海 3 天，2860 元。</div>
+      <div class="note">网页和桌面程序都行。</div></div>
+    <div class="step"><span class="num">2</span><h2>看清界面</h2>
+      <div class="outline">textbox <b>"报销人"</b><br>combobox <b>"部门"</b><br>textbox <b>"金额"</b><br>button <b>"提交审批"</b></div>
+      <div class="note">网页读大纲，桌面程序读控件树，读不到就截图识字。</div></div>
+    <div class="step"><span class="num">3</span><h2>动手核对</h2>
+      <ul class="checks"><li>逐项填写</li><li>选择部门</li><li>核对页面变化</li></ul>
+      <div class="note">每一步都记在对话里，做完告诉你结果，随时可以叫停。</div></div>
+  </div>
+  <div class="foot"><b>网页</b>走浏览器操控（后台完成）　·　<b>桌面程序</b>走电脑操控（UI Automation）</div>
+</section>
+
+<!-- 3 Browser Use, real capture -->
+<section class="slide" data-slide="3">
+  <div class="head">
+    <h1>网页在后台完成，不抢你的鼠标</h1>
+    <p class="sub">DSH 用自己的浏览器窗口读写网页，你可以照常做别的事</p>
+    <p class="en">Browser Use: pages are read and filled in a separate DSH browser, in the background</p>
+  </div>
+  <div class="shot" style="left: 95px; top: 160px; width: 560px;"><img src="src-browser.png" alt=""></div>
+  <svg class="lines" viewBox="0 0 750 500">
+    <line x1="130" y1="162" x2="152" y2="146"/><circle class="ring" cx="123" cy="169" r="9"/>
+    <line x1="280" y1="466" x2="304" y2="478"/><circle class="ring" cx="271" cy="459" r="12"/>
+    <line x1="93" y1="305" x2="70" y2="331"/><circle class="ring" cx="97" cy="300" r="6"/>
+  </svg>
+  <div class="tag" style="left: 150px; top: 132px;"><i></i>标签页图标变蓝：它在操作这一页</div>
+  <div class="tag" style="left: 302px; top: 466px;"><i></i>小箭头：它正要点的地方</div>
+  <div class="tag" style="left: 12px; top: 331px;"><i></i>蓝框：DSH 专用浏览器</div>
+</section>
+
+<!-- 4 Computer Use, real capture -->
+<section class="slide" data-slide="4">
+  <div class="head">
+    <h1>桌面程序也能操作</h1>
+    <p class="sub">用到鼠标键盘时，屏幕会亮起提示；按 Esc 立刻停</p>
+    <p class="en">Desktop apps too, with a clear on-screen indicator and Esc to stop</p>
+  </div>
+  <!-- Left: the whole capture around Calculator (src-desktop.png is 1800x1200;
+       crop x 560-1280, y 150-1140 at 0.33). The real cursor is not in a screen
+       capture, so a standard arrow marks where it was (the pointer source). -->
+  <div class="shot" style="left: 52px; top: 158px; width: 238px; height: 327px; background: url(src-desktop.png) -185px -50px / 594px auto;">
+    <svg style="position: absolute; left: 197px; top: 289px; width: 13px; height: 20px;" viewBox="0 0 16 24"><path d="M1 1v18.5l4.6-4.4 3.3 7.3 3.2-1.4-3.2-7.1h6.5z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>
+  </div>
+  <!-- Right: the same capture, zoomed on the banner and on the pointer tag. -->
+  <p class="inset-title" style="top: 166px;">用到鼠标键盘时，屏幕顶端出现提示条，边缘发光</p>
+  <div class="shot" style="left: 322px; top: 196px; width: 384px; height: 61px; background: url(src-desktop.png) -590px -25px / 1566px auto;"></div>
+  <p class="inset-title" style="top: 284px;">鼠标旁带着 DSH 标签，一眼看出是谁在动</p>
+  <div class="shot" style="left: 322px; top: 314px; width: 192px; height: 160px; background: #dfe5f4 url(src-desktop.png) -1356px -1200px / 2160px auto;">
+    <svg style="position: absolute; left: 34px; top: 34px; width: 19px; height: 29px;" viewBox="0 0 16 24"><path d="M1 1v18.5l4.6-4.4 3.3 7.3 3.2-1.4-3.2-7.1h6.5z" fill="#fff" stroke="#111" stroke-width="1.4" stroke-linejoin="round"/></svg>
+  </div>
+  <div class="esc" style="left: 536px; top: 366px;"><kbd>Esc</kbd><span>立刻停止这一轮<br>也可以点 DSH 的<br>停止按钮</span></div>
+</section>
+
+<!-- 5 Every step recorded -->
+<section class="slide" data-slide="5">
+  <div class="head">
+    <h1>每一步都看得到</h1>
+    <p class="sub">对话里记下每个动作和截图，做完把结果告诉你</p>
+    <p class="en">Every action is recorded in the chat with screenshots, then summed up</p>
+  </div>
+  <div class="shot" style="left: 40px; top: 168px; width: 430px; background: #1c1c1e;"><img src="src-steps.png" alt=""></div>
+  <div class="shot" style="right: 34px; top: 296px; width: 430px; background: #1c1c1e;"><img src="src-result.png" alt=""></div>
+</section>
+
+<!-- 6 Settings -->
+<section class="slide" data-slide="6">
+  <div class="head">
+    <h1>怎么用，由你决定</h1>
+    <p class="sub">网页优先、显示窗口、选浏览器、记住登录、工具多少，都在一页设置里</p>
+    <p class="en">One settings page: Browser Use, which browser, kept sign-ins, tools</p>
+  </div>
+  <div class="shot" style="left: 72px; top: 166px; width: 606px; padding: 14px 18px 0;"><img src="src-settings.png" alt=""></div>
+</section>
+
+<script>
+  const slide = new URLSearchParams(location.search).get('slide') || '1';
+  document.querySelector(`[data-slide="${slide}"]`).classList.add('on');
+</script>
+</body>
+</html>
