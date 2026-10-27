@@ -1713,12 +1713,13 @@ function Convert-Tree {
   $info = Convert-ElementInfo -Element $Element -Id "uia:$Path" -Depth $Depth -DetailLevel $DetailLevel -UseCache
   $Count.Value++
   # Chromium nests a page six or more levels down, under unnamed layout panes
-  # (NonClientView, ClientView, View...). In window-scoped trees those panes do
+  # (NonClientView, ClientView, View...), and Firefox-family browsers put it
+  # under three unnamed Gecko panes (#56). In window-scoped trees those panes do
   # not use up maxDepth, so the default depths reach the page; 16 extra levels
   # bound the recursion. Desktop trees stay an overview of every window.
   $childLevel = $Level + 1
-  if ($Traversal.chromiumLayout -and $info.controlType -eq 'Pane' -and [string]::IsNullOrEmpty($info.name) -and
-      (Invoke-Safe { $Element.Cached.FrameworkId } '') -eq 'Chrome') { $childLevel = $Level }
+  if ($Traversal.browserLayout -and $info.controlType -eq 'Pane' -and [string]::IsNullOrEmpty($info.name) -and
+      (Invoke-Safe { $Element.Cached.FrameworkId } '') -in @('Chrome', 'Gecko')) { $childLevel = $Level }
   $childrenOut = New-Object System.Collections.Generic.List[object]
   if ($childLevel -le $MaxDepth -and $Depth -lt $MaxDepth + 16 -and $Count.Value -lt $MaxNodes -and (Test-TreeBudget $Traversal)) {
     try {
@@ -2477,7 +2478,7 @@ function Get-TreeResult {
   $responsive = Get-WindowResponsive $window
   $cache = New-ElementCacheRequest $detailLevel
   $walker = New-Object System.Windows.Automation.TreeWalker -ArgumentList (Get-ViewCondition $viewMode $includeOffscreen)
-  $traversal = @{watch=$stopwatch; budgetMs=$budgetMs; cache=$cache; walker=$walker; reason=$null; error=$null; chromiumLayout=($Scope -ne 'desktop')}
+  $traversal = @{watch=$stopwatch; budgetMs=$budgetMs; cache=$cache; walker=$walker; reason=$null; error=$null; browserLayout=($Scope -ne 'desktop')}
   $tree = $null
   $count = 0
   $pages = $null

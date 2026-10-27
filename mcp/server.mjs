@@ -121,7 +121,7 @@ const treeBudgetProperties = {
   }
 };
 
-const maxDepthDescription = "Levels below the root. In window-scoped trees, unnamed Chromium layout panes (Electron, Chrome/Edge, CEF, WebView2) do not count, so page content stays within the default depth.";
+const maxDepthDescription = "Levels below the root. In window-scoped trees, unnamed browser layout panes (Chromium: Electron, Chrome/Edge, CEF, WebView2; Gecko: Firefox and its forks) do not count, so page content stays within the default depth.";
 const webContentNote = " In a Chromium-based window (Electron, Chrome/Edge, CEF, WebView2) the first observation enables the page's accessibility tree; webContent reports whether it is ready.";
 
 const tools = [
