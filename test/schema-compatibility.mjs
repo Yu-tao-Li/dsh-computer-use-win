@@ -19,11 +19,12 @@ try{
  // every tool disappears. Choices this version does not offer fall back to
  // their defaults and are reported; typed values stay strict for the save path.
  const validate=input=>adapter.Config['~standard'].validate(input);
- const stale=validate({toolPreset:'smart',browserApp:'firefox',browserVisible:'yes',enabledTools:['health','removed_tool','tools'],futureSetting:3});
+ assert.equal(adapter.Config({browserApp:'firefox'}).browserApp.get(),'firefox');
+ const stale=validate({toolPreset:'smart',browserApp:'unknown-browser',browserVisible:'yes',enabledTools:['health','removed_tool','tools'],futureSetting:3});
  assert.equal(stale.issues,undefined,JSON.stringify(stale.issues));
  assert.equal(stale.value.toolPreset.get(),'auto');assert.equal(stale.value.browserApp.get(),'default');assert.equal(stale.value.browserVisible.get(),true);
  assert.deepEqual(stale.value.enabledTools.get(),['health','tools']);
- assert.deepEqual(stale.value[adapter.REPAIRED_SETTINGS],['toolPreset: "smart"','browserApp: "firefox"','browserVisible: "yes"','enabledTools: "removed_tool"']);
+ assert.deepEqual(stale.value[adapter.REPAIRED_SETTINGS],['toolPreset: "smart"','browserApp: "unknown-browser"','browserVisible: "yes"','enabledTools: "removed_tool"']);
  assert.equal(Object.getOwnPropertyDescriptor(stale.value,adapter.REPAIRED_SETTINGS).enumerable,false,'The report is not a setting and is never saved');
  const unknownOnly=validate({enabledTools:['removed_tool']});
  assert.equal(unknownOnly.issues,undefined);assert.equal(unknownOnly.value.enabledTools.get().length,24,'A list of unknown tools falls back to all tools, not none');

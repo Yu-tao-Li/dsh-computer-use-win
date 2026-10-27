@@ -40,6 +40,7 @@ const suites = [
   ['sparse-canvas-smoke', process.execPath, ['test/sparse-canvas-smoke.mjs', path.join(root, 'sparse-canvas-smoke')]],
   ['browser-namespace', process.execPath, ['test/browser-namespace.mjs']],
   ['browser-transport', process.execPath, ['test/browser-transport.mjs']],
+  ['browser-bidi-offline', process.execPath, ['test/browser-bidi.mjs']],
   ['browser-lane', process.execPath, ['test/browser-lane.mjs']],
   ['browser-visible', process.execPath, ['test/browser-visible.mjs']],
   ['browser-reconnect', process.execPath, ['test/browser-reconnect.mjs']],

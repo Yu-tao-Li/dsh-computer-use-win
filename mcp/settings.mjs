@@ -10,7 +10,7 @@ export function normalizeEnabledTools(value) {
 // default browser). browserSignIn: the DSH browser keeps its profile, so the
 // sites the user signs in to there stay signed in, instead of starting from a
 // temporary profile each time. The user's own browser is never used.
-export const BROWSER_APPS = Object.freeze(['default', 'edge', 'chrome']);
+export const BROWSER_APPS = Object.freeze(['default', 'edge', 'chrome', 'firefox']);
 
 export const DEFAULT_SETTINGS = Object.freeze({
   browserFirst: true, browserVisible: true, browserApp: 'default', browserSignIn: false,
@@ -69,7 +69,7 @@ export function normalizeSettings(input = {}) {
   for (const key of ['browserFirst', 'browserVisible', 'browserSignIn', 'indicatorEnabled', 'cursorIndicatorEnabled','remoteIndicatorVisible']) {
     if (typeof value[key] !== 'boolean') throw new Error(`${key} must be boolean`);
   }
-  if (!BROWSER_APPS.includes(value.browserApp)) throw new Error('browserApp must be default, edge or chrome');
+  if (!BROWSER_APPS.includes(value.browserApp)) throw new Error('browserApp must be default, edge, chrome or firefox');
   if (typeof value.indicatorText !== 'string' || !value.indicatorText.trim() || value.indicatorText.length > 120 || /[\r\n\x00-\x1f]/.test(value.indicatorText)) {
     throw new Error('indicatorText must be one line of 1–120 characters');
   }
