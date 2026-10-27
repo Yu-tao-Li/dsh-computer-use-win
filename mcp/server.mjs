@@ -793,10 +793,14 @@ function spawnBackend() {
     }
   );
   proc.stdout.setEncoding("utf8");
+  proc.stderr.setEncoding("utf8");
+  let stderrTail = "";
   // Forward backend diagnostics (parse errors, P/Invoke failures, backend
   // tracebacks) to our stderr so they surface in the MCP client's log and in CI.
+  // The tail also explains an exit to the model (#54).
   proc.stderr.on("data", (chunk) => {
     process.stderr.write(`[wcu-backend] ${chunk}`);
+    stderrTail = (stderrTail + chunk).slice(-4000);
   });
   proc.stdout.on("data", (chunk) => {
     backendBuf += chunk;
@@ -826,11 +830,25 @@ function spawnBackend() {
   });
   proc.stdin.on("error", () => { /* EPIPE when the backend dies; the exit handler fails waiters */ });
   const onDeath = (err) => {
-    failBackendWaiters(err || new Error("Backend process exited"), proc);
     if (backendProc === proc) backendProc = null;
+    if (err) { failBackendWaiters(err, proc); return; }
+    // 'exit' can precede the last stderr chunk; wait briefly for the stream.
+    const report = () => failBackendWaiters(backendExitError(proc.exitCode, stderrTail), proc);
+    if (proc.stderr.readableEnded) { report(); return; }
+    const timer = setTimeout(report, 300);
+    proc.stderr.once("end", () => { clearTimeout(timer); report(); });
   };
   proc.on("error", onDeath);
   proc.on("exit", () => onDeath());
+}
+
+// "Backend process exited" alone hid why every tool failed (#54). Quote the
+// backend's startup failure line, or else its last lines of error output.
+function backendExitError(code, stderr) {
+  const lines = stderr.split(/\r?\n/).map(line => line.trim()).filter(line => line && !/^stage=\S+ elapsedMs=\d+$/.test(line));
+  const startup = lines.findLast(line => line.startsWith("WCU_BACKEND_STARTUP_FAILED"));
+  const detail = startup || lines.filter(line => !/^(?:\+|~|At |所在位置)/.test(line)).slice(-3).join(" | ");
+  return new Error(`Backend process exited${code == null ? "" : ` (exit code ${code})`}${detail ? `: ${detail.slice(0, 600)}` : ""}`);
 }
 
 function ensureBackend() {

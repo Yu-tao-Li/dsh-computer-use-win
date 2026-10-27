@@ -26,6 +26,8 @@ const suites = [
   ['profile-resolution', process.execPath, ['test/profile-resolution.mjs']],
   ['bundle-startup', process.execPath, ['test/bundle-startup.mjs']],
   ['backend-lifecycle', process.execPath, ['test/backend-lifecycle.mjs']],
+  ['backend-startup-error', process.execPath, ['test/backend-startup-error.mjs']],
+  ['helper-assembly-load', powershell, ['-NoProfile', '-File', 'test/helper-assembly-load.ps1']],
   ['observation-contract', process.execPath, ['test/observation-contract.mjs']],
   ['activation-cancellation', process.execPath, ['test/activation-cancellation.mjs']],
   ['native-window-discovery', process.execPath, ['test/native-window-discovery.mjs']],
