@@ -27,8 +27,8 @@ for(const mode of ['lite','full']) {
   try {
     assert.equal((await client.init()).capabilities.tools.listChanged,true);
     const initial=(await client.request('tools/list')).tools;
-    assert.equal(initial.length,mode==='lite'?10:24);
-    const catalogue=data(await manage({}));assert.equal(catalogue.tools.length,23);
+    assert.equal(initial.length,mode==='lite'?LITE_TOOL_NAMES.length:TOOL_NAMES.length);
+    const catalogue=data(await manage({}));assert.equal(catalogue.tools.length,TOOL_NAMES.length-1);
     for(const advertised of initial.filter(t=>t.name!==prefix+'tools')) {
       const described=data(await manage({operation:'describe',names:[advertised.name]}));
       assert.deepEqual(stripDescriptions(advertised.inputSchema),stripDescriptions(described.inputSchema));
@@ -67,7 +67,7 @@ assert.deepEqual(enabledToolsForSettings({toolPreset:'full',enabledTools:[]}),TO
 assert.deepEqual(enabledToolsForSettings({toolPreset:'custom',enabledTools:[]}),[]);
 assert.throws(()=>normalizeSettings({toolPreset:'unknown'}));
 assert.deepEqual(normalizeEnabledTools(['wait','screenshot','wait']),TOOL_NAMES.filter(x=>['wait','screenshot'].includes(x)));
-for(const invalid of [null,'wait',['unknown'],['wait',1],Array(25).fill('wait')])assert.throws(()=>normalizeEnabledTools(invalid));
+for(const invalid of [null,'wait',['unknown'],['wait',1],Array(TOOL_NAMES.length+1).fill('wait')])assert.throws(()=>normalizeEnabledTools(invalid));
 for(const selection of [['screenshot','wait','tools'],['wait'],[],[...TOOL_NAMES]]){
   const client=new McpTestClient(process.execPath,[path.join(root,'mcp/server.mjs')],{env:{...process.env,WCU_TOOL_MODE:'lite',WCU_ENABLED_TOOLS:JSON.stringify(selection)}});
   try {
@@ -80,7 +80,7 @@ for(const selection of [['screenshot','wait','tools'],['wait'],[],[...TOOL_NAMES
     }
     if(selection.includes('tools')){
       const catalogue=data(await client.call(prefix+'tools',{}));
-      assert.equal(catalogue.mode,selection.length===24?'full':'custom');
+      assert.equal(catalogue.mode,selection.length===TOOL_NAMES.length?'full':'custom');
       assert.equal(catalogue.tools.find(x=>x.name==='drag').available,selection.includes('drag'));
       if(!selection.includes('drag')){
         const denied=await client.call(prefix+'tools',{operation:'enable',names:['wait','drag']});

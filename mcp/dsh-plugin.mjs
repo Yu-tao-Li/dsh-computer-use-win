@@ -21,7 +21,7 @@ const fields = {
   browserSignIn: z.boolean().default(false).description('记住登录 / Keep sign-ins'),
   mode: z.union([z.const('lite'),z.const('full')]).default('full').description('旧版工具模式 / Legacy tool mode'),
   toolPreset: z.union(['auto','full','lite','lazy','custom'].map(value=>z.const(value))).default('auto').description('工具加载方案 / Tool preset'),
-  enabledTools: z.array(z.union(TOOL_NAMES.map(name=>z.const(name)))).max(24).default([...TOOL_NAMES]).description('启用的工具 / Enabled tools'),
+  enabledTools: z.array(z.union(TOOL_NAMES.map(name=>z.const(name)))).max(TOOL_NAMES.length).default([...TOOL_NAMES]).description('启用的工具 / Enabled tools'),
   indicatorEnabled: z.boolean().default(true).description('接管提示 / Takeover indicator'),
   cursorIndicatorEnabled: z.boolean().default(true).description('鼠标指示 / Pointer indicator'),
   remoteIndicatorVisible: z.boolean().default(true).description('远程与录屏可见 / Visible in remote sessions and recordings'),

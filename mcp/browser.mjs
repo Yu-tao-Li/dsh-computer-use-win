@@ -10,7 +10,6 @@ import tls from 'node:tls';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BidiBrowserLane, geckoApplication, discoverGecko } from './browser-bidi.mjs';
 
 const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
 // The browser the lane runs is the one picked in settings, else the Windows
@@ -212,7 +211,7 @@ export function isBrowserCall(args) {
 const READS = new Set(['snapshot', 'tree', 'accessibility_tree', 'find', 'element_info', 'screenshot', 'ocr', 'wait_for']);
 export const BACKGROUND_FIRST = new Set(['invoke', 'set_value', 'scroll', 'type_text']);
 export function isQuietCall(action, args = {}) {
-  if (isBrowserCall(args) || ['health', 'list_windows', 'wait'].includes(action)) return true;
+  if (isBrowserCall(args) || ['health', 'list_windows', 'wait', 'launch_app'].includes(action)) return true;
   if (!args || args.activate === true) return false;
   if (READS.has(action)) return true;
   // Window messages posted to the target window.
@@ -655,10 +654,28 @@ export class BrowserLane {
 
   async bidiBackend() {
     this.bidiReady ??= (async () => {
+      // Keep Chromium-only deployments and test fixtures independent of the
+      // optional Gecko module. Probe the engine ID before dynamically importing.
+      let customGecko = false;
+      if (this.env.WCU_BROWSER_EXE) for (const relative of ['application.ini', 'browser/application.ini']) {
+        try {
+          const ini = readFileSync(path.join(path.dirname(this.env.WCU_BROWSER_EXE), relative), 'utf8');
+          const app = /(?:^|\r?\n)\[App\]\s*\r?\n([\s\S]*?)(?=\r?\n\[|$)/i.exec(ini)?.[1] ?? '';
+          if (/^ID=\{ec8030f7-c20a-464f-9b0e-13a3a9e97384\}\s*$/mi.test(app)) customGecko = true;
+        } catch { }
+      }
+      if (!this.env.WCU_BROWSER_BIDI_URL && this.env.WCU_BROWSER_EXE && !customGecko) return null;
+      // The experimental lane is opt-in: a Firefox OS default must not turn
+      // an existing default/visible Chromium workflow into a headless error.
+      if (!this.env.WCU_BROWSER_BIDI_URL && !customGecko && this.app !== 'firefox') return null;
+      await this.resolveApp();
+      const { BidiBrowserLane, geckoApplication, discoverGecko } = await import('./browser-bidi.mjs');
+      if (this.env.WCU_BROWSER_BIDI_URL) {
+        this.bidi = new BidiBrowserLane({ env: this.env });
+        this.bidi.seriesActive = () => this.seriesActive();
+        return this.bidi;
+      }
       const custom = geckoApplication(this.env.WCU_BROWSER_EXE);
-      if (this.env.WCU_BROWSER_EXE && !custom) return null; // explicit Chromium override wins over the OS default
-      const app = await this.resolveApp();
-      if (!custom && app !== 'firefox') return null;
       const executable = custom ?? await discoverGecko(this.env, this.progId);
       this.bidi = new BidiBrowserLane({ env: this.env, executable });
       this.bidi.seriesActive = () => this.seriesActive();

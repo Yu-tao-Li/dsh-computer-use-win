@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 if (process.platform !== 'win32') throw new Error('These backend regression tests require Windows.');
 const checkout = fileURLToPath(new URL('../', import.meta.url));
 const powershell = process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe';
-const root = await mkdtemp(path.join(os.tmpdir(), 'wcu-isolated-tests-'));
+const root = await mkdtemp(path.join(process.env.WCU_TEST_OUTPUT || os.tmpdir(), 'wcu-isolated-tests-'));
 if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `artifactRoot=${root}\n`);
 const suites = [
   ['source-encoding', process.execPath, ['test/source-encoding.mjs']],
@@ -28,6 +28,8 @@ const suites = [
   ['backend-lifecycle', process.execPath, ['test/backend-lifecycle.mjs']],
   ['backend-startup-error', process.execPath, ['test/backend-startup-error.mjs']],
   ['helper-assembly-load', powershell, ['-NoProfile', '-File', 'test/helper-assembly-load.ps1']],
+  ['helper-assembly-concurrency', process.execPath, ['test/helper-assembly-concurrency.mjs']],
+  ['launch-app', process.execPath, ['test/launch-app.mjs']],
   ['observation-contract', process.execPath, ['test/observation-contract.mjs']],
   ['activation-cancellation', process.execPath, ['test/activation-cancellation.mjs']],
   ['native-window-discovery', process.execPath, ['test/native-window-discovery.mjs']],
@@ -55,8 +57,11 @@ const suites = [
   ['less-takeover-contract', powershell, ['-NoProfile', '-File', 'test/less-takeover-contract.ps1']]
 ];
 const results = [];
+const selected = process.env.WCU_TEST_SUITES?.split(',').filter(Boolean);
+if (selected?.some(name => !suites.some(suite => suite[0] === name))) throw new Error('Unknown WCU_TEST_SUITES selection');
 console.log(`Isolated test artifacts: ${root}`);
 for (const [name, command, args] of suites) {
+  if (selected && !selected.includes(name)) continue;
   const temp = path.join(root, name);
   await mkdir(temp);
   const start = Date.now();

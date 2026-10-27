@@ -126,6 +126,17 @@ const webContentNote = " In a Chromium-based window (Electron, Chrome/Edge, CEF,
 
 const tools = [
   {
+    name: "windows_computer_use_launch_app",
+    description: "Launch an executable, shortcut or installed application through the interactive Windows desktop Shell. The app outlives the tool call and MCP server; it uses the desktop's environment. Requires Explorer. A successful result means dispatched; verify the intended window with list_windows/wait_for. Applications may activate themselves even with activate:false. Does not interpret shell commands or request elevation.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["target"], properties: {
+      target: { type: "string", minLength: 1, maxLength: 32767, description: "Absolute .exe/.com/.lnk path, executable name on PATH/App Paths, exact installed app name or AppUserModelID." },
+      arguments: { type: "string", maxLength: 32767, default: "", description: "Windows command-line arguments for the executable or shortcut; quote individual arguments containing spaces. Not a shell command." },
+      workingDirectory: { type: "string", maxLength: 32767, default: "", description: "Existing absolute working directory. Not supported for AppUserModelID launches." },
+      activate: { type: "boolean", default: false },
+      waitMs: { type: "integer", minimum: 0, maximum: 10000, default: 1500 }
+    } }
+  },
+  {
     name: "windows_computer_use_health",
     description: "Check that the Windows UI Automation backend, screenshot capture, and input stack are available.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} }
@@ -505,6 +516,7 @@ const tools = [
 // Keep execution/validation schemas intact; only the model-facing prose is
 // shortened. The discovery tool returns the original definition on demand.
 const conciseDescriptions = {
+  launch_app: 'Launch an executable, shortcut or installed app through the desktop Shell; survives tool/server exit. Verify the intended window afterward; apps may activate themselves.',
   health: 'Check Windows backend availability.',
   snapshot: 'Screenshot and UIA tree. Partial trees report truncation; use OCR for sparse UIA. browserTab: page outline and viewport.',
   accessibility_tree: 'Read a bounded UIA tree; partial output does not establish absence. browserTab: page outline with element ids.',
@@ -558,7 +570,7 @@ const toolMode = process.env.WCU_TOOL_MODE || 'full';
 if (!['lite', 'full', 'lazy'].includes(toolMode)) throw new Error('WCU_TOOL_MODE must be lite, full or lazy');
 const prefix = 'windows_computer_use_';
 const discoveryName = prefix + 'tools';
-const liteNames = ['list_windows', 'find', 'click', 'scroll', 'type_text', 'keypress', 'ocr', 'screenshot', 'wait_for'];
+const liteNames = ['list_windows', 'find', 'click', 'scroll', 'type_text', 'keypress', 'ocr', 'screenshot', 'wait_for', 'launch_app'];
 if (JSON.stringify([...TOOL_NAMES].sort()) !== JSON.stringify([...tools.map(tool=>tool.name.slice(prefix.length)),'tools'].sort())) throw new Error('Tool settings catalogue does not match the MCP tool definitions');
 const configuredSelection = process.env.WCU_ENABLED_TOOLS === undefined ? null : normalizeEnabledTools(JSON.parse(process.env.WCU_ENABLED_TOOLS));
 const selectionMode = toolMode === 'lazy' ? 'lazy' : configuredSelection === null ? toolMode : configuredSelection.length === TOOL_NAMES.length ? 'full' : 'custom';
@@ -590,7 +602,7 @@ const discoveryTool = {
   description: (toolMode === 'lazy' ? 'Lazy startup: ' : '') + (managementOnly ? 'reads and operates real Windows apps (UI Automation, screenshots, OCR, input, windows); enable tools before desktop use. ' : '') + 'List capabilities; describe reads one full schema; enable/disable accepts names or ["*"] for all allowed desktop tools; reset restores startup selection.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {
     operation: { type: 'string', enum: ['list','describe','enable','disable','reset'], default: 'list' },
-    names: { type: 'array', maxItems: 23, items: { type: 'string' } }
+    names: { type: 'array', maxItems: TOOL_NAMES.length, items: { type: 'string' } }
   } }
 };
 function advertisedTools() {
@@ -944,6 +956,8 @@ async function callTool(name, args, request) {
   if (actionName === "keypress" && args.keys.filter(key => !/^(ctrl|control|alt|option|shift)$/i.test(key)).length !== 1) throw new Error("INVALID_ARGUMENTS: keypress needs exactly one non-modifier key");
   if (browser) return runBrowser(actionName === "accessibility_tree" ? "tree" : actionName, args, request);
   switch (name) {
+    case "windows_computer_use_launch_app":
+      return backendText("launch_app", args, 30000, request);
     case "windows_computer_use_health": {
       const result = await runBackend("health", args, undefined, request);
       result.browserLane = await browserLane.health();

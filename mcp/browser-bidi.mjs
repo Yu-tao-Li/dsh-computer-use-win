@@ -1,5 +1,5 @@
-// Experimental Gecko lane. One BiDi session per owned browser, never attach to
-// the user's browser. DOM semantics are an approximation, not an AX tree.
+// Experimental Gecko lane. Own a fresh browser, or connect only to an endpoint
+// explicitly configured by the user. DOM semantics approximate, not replace, AX.
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes, createHash } from 'node:crypto';
 import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -58,7 +58,7 @@ export class BidiConnection {
   }
   static async open(url, { timeoutMs = 5000, trace, WebSocketImpl = WebSocket } = {}) {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'ws:' || !['127.0.0.1', '[::1]', 'localhost'].includes(parsed.hostname)) fail('BROWSER_ENDPOINT', 'owned loopback ws endpoint required');
+    if (parsed.protocol !== 'ws:' || !['127.0.0.1', '[::1]', 'localhost'].includes(parsed.hostname) || parsed.username || parsed.password || parsed.hash) fail('BROWSER_ENDPOINT', 'loopback ws endpoint without credentials or fragment required');
     if (parsed.pathname === '/') parsed.pathname = '/session';
     const socket = new WebSocketImpl(parsed.href);
     const connection = new BidiConnection(socket, trace);
@@ -106,7 +106,7 @@ export const FIREFOX_PREFS = Object.freeze({
   'app.update.auto': false, 'app.update.enabled': false, 'app.normandy.enabled': false,
   'datareporting.policy.dataSubmissionEnabled': false, 'datareporting.healthreport.uploadEnabled': false,
   'toolkit.telemetry.enabled': false, 'toolkit.telemetry.unified': false,
-  'browser.discovery.enabled': false, 'browser.safebrowsing.downloads.remote.enabled': false,
+  'browser.discovery.enabled': false,
   'browser.tabs.loadInBackground': true, 'browser.tabs.loadDivertedInBackground': true,
 });
 
@@ -126,10 +126,17 @@ export async function launchGecko({ executable, root, headless = true, keep = fa
   let lock;
   try { lock = path.join(profile, 'dsh-bidi-owner'); writeFileSync(lock, String(process.pid), { flag: 'wx' }); }
   catch (error) { fail('BROWSER_PROFILE_BUSY', `BiDi profile already owned; never share a single session (${error.code})`); }
-  writeFileSync(path.join(profile, 'user.js'), Object.entries(FIREFOX_PREFS).map(([k, v]) => `user_pref(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join('\n') + '\n');
   const args = ['-no-remote', '-new-instance', '-profile', profile, '-headless', '--remote-debugging-port', '0', 'about:blank'];
-  trace('launch', { executable, args, profile });
-  const child = spawnImpl(executable, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  let child;
+  try {
+    writeFileSync(path.join(profile, 'user.js'), Object.entries(FIREFOX_PREFS).map(([k, v]) => `user_pref(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join('\n') + '\n');
+    trace('launch', { executable, args, profile });
+    child = spawnImpl(executable, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  } catch (error) {
+    rmSync(lock, { force: true });
+    if (!keep) rmSync(profile, { recursive: true, force: true });
+    throw error;
+  }
   let stderr = '', exited = false, cleaned = false;
   const exit = new Promise(resolve => child.once('exit', (code, signal) => { exited = true; trace('exit', { pid: child.pid, code, signal }); resolve(); }));
   child.stdout.on('data', data => trace('stdout', String(data)));
@@ -216,22 +223,34 @@ export class BidiBrowserLane {
     check(request);
     if (this.stopping) fail('BROWSER_DISCONNECTED', 'lane is stopping');
     if (this.env.WCU_BROWSER_LANE === 'off') fail('BROWSER_LANE_UNAVAILABLE', 'browser lane is disabled');
+    if (this.launching) { const connection = await this.launching; check(request); return connection; }
     if (this.connection?.closed) fail('BROWSER_DISCONNECTED', 'restart lane after disconnect; mutation replay is unsafe');
     if (this.connection) return this.connection;
     this.launching ??= (async () => {
-      this.executable ??= await discoverGecko(this.env);
-      if (!this.executable) fail('BROWSER_LANE_UNAVAILABLE', 'no registered Firefox-family application found; set WCU_BROWSER_EXE');
-      this.owned = await launchGecko({ executable: this.executable.path,
-        root: this.env.WCU_BROWSER_PROFILE || path.join(this.env.LOCALAPPDATA || os.tmpdir(), 'dsh-computer-use-win', 'agent-browser'),
-        headless: this.env.WCU_BROWSER_HEADLESS === '1', keep: this.env.WCU_BROWSER_SIGNIN === '1', trace: this.trace });
+      let endpoint = this.env.WCU_BROWSER_BIDI_URL;
+      if (!endpoint) {
+        this.executable ??= await discoverGecko(this.env);
+        if (!this.executable) fail('BROWSER_LANE_UNAVAILABLE', 'no registered Firefox-family application found; set WCU_BROWSER_EXE');
+        this.owned = await launchGecko({ executable: this.executable.path,
+          root: this.env.WCU_BROWSER_PROFILE || path.join(this.env.LOCALAPPDATA || os.tmpdir(), 'dsh-computer-use-win', 'agent-browser'),
+          headless: this.env.WCU_BROWSER_HEADLESS === '1', keep: this.env.WCU_BROWSER_SIGNIN === '1', trace: this.trace });
+        endpoint = this.owned.endpoint;
+      }
       try {
-        const connection = await BidiConnection.open(this.owned.endpoint, { trace: this.trace });
-        this.connection = connection; this.listen(connection);
+        const connection = await BidiConnection.open(endpoint, { trace: this.trace });
+        this.connection = connection;
         await connection.send('session.new', { capabilities: { alwaysMatch: { unhandledPromptBehavior: { default: 'ignore' } } } });
+        this.sessionOwned = true; this.listen(connection);
         await connection.send('session.subscribe', { events: ['browsingContext.contextCreated', 'browsingContext.contextDestroyed', 'browsingContext.navigationStarted', 'browsingContext.load', 'browsingContext.userPromptOpened', 'browsingContext.userPromptClosed'] });
         await this.refresh();
         return connection;
-      } catch (error) { this.connection?.close(); await this.owned.stop(); throw error; }
+      } catch (error) {
+        // A failed session.new can mean another client owns the single Gecko
+        // session. Never end that client's session or close its browser.
+        if (this.sessionOwned && this.connection && !this.connection.closed) await this.connection.send('session.end', {}, 3000).catch(() => {});
+        this.sessionOwned = false; this.connection?.close(); this.connection = null;
+        await this.owned?.stop(); this.owned = null; throw error;
+      }
     })().finally(() => { this.launching = null; });
     const connection = await this.launching; check(request); return connection;
   }
@@ -416,18 +435,20 @@ export class BidiBrowserLane {
   }
   async annotateWindows(result) {
     if (this.env.WCU_BROWSER_LANE === 'off') return result;
+    if (this.launching) await this.launching;
+    if (this.env.WCU_BROWSER_BIDI_URL) await this.ensure();
     if (this.connection && !this.connection.closed) await this.refresh();
-    result.browserLane = { browsers: this.connection && !this.connection.closed ? [{ id: this.key, name: this.executable?.name ?? 'Gecko', source: 'agent', backend: 'bidi',
-      processId: this.owned?.child.pid, visible: false, newTab: `${this.key}:new-tab`, tabs: [...this.tabs.values()].map(tab => this.describe(tab)) }] : [],
-      use: 'set_value elementId new-tab with URL opens a background Gecko tab. DOM outline is heuristic; prototype requires browserVisible=false.' };
+    result.browserLane = { browsers: this.connection && !this.connection.closed ? [{ id: this.key, name: this.executable?.name ?? 'Gecko', source: this.owned ? 'agent' : 'configured', backend: 'bidi',
+      processId: this.owned?.child.pid, visible: this.owned ? false : null, newTab: `${this.key}:new-tab`, tabs: [...this.tabs.values()].map(tab => this.describe(tab)) }] : [],
+      use: 'set_value elementId new-tab with URL opens a background Gecko tab. DOM outline is heuristic. Automatic launch requires browserVisible=false; WCU_BROWSER_BIDI_URL connects an explicitly configured endpoint.' };
     for (const window of result.windows ?? []) if (this.owned?.child.pid && window.processId === this.owned.child.pid && window.className === 'MozillaWindowClass') window.browser = this.key;
     return result;
   }
   async health() {
-    this.executable ??= await discoverGecko(this.env);
+    if (!this.env.WCU_BROWSER_BIDI_URL) this.executable ??= await discoverGecko(this.env);
     return { enabled: this.env.WCU_BROWSER_LANE !== 'off', app: 'firefox', resolvedApp: 'firefox', backend: 'bidi', experimental: true,
-      agentBrowser: this.executable?.path ?? null, visible: this.env.WCU_BROWSER_HEADLESS !== '1', keepSignIns: this.env.WCU_BROWSER_SIGNIN === '1',
-      connected: this.connection && !this.connection.closed ? [{ id: this.key, source: 'agent' }] : [], limitations: ['headless only', 'DOM outline', 'no profile sharing or reconnect broker', 'no indicator', 'unscaled screenshots'] };
+      agentBrowser: this.executable?.path ?? null, configuredEndpoint: Boolean(this.env.WCU_BROWSER_BIDI_URL), visible: this.env.WCU_BROWSER_BIDI_URL ? null : this.env.WCU_BROWSER_HEADLESS !== '1', keepSignIns: this.env.WCU_BROWSER_SIGNIN === '1',
+      connected: this.connection && !this.connection.closed ? [{ id: this.key, source: this.owned ? 'agent' : 'configured' }] : [], limitations: ['automatic launch is headless only', 'DOM outline', 'one session per browser; no sharing or reconnect broker', 'no indicator', 'unscaled screenshots'] };
   }
   async shutdown() {
     this.stopping = true;
@@ -436,7 +457,12 @@ export class BidiBrowserLane {
       // browser.close asks Gecko to flush cookies. Always restrict to our child.
       await this.connection.send('browser.close', {}, 3000).catch(() => {});
       await Promise.race([this.owned.exit, delay(1500)]);
+    } else if (this.sessionOwned && this.connection && !this.connection.closed) {
+      // The caller owns the configured browser and its tabs/profile. Release
+      // only the session created here, so another client may connect later.
+      await this.connection.send('session.end', {}, 3000).catch(() => {});
     }
+    this.sessionOwned = false;
     this.connection?.close(); await this.owned?.stop();
   }
   close() { this.stopping = true; this.connection?.close(); if (this.owned && !this.owned.exited) this.owned.child.kill(); }

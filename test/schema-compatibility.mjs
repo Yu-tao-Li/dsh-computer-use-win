@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import z from '@deepseek-ai/schemastery';
+import {TOOL_NAMES} from '../mcp/settings.mjs';
 import {volatileEntries,updateVolatile} from '@deepseek-ai/cosmokit';
 const original=z.prototype.volatile;
 try{
@@ -27,7 +28,7 @@ try{
  assert.deepEqual(stale.value[adapter.REPAIRED_SETTINGS],['toolPreset: "smart"','browserApp: "unknown-browser"','browserVisible: "yes"','enabledTools: "removed_tool"']);
  assert.equal(Object.getOwnPropertyDescriptor(stale.value,adapter.REPAIRED_SETTINGS).enumerable,false,'The report is not a setting and is never saved');
  const unknownOnly=validate({enabledTools:['removed_tool']});
- assert.equal(unknownOnly.issues,undefined);assert.equal(unknownOnly.value.enabledTools.get().length,24,'A list of unknown tools falls back to all tools, not none');
+ assert.equal(unknownOnly.issues,undefined);assert.equal(unknownOnly.value.enabledTools.get().length,TOOL_NAMES.length,'A list of unknown tools falls back to all tools, not none');
  const clean=validate({toolPreset:'lite',browserApp:'edge'});
  assert.equal(clean.issues,undefined);assert.equal(clean.value[adapter.REPAIRED_SETTINGS],undefined,'Valid settings are not reported');
  for(const typed of [{stopShortcut:'Esc'},{indicatorIdleMs:99999},{toolPreset:'smart',stopShortcut:'Ctrl'}])assert.ok(validate(typed).issues,'Typed values stay strict: '+JSON.stringify(typed));

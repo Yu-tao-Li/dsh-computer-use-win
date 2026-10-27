@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- #54：编译的辅助 DLL 改为按字节加载，启动错误带阶段和 HRESULT；原生 DLL 缓存按 PowerShell/.NET 运行时区分，并发编译使用独立临时文件。Load compiled helpers from bytes, report startup failures, separate runtime-specific native caches and publish complete cache files atomically.
+- #55：新增 `launch_app`，通过交互桌面 Shell 启动应用，应用不随工具调用或 MCP 进程退出而关闭。支持可执行文件、快捷方式和已安装应用标识；返回“已发送”，需再观察窗口确认。Add desktop-shell app launching with explicit dispatched/observed semantics.
+- #56：窗口范围读取忽略 Gecko 无名布局 Pane 的深度开销。新增可选实验性 Firefox 系 BiDi 后端，支持隐藏自动启动或显式回环端点、DOM 大纲、页面动作和截图。自动可见启动及跨 MCP 共享会话尚未实现。Add Gecko default-depth accessibility and an opt-in experimental BiDi lane; see [scope and setup](docs/browser-bidi.md).
+
 ## 0.5.2 — 2026-10-25
 
 ### 浏览器操控 / Browser Use

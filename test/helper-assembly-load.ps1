@@ -22,11 +22,14 @@ if ($Phase -eq 'main') {
   $Cache = Join-Path ([IO.Path]::GetTempPath()) ('wcu-helper-load-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
   New-Item -ItemType Directory -Path $Cache | Out-Null
   try {
+    $failure = Invoke-Phase 'compile-failure'
+    if (-not $failure.cleaned) { throw 'A failed compilation left its private partial DLL' }
+    Write-Output 'PASS failed compilation reports the original error and removes only its private partial DLL'
     $first = Invoke-Phase 'load'
     if (-not $first.native) { throw 'The native helper did not compile and load' }
     if (-not $first.ocr) { throw "The OCR helper did not compile and load: $($first.ocrError)" }
     $dlls = @(Get-ChildItem -LiteralPath $Cache -Filter 'wcu-*.dll')
-    $leftovers = @(Get-ChildItem -LiteralPath $Cache | Where-Object { $_.Name -match '\.\d+\.dll$' -or $_.Name -like '*.cs' })
+    $leftovers = @(Get-ChildItem -LiteralPath $Cache | Where-Object { $_.Name -match '\.(?:\d+\.)?[0-9a-f]{32}\.dll$|\.\d+\.dll$' -or $_.Name -like '*.cs' })
     if ($leftovers.Count) { throw "Compilation left partial files: $($leftovers.Name -join ', ')" }
     if ($dlls.Count -lt 2) { throw "Expected cached helpers, found: $($dlls.Name -join ', ')" }
     foreach ($dll in $dlls) {
@@ -50,7 +53,10 @@ if ($Phase -eq 'main') {
     if ($isDesktop -and $second.ocrText -notmatch '54') { throw "OCR from the marked cache did not read the test image: '$($second.ocrText)'" }
     Write-Output ("PASS native, OCR{0} helpers load from the marked cache; OCR read '{1}'" -f $(if ($second.wgc) { ' and WGC' } else { " (WGC unavailable here: $($first.wgcError))" }), $second.ocrText)
   } finally {
-    Remove-Item -LiteralPath $Cache -Recurse -Force -ErrorAction SilentlyContinue
+    $cacheFull = [IO.Path]::GetFullPath($Cache)
+    $tempFull = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    if ([IO.Path]::GetDirectoryName($cacheFull) -ne $tempFull -or [IO.Path]::GetFileName($cacheFull) -notlike 'wcu-helper-load-*') { throw 'Refusing cleanup outside the task cache' }
+    Remove-Item -LiteralPath $cacheFull -Recurse -Force -ErrorAction SilentlyContinue
   }
   exit 0
 }
@@ -78,6 +84,26 @@ foreach ($name in 'Write-BackendStage', 'Get-CsHash', 'Import-HelperAssembly', '
   $function = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
   if ($null -eq $function) { throw "Missing backend function $name" }
   . ([scriptblock]::Create($function.Extent.Text))
+}
+if ($Phase -eq 'compile-failure') {
+  $failedDll = Join-Path $Cache 'wcu-failure.dll'
+  $script:FailurePartial = $null
+  $failed = $false
+  try {
+    Import-HelperAssembly -Path $failedDll -Compile {
+      param($out)
+      $script:FailurePartial = $out
+      [IO.File]::WriteAllText($out, 'deliberately incomplete fixture assembly')
+      throw 'fixture compile failed'
+    }
+  } catch {
+    if ($_.Exception.Message -notmatch 'fixture compile failed') { throw }
+    $failed = $true
+  }
+  if (-not $failed -or -not $script:FailurePartial) { throw 'The compiler failure fixture did not execute' }
+  if ((Test-Path -LiteralPath $failedDll) -or (Test-Path -LiteralPath $script:FailurePartial)) { throw 'A failed compilation was published or leaked its private file' }
+  [ordered]@{ cleaned = $true } | ConvertTo-Json -Compress
+  exit 0
 }
 $before = @(Get-ChildItem -LiteralPath $Cache -Filter 'wcu-*.dll').Count
 $result = [ordered]@{ native = $false; ocr = $false; wgc = $false; compiled = $false; ocrText = ''; ocrError = ''; wgcError = '' }

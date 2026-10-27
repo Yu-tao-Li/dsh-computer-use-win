@@ -20,11 +20,13 @@
 
 网页能完成的步骤优先使用浏览器通道；原生应用、浏览器工具栏、无可用 CDP 连接、iframe 内容和 canvas 坐标动作，转为同一目标窗口的 UIA，再用截图/OCR/坐标兜底。必须重新读取桌面状态，不把网页坐标当屏幕坐标。不确定是否成功的动作先观察再决定，不能盲目重放。停止、取消、权限拒绝、禁用或只读控件，不允许通过桌面输入绕过。临时浏览器没有用户登录状态，不能代替已登录工作流。精简/自定义禁用 set_value 时不能新开标签页。设置修改在当前动作完成后重连，会关闭临时浏览器。
 
+Firefox 系网页通道为实验功能：选择“Firefox 系（实验性）”后，自动启动需关闭“显示浏览器窗口”；也可以通过显式 BiDi 端点连接单独启动的浏览器。默认浏览器选项仍按上述 Chrome/Edge 规则回退。Firefox 不具备上述蓝色状态提示、可见登录和多会话共享流程；具体范围见 [BiDi 说明](browser-bidi.md)。桌面通道读取现有 Gecko 窗口无需启用实验选项。
+
 ### 工具加载
 
-在 **全部 / 精简 / 懒启动 / 自定义** 一排选项里选择，默认全部 24 项（23 项桌面工具加管理入口），下方一行说明当前方案。每项设置左边是一张随设置变化的小示意图，右边是名称和开关，两项一行。详细说明收在 ⓘ 图标里，鼠标停上去、点一下或用键盘聚焦时在图标上方弹出，不会被鼠标指针挡住；鼠标可以移到说明上，点一下后移开也不消失，按 Esc 或点别处关闭。精简固定加载 10 项；自定义才展开内部缩进清单，支持逐项、分组、全选和全部关闭。切换方案会保留自定义勾选，保存后在当前动作结束时生效，重启保留选择。agent 不能重新启用用户关闭的工具。
+在 **全部 / 精简 / 懒启动 / 自定义** 一排选项里选择，默认全部 25 项（24 项操作工具加管理入口），下方一行说明当前方案。每项设置左边是一张随设置变化的小示意图，右边是名称和开关，两项一行。详细说明收在 ⓘ 图标里，鼠标停上去、点一下或用键盘聚焦时在图标上方弹出，不会被鼠标指针挡住；鼠标可以移到说明上，点一下后移开也不消失，按 Esc 或点别处关闭。精简固定加载 11 项；自定义才展开内部缩进清单，支持逐项、分组、全选和全部关闭。切换方案会保留自定义勾选，保存后在当前动作结束时生效，重启保留选择。agent 不能重新启用用户关闭的工具。
 
-懒启动仅注册管理入口，允许全部工具按需加载；启动显示“1 项，允许全部 24 项”。切换回自定义会恢复原清单。使用桌面工具前需要加载，`reset` 恢复为管理入口。
+懒启动仅注册管理入口，允许全部工具按需加载；启动显示“1 项，允许全部 25 项”。切换回自定义会恢复原清单。使用桌面工具前需要加载，`reset` 恢复为管理入口。
 
 ### 接管提示
 
@@ -60,7 +62,9 @@ DSH sessions using the same kept profile share one browser. Ending its first cli
 
 Keep sign-ins (cookies) is off by default. When on, the DSH browser keeps one profile per browser (`kept-edge`, `kept-chrome` under `%LOCALAPPDATA%\dsh-computer-use-win\agent-browser`) instead of a temporary one: sites you sign in to in its window stay signed in for later tasks, session cookies included. The first time a task needs a site that asks you to sign in, the agent asks you to sign in once in that window; you type passwords and codes yourself, and Show the browser window must be on. Your own browser is never touched: no remote debugging to turn on and no prompts to allow. With Edge, Edge signs this profile in with the Microsoft account of your Windows, so Microsoft’s own sites are signed in already (Edge 156 has no switch for this); choose Chrome to avoid it. Sign-ins stay when you turn the switch off; to remove them all, exit DSH and delete the folder. With the switch on, the settings page explains this and lists the risks: DSH acts as you on the sites you signed in to there; page text can try to steer the agent; and while the DSH browser runs, other programs on this computer can connect to it through its debugging port. Changing Browser or Keep sign-ins reconnects the plugin’s server after the current action and closes open DSH browsers.
 
-Choose **All / Lite / Lazy / Custom** in one row; a line below describes the selected preset, and each setting shows a small picture of its effect beside its name and switch, two to a row. Details open above the ⓘ icon on hover, click or keyboard focus, so the pointer never covers them; the pointer can move onto the text, a click keeps it open, and Esc or a click elsewhere closes it. All is the default (24 entries); Lite loads 10. Custom reveals the indented checklist with individual/group selection, select-all and disable-all. Preset changes preserve your custom selection. Save applies after the current action finishes and survives restart. Management cannot re-enable user-disabled tools.
+Firefox-family Browser Use is experimental: select Firefox family and turn Show browser window off for automatic launch, or configure a separately started BiDi endpoint. The default selection retains its Chrome/Edge fallback. The blue status UI, automatic visible sign-in and cross-client sharing described above do not apply to BiDi; see [its scope](browser-bidi.md). Gecko desktop accessibility does not require this option.
+
+Choose **All / Lite / Lazy / Custom** in one row; a line below describes the selected preset, and each setting shows a small picture of its effect beside its name and switch, two to a row. Details open above the ⓘ icon on hover, click or keyboard focus, so the pointer never covers them; the pointer can move onto the text, a click keeps it open, and Esc or a click elsewhere closes it. All is the default (25 entries); Lite loads 11. Custom reveals the indented checklist with individual/group selection, select-all and disable-all. Preset changes preserve your custom selection. Save applies after the current action finishes and survives restart. Management cannot re-enable user-disabled tools.
 
 Lazy starts with one management entry while allowing all tools to be loaded on demand. Switching back to Custom restores its saved list; reset returns Lazy to management only.
 

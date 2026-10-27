@@ -23,7 +23,9 @@ async function server(name, { script, temp } = {}) {
   else await copyFile(path.join(source, 'scripts/windows-uia.ps1'), path.join(dir, 'scripts/windows-uia.ps1'));
   const env = temp ? { ...baseEnv, TEMP: temp, TMP: temp } : baseEnv;
   const client = new McpTestClient(process.execPath, [path.join(dir, 'mcp/server.mjs')], { env });
-  clients.push(client); await client.init(); return client;
+  clients.push(client);
+  try { await client.init(); } catch (error) { throw new Error(`${error.message}\n${client.stderr}`, { cause: error }); }
+  return client;
 }
 const health = client => client.request('tools/call', { name: 'windows_computer_use_health', arguments: {} }, 90000);
 async function stop(client) {
@@ -65,7 +67,7 @@ try {
   result = await health(client);
   assert.equal(result.isError, undefined, text(result));
   await stop(client);
-  const dlls = (await readdir(cache)).filter(name => /^wcu-native-[0-9a-f]{16}\.dll$/.test(name));
+  const dlls = (await readdir(cache)).filter(name => /^wcu-native-(?:desktop|core)-clr\d+-[0-9a-f]{16}\.dll$/.test(name));
   assert.equal(dlls.length, 1, 'The first start caches the native helper');
   for (const name of dlls) await writeFile(path.join(cache, name + ':Zone.Identifier'), '[ZoneTransfer]\r\nZoneId=3\r\n');
   assert.match(await readFile(path.join(cache, dlls[0] + ':Zone.Identifier'), 'utf8'), /ZoneId=3/);

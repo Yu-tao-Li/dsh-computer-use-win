@@ -4,6 +4,22 @@ The Node server enforces the same schemas returned by tools/list. Unknown proper
 
 ## Observation and task verification
 
+Gecko desktop trees now apply the same depth accounting to unnamed Gecko layout panes as Chromium panes: window-scoped reads reach page content at default depths, while desktop overviews remain bounded. This is independent of the experimental browser lane; it does not claim that every Firefox/ESR provider needs Chromium-style warm-up.
+
+## Launch an application
+
+`windows_computer_use_launch_app` accepts `target` (absolute `.exe`/`.com`/`.lnk`, executable name from PATH/App Paths, exact installed application name or AppUserModelID), optional `arguments`, `workingDirectory`, `activate` and `waitMs` (0–10000, default 1500). Arguments are a Windows command-line string passed directly to the target, not interpreted by a command shell. Installed-app identifiers do not accept arguments or a working directory. URLs and scripts are not launch targets.
+
+The interactive Explorer desktop starts the application with its environment and lifetime. This keeps it alive when the calling tool's kill-on-close Job or MCP server ends; it does not request elevation or change Job limits. An absent Explorer desktop returns an explicit error. `activate:false` requests a nonactivating show, but an application can activate itself.
+
+Success is `verification:"dispatched"`, not proof that a window appeared. `observedNewWindows` lists newly observed windows, which may include unrelated applications; identify the intended window with `list_windows` or `wait_for`. Single-instance applications can reuse an existing window. Cancellation after dispatch does not undo launch; observe before retrying.
+
+## Experimental Gecko browser lane
+
+Firefox-family browsers can opt into a separate WebDriver BiDi backend, using headless automatic launch or `WCU_BROWSER_BIDI_URL` for an explicitly supplied loopback endpoint. See [setup, supported actions and limitations](../browser-bidi.md). The detailed Browser Use behavior below describes the Chromium CDP backend; BiDi does not yet provide all of its lifecycle, indicator or upload/download features.
+
+## Desktop observation details
+
 Prefer scoped UIA observations. find supplements an empty sparse (at most 20 nodes, a heuristic) or incomplete search with OCR, unless ocrFallback:false or controlType is specified. OCR candidates are recognized text and screen coordinates, not UIA ids. Inspect ocr.lines if a literal query misses a placeholder.
 
 Chromium-based windows (Electron, Chrome/Edge, CEF, WebView2) build a page's accessibility tree only after a UIA client reads a property of the page root, the first child of each Chrome_RenderWidgetHostHWND window. The control view skips that empty root, so a tree walk alone can leave such a window at its frame and layout panes. Before a window-scoped snapshot, accessibility_tree, find or element wait_for, the backend reads that root for each visible renderer window and waits for the page tree: at most 1.5 seconds and half of treeTimeoutMs per call. The result then carries webContent with renderers, ready, waitedMs and state: ready, partial, starting (observe again shortly) or unavailable (no page tree after 30 seconds of observations, or an unresponsive renderer). element_info by point and OCR resolveControl warm the window the same way before hit-testing. In window-scoped trees, unnamed Chromium layout panes do not count toward maxDepth, so the default depths reach the page; reported depth values stay structural. Desktop-scoped trees neither warm pages nor change depth counting, so they remain an overview of every window.

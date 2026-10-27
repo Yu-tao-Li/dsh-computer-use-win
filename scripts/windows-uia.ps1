@@ -421,14 +421,17 @@ function Get-CsHash {
 function Import-HelperAssembly {
   param([string]$Path, [scriptblock]$Compile)
   if (-not (Test-Path -LiteralPath $Path)) {
-    $partial = $Path -replace '\.dll$', (".$PID.dll")
-    & $Compile $partial
-    try { [System.IO.File]::Move($partial, $Path) }
-    catch { if (-not (Test-Path -LiteralPath $Path)) { throw } }
-    if (Test-Path -LiteralPath $partial) {
-      [void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($partial))
-      Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
-      return
+    $partial = $Path -replace '\.dll$', (".$PID." + [Guid]::NewGuid().ToString('N') + '.dll')
+    try {
+      & $Compile $partial
+      try { [System.IO.File]::Move($partial, $Path) }
+      catch { if (-not (Test-Path -LiteralPath $Path)) { throw } }
+      if (Test-Path -LiteralPath $partial) {
+        [void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($partial))
+        return
+      }
+    } finally {
+      if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue }
     }
   }
   [void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($Path))
@@ -441,7 +444,10 @@ function Load-Assemblies {
   # 150%-scaled values like 3414x960 instead of physical 5120x1440).
   if (-not ("WindowsComputerUseNative" -as [type])) {
     Write-BackendStage 'native-load-start'
-    $dll = Join-Path $env:TEMP ("wcu-native-" + (Get-CsHash -Source $script:WcuCs) + ".dll")
+    # Add-Type targets the current runtime. A Core-built helper cannot be used
+    # by Windows PowerShell 5.1 even when its C# source is identical.
+    $runtimeKey = $PSVersionTable.PSEdition.ToLowerInvariant() + '-clr' + [Environment]::Version.Major
+    $dll = Join-Path $env:TEMP ("wcu-native-" + $runtimeKey + '-' + (Get-CsHash -Source $script:WcuCs) + ".dll")
     Import-HelperAssembly -Path $dll -Compile { param($out) Add-Type -TypeDefinition $script:WcuCs -OutputAssembly $out }
   }
   Write-BackendStage 'native-load-complete'
@@ -2524,6 +2530,86 @@ function Get-TreeResult {
 # Action dispatch (shared by one-shot and persistent modes)
 # ============================================================================
 
+function Resolve-LaunchTarget {
+  param([string]$Target)
+  $targetValue = [Environment]::ExpandEnvironmentVariables($Target.Trim())
+  if ([string]::IsNullOrWhiteSpace($targetValue) -or $targetValue -match '[\x00-\x1f]') { throw 'LAUNCH_INVALID_TARGET: supply an executable, shortcut, installed app name or AppUserModelID.' }
+  # Resolve files and application commands without interpreting shell syntax.
+  $file = $null
+  if ([IO.Path]::IsPathRooted($targetValue)) {
+    if ($targetValue -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))') { throw 'LAUNCH_INVALID_TARGET: supply a fully qualified absolute path, not a drive-relative or root-relative path.' }
+    if (-not (Test-Path -LiteralPath $targetValue -PathType Leaf)) { throw "LAUNCH_NOT_FOUND: $targetValue" }
+    $file = (Get-Item -LiteralPath $targetValue).FullName
+  } elseif ($targetValue -notmatch '[/\\:]') {
+    $command = Get-Command -Name $targetValue -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $targetValue -or $_.Name -ieq ($targetValue + '.exe') } | Select-Object -First 1
+    if ($command) { $file = $command.Source }
+    if (-not $file) {
+      $exeName = if ($targetValue.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) { $targetValue } else { $targetValue + '.exe' }
+      foreach ($hive in @('HKCU:', 'HKLM:')) {
+        $key = Get-Item -LiteralPath ($hive + '\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\' + $exeName) -ErrorAction SilentlyContinue
+        if ($key) {
+          $candidate = [Environment]::ExpandEnvironmentVariables(([string]$key.GetValue('')).Trim('"'))
+          if (Test-Path -LiteralPath $candidate -PathType Leaf) { $file = (Get-Item -LiteralPath $candidate).FullName; break }
+        }
+      }
+    }
+  }
+  if ($file) {
+    if ([IO.Path]::GetExtension($file) -notin @('.exe', '.com', '.lnk')) { throw 'LAUNCH_INVALID_TARGET: only .exe, .com and .lnk files are supported.' }
+    return @{ target=$file; kind='file' }
+  }
+  # Exact matching prevents an ambiguous display name from launching the wrong app.
+  $apps = @(Get-StartApps -ErrorAction Stop | Where-Object { $_.AppID -ieq $targetValue -or $_.Name -ieq $targetValue })
+  if ($apps.Count -eq 0) { throw "LAUNCH_NOT_FOUND: '$targetValue'. Supply a full executable path or an installed AppUserModelID." }
+  if ($apps.Count -ne 1) { throw "LAUNCH_AMBIGUOUS: '$targetValue' matches several installed apps; use its AppUserModelID or full executable path." }
+  return @{ target=('shell:AppsFolder\' + $apps[0].AppID); kind='installed-app' }
+}
+
+function Invoke-LaunchApp {
+  param([object]$InputObject)
+  $resolved = Resolve-LaunchTarget ([string](Get-Prop $InputObject 'target' ''))
+  $arguments = [string](Get-Prop $InputObject 'arguments' '')
+  $directory = [string](Get-Prop $InputObject 'workingDirectory' '')
+  if ($arguments -match '[\x00\r\n]' -or $directory -match '[\x00-\x1f]') { throw 'LAUNCH_INVALID_ARGUMENTS: arguments and workingDirectory must be single-line strings.' }
+  if ($directory) {
+    $directory = [Environment]::ExpandEnvironmentVariables($directory)
+    if ($directory -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))' -or -not (Test-Path -LiteralPath $directory -PathType Container)) { throw 'LAUNCH_INVALID_DIRECTORY: supply an existing fully qualified absolute directory.' }
+    $directory = (Get-Item -LiteralPath $directory).FullName
+  }
+  if ($resolved.kind -eq 'installed-app' -and ($arguments -or $directory)) { throw 'LAUNCH_INVALID_ARGUMENTS: AppUserModelID launches do not accept arguments or workingDirectory.' }
+  $waitMs = [int](Get-Prop $InputObject 'waitMs' 1500)
+  if ($waitMs -lt 0 -or $waitMs -gt 10000) { throw 'LAUNCH_INVALID_ARGUMENTS: waitMs must be 0-10000.' }
+  $before = @(Get-NativeWindowList -MaxWindows 1000 | ForEach-Object { $_.ToArray() } | ForEach-Object { $_.nativeWindowHandle })
+  $shellWindows = $null; $desktop = $null; $document = $null; $application = $null
+  try {
+    # The desktop folder view belongs to Explorer. Its ShellExecute starts the
+    # application with the desktop environment/lifetime, outside the short-lived
+    # tool's kill-on-close Job (#55). No elevation or breakaway flag is requested.
+    $shellWindows = [Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]'9BA05972-F6A8-11CF-A442-00A0C90A8F39'))
+    $location = 0; $root = $null; $desktopHwnd = 0
+    $desktop = $shellWindows.FindWindowSW([ref]$location, [ref]$root, 8, [ref]$desktopHwnd, 1)
+    if ($null -eq $desktop) { throw 'The interactive Explorer desktop is unavailable.' }
+    $document = $desktop.Document
+    $application = $document.Application
+    [void](Test-Failsafe)
+    $show = if ([bool](Get-Prop $InputObject 'activate' $false)) { 1 } else { 4 }
+    $application.ShellExecute($resolved.target, $arguments, $directory, 'open', $show)
+  } catch {
+    throw ('LAUNCH_SHELL_FAILED: ' + $_.Exception.Message + ' An interactive Explorer desktop is required; the request is not retried as a tool child process.')
+  } finally {
+    foreach ($com in @($application, $document, $desktop, $shellWindows)) {
+      if ($null -ne $com -and [Runtime.InteropServices.Marshal]::IsComObject($com)) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($com) }
+    }
+  }
+  if ($waitMs) { Start-Sleep -Milliseconds $waitMs }
+  $observed = @(Get-NativeWindowList -MaxWindows 1000 | ForEach-Object { $_.ToArray() } | Where-Object { $before -notcontains $_.nativeWindowHandle })
+  return [ordered]@{
+    ok=$true; action='launch_app'; target=$resolved.target; launchMethod='explorer-shell'; verification='dispatched'
+    observedNewWindows=$observed
+    note='The shell accepted the request. New windows are observations, not confirmed matches; an app may reuse an existing window or show none. Verify with list_windows/wait_for. activate=false requests no activation, but applications may activate themselves.'
+  }
+}
+
 function Invoke-Action {
   param([string]$Action, [object]$inputObject = $null)
 
@@ -2532,12 +2618,13 @@ function Invoke-Action {
   # operation series (host turn) this call belongs to.
   $script:WcuQuiet = [bool](Get-Prop $inputObject '_wcuQuiet' $false)
   $script:WcuSeries = Get-Prop $inputObject '_wcuSeries' $null
-  if ($Action -in @('click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','close_window','move_window') -or (Get-Prop $inputObject 'activate' $false)) {
+  if ($Action -in @('launch_app','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','close_window','move_window') -or (Get-Prop $inputObject 'activate' $false)) {
     if ($env:WCU_CANCEL_EVENT) { [WindowsComputerUseNative]::SetStopListener([int](Get-Prop $inputObject '_wcuTakeoverPid' 0)) }
     [void](Test-Failsafe)
   }
 
   switch ($Action) {
+    "launch_app" { return (Invoke-LaunchApp $inputObject) }
     "health" {
       $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
       # Health checks backend availability independently of any application's

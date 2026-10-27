@@ -5,6 +5,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+import { McpTestClient } from './mcp-test-client.mjs';
 import { BidiConnection, BidiBrowserLane, GECKO_APP_ID, geckoApplication, geckoProfileName, discoverGecko, remoteValue, localValue, keyActions, bidiUrl, launchGecko } from '../mcp/browser-bidi.mjs';
 import { domElement, domOutline } from '../mcp/browser-bidi-dom.mjs';
 import { BrowserLane, appForProgId, isBrowserCall, isQuietCall } from '../mcp/browser.mjs';
@@ -48,6 +50,8 @@ await test('close, malformed JSON and send failure reject pending work', async (
 });
 await test('loopback restriction and endpoint /session normalization', async () => {
   await assert.rejects(BidiConnection.open('ws://example.com/session'), /BROWSER_ENDPOINT/);
+  await assert.rejects(BidiConnection.open('ws://user:secret@127.0.0.1/session'), /BROWSER_ENDPOINT/);
+  await assert.rejects(BidiConnection.open('ws://127.0.0.1/session#fragment'), /BROWSER_ENDPOINT/);
   class OpeningSocket extends FakeSocket { constructor(url) { super(); assert.equal(url, 'ws://127.0.0.1:1234/session'); queueMicrotask(() => this.dispatchEvent(new Event('open'))); } }
   const c = await BidiConnection.open('ws://127.0.0.1:1234', { WebSocketImpl: OpeningSocket }); c.close();
 });
@@ -74,7 +78,14 @@ try {
 await test('settings and existing browser/quiet routing accept Gecko without new tools', () => {
   assert.equal(normalizeSettings({ browserApp: 'firefox' }).browserApp, 'firefox');
   assert.ok(isBrowserCall({ elementId: 't123abc:42' })); assert.ok(isQuietCall('click', { browserTab: 't123abc' }));
+  assert.equal(isQuietCall('launch_app', { target: 'notepad.exe' }), true);
   assert.equal(appForProgId('MSEdgeHTM'), 'edge'); assert.equal(appForProgId('ChromeHTML'), 'chrome');
+});
+await test('Firefox OS default retains Chromium fallback until explicitly selected', async () => {
+  const lane = new BrowserLane({ env: {} }); lane.resolveApp = async () => (lane.resolvedApp = 'firefox');
+  assert.equal(await lane.bidiBackend(), null);
+  assert.equal((await lane.health()).backend, undefined); assert.equal(lane.bidi, undefined);
+  await lane.shutdown();
 });
 await test('visible launch refuses before profile or process side effects', async () => {
   await assert.rejects(launchGecko({ headless: false }), /VISIBLE_UNVERIFIED/);
@@ -100,6 +111,15 @@ await test('owned launch has isolated flags, parses split stderr and cleanup is 
       } });
     assert.equal(owned.endpoint, 'ws://127.0.0.1:1234'); assert.equal(existsSync(owned.profile), true);
     await owned.stop(); await owned.stop(); assert.equal(existsSync(owned.profile), false); assert.ok(!traces.some(t => t.kind === 'cleanupError'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+await test('profile initialization failure releases only the newly acquired owner lock', async () => {
+  const root = mkdtempSync(path.join(process.env.WCU_TEST_OUTPUT || os.tmpdir(), 'wcu-bidi-init-'));
+  try {
+    const executable = path.join(root, 'never-spawn.exe'), profile = path.join(root, geckoProfileName(executable));
+    mkdirSync(profile); mkdirSync(path.join(profile, 'user.js'));
+    await assert.rejects(launchGecko({ executable, root, keep: true }), /EISDIR|EPERM|EACCES/);
+    assert.equal(existsSync(path.join(profile, 'dsh-bidi-owner')), false); assert.equal(existsSync(profile), true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 await test('URLs and keys reject desktop shortcuts and ambiguous input', () => {
@@ -133,6 +153,53 @@ class FakeBidi {
   close() { this.closed = true; }
 }
 function fixture() { const connection = new FakeBidi(); const lane = new BidiBrowserLane({ env: {}, connection }); const tab = lane.tabFor({ context: 'context-1', url: 'https://fixture.test' }); connection.next = 1; return { connection, lane, tab }; }
+await test('explicit endpoint health is cold and does not require a local executable', async () => {
+  const lane = new BrowserLane({ env: { WCU_BROWSER_BIDI_URL: 'ws://127.0.0.1:1234', WCU_BROWSER_APP: 'edge', WCU_BROWSER_EXE: 'missing.exe' } });
+  const health = await lane.health(); assert.equal(health.backend, 'bidi'); assert.equal(health.configuredEndpoint, true);
+  assert.equal(health.agentBrowser, null); assert.equal(lane.bidi.connection, undefined); await lane.shutdown();
+});
+await test('configured endpoint ends only its own session and permits retry after busy', async () => {
+  const open = BidiConnection.open;
+  try {
+    const rejected = new FakeBidi(); rejected.send = async function(method) { this.calls.push({ method }); throw new Error('Maximum number of active sessions'); };
+    BidiConnection.open = async () => rejected;
+    const lane = new BidiBrowserLane({ env: { WCU_BROWSER_BIDI_URL: 'ws://127.0.0.1:1234' } });
+    await assert.rejects(lane.ensure(), /Maximum number/); assert.deepEqual(rejected.calls.map(c => c.method), ['session.new']);
+    assert.equal(lane.connection, null); assert.equal(lane.owned, null);
+    const accepted = new FakeBidi(); BidiConnection.open = async () => accepted;
+    await lane.ensure(); assert.equal(lane.sessionOwned, true); await lane.shutdown();
+    assert.ok(accepted.calls.some(c => c.method === 'session.end')); assert.ok(!accepted.calls.some(c => c.method === 'browser.close'));
+  } finally { BidiConnection.open = open; }
+});
+await test('failed configured session subscription releases its created session', async () => {
+  const open = BidiConnection.open;
+  try {
+    const connection = new FakeBidi(), send = connection.send.bind(connection);
+    connection.send = async (method, params) => { if (method === 'session.subscribe') throw new Error('subscription failed'); return send(method, params); };
+    BidiConnection.open = async () => connection;
+    const lane = new BidiBrowserLane({ env: { WCU_BROWSER_BIDI_URL: 'ws://127.0.0.1:1234' } });
+    await assert.rejects(lane.ensure(), /subscription failed/);
+    assert.ok(connection.calls.some(c => c.method === 'session.end')); assert.ok(!connection.calls.some(c => c.method === 'browser.close'));
+  } finally { BidiConnection.open = open; }
+});
+await test('concurrent endpoint callers wait for session initialization', async () => {
+  const open = BidiConnection.open;
+  try {
+    const connection = new FakeBidi(), send = connection.send.bind(connection); let release;
+    const initialized = new Promise(resolve => { release = resolve; }); let ready = false;
+    connection.send = async (method, params) => {
+      if (method === 'session.new') { await initialized; ready = true; }
+      if (method === 'browsingContext.getTree') assert.equal(ready, true);
+      return send(method, params);
+    };
+    BidiConnection.open = async () => connection;
+    const lane = new BidiBrowserLane({ env: { WCU_BROWSER_BIDI_URL: 'ws://127.0.0.1:1234' } });
+    const first = lane.ensure(); await Promise.resolve();
+    const second = lane.annotateWindows({ windows: [] }); release();
+    await Promise.all([first, second]); assert.equal(connection.calls.filter(c => c.method === 'session.new').length, 1);
+    await lane.shutdown();
+  } finally { BidiConnection.open = open; }
+});
 await test('invalid browser context is diagnosed instead of issuing page commands', async () => {
   const { lane, connection } = fixture(); connection.send = async () => ({ contexts: [{ context: null }] });
   await assert.rejects(lane.refresh(), /BROWSER_BIDI_CONTEXT.*content-process/);
@@ -284,5 +351,45 @@ else {
       await lane.run('close_window', { browserTab: second.meta.opened.id });
       await lane.run('close_window', { browserTab: tab }); console.log('PASS live Gecko core lane workflow');
     } finally { await lane.shutdown(); }
+    // Emulate a caller-provided endpoint using another test-owned browser.
+    // The lane must leave this browser alive and release only its own session.
+    const owned = await launchGecko({ executable: executable.path, root, headless: true });
+    const external = new BidiBrowserLane({ env: { WCU_BROWSER_BIDI_URL: owned.endpoint } });
+    const competing = new BidiBrowserLane({ env: { WCU_BROWSER_BIDI_URL: owned.endpoint } });
+    let verify, client;
+    try {
+      const listing = await external.annotateWindows({ windows: [] });
+      assert.equal(listing.browserLane.browsers[0].source, 'configured'); assert.equal(external.owned, undefined);
+      const opened = await external.run('set_value', { elementId: 'new-tab', value: 'data:text/html,<h1>External fixture</h1>' });
+      await assert.rejects(competing.ensure(), /Maximum number of active sessions/);
+      assert.match((await external.run('tree', { browserTab: opened.meta.opened.id })).text, /External fixture/);
+      await external.shutdown(); assert.equal(owned.exited, false);
+      await competing.ensure();
+      assert.ok([...competing.tabs.values()].some(t => /External%20fixture|External fixture/.test(t.url)));
+      await competing.shutdown(); assert.equal(owned.exited, false);
+      client = new McpTestClient(process.execPath, [path.join(import.meta.dirname, '../mcp/server.mjs')], {
+        env: { ...process.env, WCU_BROWSER_BIDI_URL: owned.endpoint, WCU_INDICATOR: '0', WCU_TEST_NO_TAKEOVER: '1' },
+      });
+      const call = async (name, args) => {
+        const result = await client.call('windows_computer_use_' + name, args);
+        assert.ok(!result.isError, JSON.stringify(result)); return result;
+      };
+      await client.init();
+      const mcpPage = await call('set_value', { elementId: 'new-tab', value: 'data:text/html,<h1>MCP BiDi fixture</h1><label>Name<input></label>' });
+      const mcpMeta = JSON.parse(mcpPage.content.find(c => c.type === 'text').text);
+      assert.equal(mcpMeta.backend, 'bidi');
+      const found = await call('find', { browserTab: mcpMeta.opened.id, query: 'Name' });
+      const field = JSON.parse(found.content.find(c => c.type === 'text').text).results[0].id;
+      const set = await call('set_value', { elementId: field, value: 'MCP 中文' });
+      assert.equal(JSON.parse(set.content.find(c => c.type === 'text').text).verifyValue, 'MCP 中文');
+      assert.ok((await call('screenshot', { browserTab: mcpMeta.opened.id })).content.some(c => c.type === 'image' && c.mimeType === 'image/png'));
+      client.child.stdin.end();
+      for (let i = 0; client.child.exitCode === null && i < 50; i++) await delay(100);
+      assert.equal(client.child.exitCode, 0, client.stderr); assert.equal(owned.exited, false);
+      verify = await BidiConnection.open(owned.endpoint);
+      await verify.send('session.new', { capabilities: {} });
+      assert.ok((await verify.send('browsingContext.getTree')).contexts.length >= 2);
+      await verify.send('browser.close'); console.log('PASS configured BiDi endpoint: existing tabs, busy-session isolation, browser survives shutdown and reconnect; real MCP read/write/screenshot and graceful exit');
+    } finally { if (client?.child.exitCode === null) client.close(); await external.shutdown(); await competing.shutdown(); verify?.close(); await owned.stop(); }
   }
 }

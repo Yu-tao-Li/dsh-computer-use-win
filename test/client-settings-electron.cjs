@@ -34,11 +34,11 @@ app.whenReady().then(async()=>{
   );
   await until("!!document.getElementById('wincu-page-tool-screenshot')");
   assert.equal(await evaluate("document.querySelector('[data-wincu-tools]').open"),false,'Tool checklist must be collapsed by default');
-  assert.equal(await evaluate("[...document.querySelectorAll('[data-wincu-tool]')].filter(x=>x.checked).length"),24,'All tools must be selected by default, including in an older lite profile');
+  assert.equal(await evaluate("[...document.querySelectorAll('[data-wincu-tool]')].filter(x=>x.checked).length"),25,'All tools must be selected by default, including in an older lite profile');
   assert.equal(await evaluate("document.getElementById('wincu-page-toolPreset-full').checked"),true);
   assert.equal(await evaluate("document.querySelector('[data-wincu-tools]').hidden"),true,'Custom list belongs inside the Custom preset');
   await evaluate("document.getElementById('wincu-page-toolPreset-lite').click()");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('10 / 24')");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('11 / 25')");
   await evaluate("window.clickButton('放弃更改')");
   await until("document.getElementById('wincu-page-toolPreset-full').checked");
   assert.equal(await evaluate("document.getElementById('wincu-page-browserFirst').checked"),true);
@@ -65,6 +65,10 @@ app.whenReady().then(async()=>{
   assert.ok(!/inspect|remote-debugging|允许提示/.test(notice.text.replace('也不会弹出允许提示','')),'Nothing to set up in the user\'s own browser');
   assert.ok(notice.edge&&!notice.hidden,'The default browser may be Edge, so its Microsoft account sign-in is named');
   assert.ok(notice.inside&&notice.fits,'The notice fits the page');
+  await chooseApp('firefox');
+  await until("!!document.querySelector('[data-wincu-firefox-notice]')");
+  assert.match(await evaluate("document.querySelector('[data-wincu-firefox-notice]').textContent"),/实验|隐藏|BiDi/);
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-signin-notice]')"),false,'Firefox must not offer Chromium visible sign-in instructions');
   await chooseApp('chrome');
   await until("!document.querySelector('[data-wincu-signin-edge]')");
   await evaluate("document.getElementById('wincu-page-browserVisible').click()");
@@ -154,7 +158,7 @@ app.whenReady().then(async()=>{
   await until("document.body.textContent.includes('已保存')");
   assert.equal(await evaluate('window.writes.length'),1,'Save all changed fields in a single host transaction');
   assert.equal(await evaluate("window.snapshot.value.enabledTools.includes('drag')"),false);
-  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),23);
+  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),24);
   assert.equal(await evaluate('window.snapshot.value.indicatorPosition'),'bottom');
   assert.equal(await evaluate('window.snapshot.value.cursorIndicatorEnabled'),false,'Pointer switch must persist in the same atomic save');
   assert.equal(await evaluate("document.getElementById('wincu-page-remoteIndicatorVisible').checked"),true);
@@ -185,18 +189,18 @@ app.whenReady().then(async()=>{
   await evaluate("window.clickButton('全选')");
   await until("[...document.querySelectorAll('[data-wincu-tool]')].every(x=>x.checked)");
   await evaluate("window.clickButton('保存更改')");
-  await until("window.snapshot.value.enabledTools.length===24");
+  await until("window.snapshot.value.enabledTools.length===25");
   await evaluate("window.chooseTool('drag')");
   await until("!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='保存更改').disabled");
   await evaluate("window.clickButton('保存更改')");
-  await until("window.snapshot.value.enabledTools.length===23");
+  await until("window.snapshot.value.enabledTools.length===24");
   await evaluate("document.getElementById('wincu-page-toolPreset-full').click()");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('24 / 24')");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('25 / 25')");
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.toolPreset==='full'");
-  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),23,'Presets must keep the custom selection');
+  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),24,'Presets must keep the custom selection');
   await evaluate("document.getElementById('wincu-page-toolPreset-lite').click()");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('10 / 24')");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('11 / 25')");
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.toolPreset==='lite'");
   await evaluate("document.getElementById('wincu-page-toolPreset-lazy').click()");
@@ -205,7 +209,7 @@ app.whenReady().then(async()=>{
   assert.equal(await evaluate('window.snapshot.value.toolPreset'),'lite','Lazy stays a draft until saved');
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.toolPreset==='lazy'");
-  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),23,'Lazy preserves custom restrictions for a later Custom selection');
+  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),24,'Lazy preserves custom restrictions for a later Custom selection');
   await evaluate("window.renderPage('en')");
   await until("document.getElementById('wincu-page-toolPreset-lazy').checked&&document.body.textContent.includes('1 at startup')");
   await evaluate("window.renderPage('zh')");
@@ -213,12 +217,12 @@ app.whenReady().then(async()=>{
   await new Promise(resolve=>setTimeout(resolve,100));
   await savePicture('settings-lazy.png');
   await evaluate("document.getElementById('wincu-page-toolPreset-custom').click()");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('23 / 24')");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('24 / 25')");
   assert.equal(await evaluate("document.getElementById('wincu-page-tool-drag').checked"),false);
   await evaluate("window.clickButton('全选')");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('24 / 24')");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('25 / 25')");
   await evaluate("window.clickButton('保存更改')");
-  await until("window.snapshot.value.toolPreset==='custom'&&window.snapshot.value.enabledTools.length===24");
+  await until("window.snapshot.value.toolPreset==='custom'&&window.snapshot.value.enabledTools.length===25");
   await evaluate("window.clickButton('预览')");
   await until("window.snapshot.value.previewToken>0");
   assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='恢复桌面控制')"),false,'A new task resumes automatically; no settings resume button is needed');
@@ -259,7 +263,7 @@ app.whenReady().then(async()=>{
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.stopShortcut===''");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='恢复默认（Esc）').disabled"),true,'Default reset must remain visible and disabled when already using Esc');
-  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),24,'Restoring the stop shortcut must preserve selected tools');
+  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),25,'Restoring the stop shortcut must preserve selected tools');
   // The support note collapses to one project link. The choice saves at once
   // and leaves a pending draft alone.
   await evaluate("document.getElementById('wincu-page-indicatorEnabled').click()");
