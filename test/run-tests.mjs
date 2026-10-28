@@ -50,7 +50,8 @@ const suites = [
   ['browser-visible', process.execPath, ['test/browser-visible.mjs']],
   ['browser-reconnect', process.execPath, ['test/browser-reconnect.mjs']],
   ['browser-signin', process.execPath, ['test/browser-signin.mjs']],
-  ['browser-profile-lifecycle', process.execPath, ['test/browser-profile-lifecycle.mjs', path.join(root, 'browser-profile-lifecycle')]],
+  // 22 real Chrome/Edge restarts: 90-140 s on CI runners, past 180 s on a slow one.
+  ['browser-profile-lifecycle', process.execPath, ['test/browser-profile-lifecycle.mjs', path.join(root, 'browser-profile-lifecycle')], 360000],
   ['ocr-query-contract', powershell, ['-NoProfile', '-File', 'test/ocr-query-contract.ps1']],
   ['native-input-errors', powershell, ['-NoProfile', '-File', 'test/native-input-errors.ps1']],
   ['input-upgrade-contract', powershell, ['-NoProfile', '-File', 'test/input-upgrade-contract.ps1']],
@@ -60,7 +61,7 @@ const results = [];
 const selected = process.env.WCU_TEST_SUITES?.split(',').filter(Boolean);
 if (selected?.some(name => !suites.some(suite => suite[0] === name))) throw new Error('Unknown WCU_TEST_SUITES selection');
 console.log(`Isolated test artifacts: ${root}`);
-for (const [name, command, args] of suites) {
+for (const [name, command, args, timeout = 180000] of suites) {
   if (selected && !selected.includes(name)) continue;
   const temp = path.join(root, name);
   await mkdir(temp);
@@ -70,7 +71,7 @@ for (const [name, command, args] of suites) {
     env: { ...process.env, TEMP: temp, TMP: temp, NODE_ENV: 'test', WCU_BROWSER_HEADLESS: '1', WCU_TEST_NO_TAKEOVER: '1', WCU_INDICATOR: '0', WINDOWS_CU_POWERSHELL: powershell },
     windowsHide: true,
     encoding: 'utf8',
-    timeout: 180000,
+    timeout,
     maxBuffer: 4 * 1024 * 1024
   });
   await writeFile(path.join(temp, 'stdout.log'), result.stdout || '');
