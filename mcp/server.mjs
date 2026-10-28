@@ -127,10 +127,10 @@ const webContentNote = " In a Chromium-based window (Electron, Chrome/Edge, CEF,
 const tools = [
   {
     name: "windows_computer_use_launch_app",
-    description: "Launch an executable, shortcut or installed application through the interactive Windows desktop Shell. The app outlives the tool call and MCP server; it uses the desktop's environment. Requires Explorer. A successful result means dispatched; verify the intended window with list_windows/wait_for. Applications may activate themselves even with activate:false. Does not interpret shell commands or request elevation.",
+    description: "Launch an executable, shortcut or installed application through the interactive Windows desktop Shell. The app outlives the tool call and MCP server; it uses the desktop's environment. Requires Explorer. A successful result means dispatched; verify the intended window with list_windows/wait_for. Applications may activate themselves even with activate:false. Runs no commands: command interpreters and script hosts (cmd, PowerShell, wscript, mshta…) start only without arguments. Does not request elevation.",
     inputSchema: { type: "object", additionalProperties: false, required: ["target"], properties: {
       target: { type: "string", minLength: 1, maxLength: 32767, description: "Absolute .exe/.com/.lnk path, executable name on PATH/App Paths, exact installed app name or AppUserModelID." },
-      arguments: { type: "string", maxLength: 32767, default: "", description: "Windows command-line arguments for the executable or shortcut; quote individual arguments containing spaces. Not a shell command." },
+      arguments: { type: "string", maxLength: 32767, default: "", description: "Windows command-line arguments for the executable or shortcut; quote individual arguments containing spaces. Not a shell command, and refused for command interpreters and script hosts." },
       workingDirectory: { type: "string", maxLength: 32767, default: "", description: "Existing absolute working directory. Not supported for AppUserModelID launches." },
       activate: { type: "boolean", default: false },
       waitMs: { type: "integer", minimum: 0, maximum: 10000, default: 1500 }
@@ -516,7 +516,7 @@ const tools = [
 // Keep execution/validation schemas intact; only the model-facing prose is
 // shortened. The discovery tool returns the original definition on demand.
 const conciseDescriptions = {
-  launch_app: 'Launch an executable, shortcut or installed app through the desktop Shell; survives tool/server exit. Verify the intended window afterward; apps may activate themselves.',
+  launch_app: 'Launch an executable, shortcut or installed app through the desktop Shell; survives tool/server exit. Verify the intended window afterward; apps may activate themselves. No arguments for command interpreters or script hosts.',
   health: 'Check Windows backend availability.',
   snapshot: 'Screenshot and UIA tree. Partial trees report truncation; use OCR for sparse UIA. browserTab: page outline and viewport.',
   accessibility_tree: 'Read a bounded UIA tree; partial output does not establish absence. browserTab: page outline with element ids.',

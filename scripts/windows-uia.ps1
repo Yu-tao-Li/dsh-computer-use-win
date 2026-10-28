@@ -2577,6 +2577,21 @@ function Invoke-LaunchApp {
     $directory = (Get-Item -LiteralPath $directory).FullName
   }
   if ($resolved.kind -eq 'installed-app' -and ($arguments -or $directory)) { throw 'LAUNCH_INVALID_ARGUMENTS: AppUserModelID launches do not accept arguments or workingDirectory.' }
+  # Command interpreters and script hosts run whatever their arguments say, so
+  # with arguments launch_app would be a command channel the user never sees.
+  # They start only without arguments; commands belong to DSH's own shell tool.
+  # A shortcut is judged by the program it starts.
+  if ($resolved.kind -eq 'file' -and $arguments.Trim()) {
+    $program = $resolved.target
+    if ([IO.Path]::GetExtension($program) -ieq '.lnk') {
+      $shell = $null; $link = $null
+      try { $shell = New-Object -ComObject WScript.Shell; $link = $shell.CreateShortcut($program); $program = [string]$link.TargetPath }
+      finally { foreach ($com in @($link, $shell)) { if ($null -ne $com) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($com) } } }
+    }
+    $commandHosts = @('cmd', 'powershell', 'pwsh', 'wt', 'wsl', 'bash', 'conhost', 'wscript', 'cscript', 'mshta', 'rundll32', 'regsvr32', 'msiexec', 'forfiles', 'schtasks')
+    $name = [IO.Path]::GetFileNameWithoutExtension($program)
+    if ($name -in $commandHosts) { throw "LAUNCH_COMMAND_REFUSED: $name runs the commands in its arguments. launch_app starts command interpreters and script hosts only without arguments; run commands with DSH's own shell tool." }
+  }
   $waitMs = [int](Get-Prop $InputObject 'waitMs' 1500)
   if ($waitMs -lt 0 -or $waitMs -gt 10000) { throw 'LAUNCH_INVALID_ARGUMENTS: waitMs must be 0-10000.' }
   $before = @(Get-NativeWindowList -MaxWindows 1000 | ForEach-Object { $_.ToArray() } | ForEach-Object { $_.nativeWindowHandle })

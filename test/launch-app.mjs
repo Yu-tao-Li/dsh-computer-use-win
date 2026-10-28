@@ -51,6 +51,10 @@ if(process.argv[2]==='--job-child'){
   await writeFile(shortcutScript,`param([string]$Config)\n$ErrorActionPreference='Stop'\n$c=Get-Content -LiteralPath $Config -Raw -Encoding UTF8 | ConvertFrom-Json\n$s=New-Object -ComObject WScript.Shell\n$l=$s.CreateShortcut($c.path)\n$l.TargetPath=$c.target\n$l.Save()\n[void][Runtime.InteropServices.Marshal]::ReleaseComObject($l)\n[void][Runtime.InteropServices.Marshal]::ReleaseComObject($s)\n`);
   const made=spawnSync(powershell,['-NoProfile','-File',shortcutScript,'-Config',shortcutConfig],{windowsHide:true,encoding:'utf8'});
   assert.equal(made.status,0,made.stdout+made.stderr);assert.ok(existsSync(shortcut));
+  const cmdShortcut=path.join(root,'cmd shortcut.lnk'), cmdConfig=path.join(root,'cmd-shortcut-config.json');
+  await writeFile(cmdConfig,JSON.stringify({target:process.env.ComSpec || path.join(process.env.WINDIR || 'C:/Windows','System32','cmd.exe'),path:cmdShortcut}));
+  const madeCmd=spawnSync(powershell,['-NoProfile','-File',shortcutScript,'-Config',cmdConfig],{windowsHide:true,encoding:'utf8'});
+  assert.equal(madeCmd.status,0,madeCmd.stdout+madeCmd.stderr);assert.ok(existsSync(cmdShortcut));
   let client;
   try{
     for(const mode of ['full','lite','lazy']){
@@ -69,6 +73,13 @@ if(process.argv[2]==='--job-child'){
       {target:exe,workingDirectory:'C:Windows'},{target:exe,workingDirectory:'\\Windows'},
       {target:exe,arguments:'line\nbreak'},{target:exe,waitMs:-1},{target:exe,waitMs:10001},{target:exe,unknown:1}
     ]){const r=await client.call(prefix+'launch_app',args);assert.equal(r.isError,true,JSON.stringify({args,r}));results.push({name:'invalid-request',args,error:text(r),passed:true});}
+    // Command interpreters and script hosts get no arguments, so launch_app is
+    // no hidden command channel. They are refused before the Shell is asked,
+    // so no console window opens.
+    for(const args of [
+      {target:'cmd.exe',arguments:'/c echo refused'},{target:'%ComSpec%',arguments:'/c echo refused'},{target:'powershell',arguments:'-NoProfile -Command exit'},
+      {target:'mshta.exe',arguments:'about:blank'},{target:cmdShortcut,arguments:'/c echo refused'}
+    ]){const r=await client.call(prefix+'launch_app',args);assert.equal(r.isError,true,JSON.stringify({args,r}));assert.match(text(r),/LAUNCH_COMMAND_REFUSED/);results.push({name:'command-host-refused',args,error:text(r),passed:true});}
     const pathKey=Object.keys(process.env).find(key=>key.toLowerCase()==='path') || 'PATH';
     for(const [name,target,extra] of [['absolute',exe,{}],['shortcut',shortcut,{}],['PATH',path.basename(exe),{[pathKey]:root+path.delimiter+process.env[pathKey]}],['environment','%WCU_LAUNCH_FIXTURE_EXE%',{WCU_LAUNCH_FIXTURE_EXE:exe}]]){
       client.close();client=makeClient(extra);await client.init();

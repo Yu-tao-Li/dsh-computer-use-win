@@ -3,8 +3,8 @@
 ## Unreleased
 
 - #54：编译的辅助 DLL 改为按字节加载，启动错误带阶段和 HRESULT；原生 DLL 缓存按 PowerShell/.NET 运行时区分，并发编译使用独立临时文件。Load compiled helpers from bytes, report startup failures, separate runtime-specific native caches and publish complete cache files atomically.
-- #55：新增 `launch_app`，通过交互桌面 Shell 启动应用，应用不随工具调用或 MCP 进程退出而关闭。支持可执行文件、快捷方式和已安装应用标识；返回“已发送”，需再观察窗口确认。Add desktop-shell app launching with explicit dispatched/observed semantics.
-- #56：窗口范围读取忽略 Gecko 无名布局 Pane 的深度开销。新增可选实验性 Firefox 系 BiDi 后端，支持隐藏自动启动或显式回环端点、DOM 大纲、页面动作和截图。自动可见启动及跨 MCP 共享会话尚未实现。Add Gecko default-depth accessibility and an opt-in experimental BiDi lane; see [scope and setup](docs/browser-bidi.md).
+- #55：新增 `launch_app`，通过交互桌面 Shell 启动应用，应用不随工具调用或 MCP 进程退出而关闭。支持可执行文件、快捷方式和已安装应用标识；返回“已发送”，需再观察窗口确认。cmd、PowerShell 这类命令解释器和脚本宿主（含指向它们的快捷方式）只能不带参数启动，带参数时返回 `LAUNCH_COMMAND_REFUSED`；`activate:true` 会把应用切到前台，所以和 `activate_window` 一样显示接管提示。Add desktop-shell app launching with explicit dispatched/observed semantics. Command interpreters and script hosts start only without arguments, and `activate:true` shows the takeover indicator.
+- #56：窗口范围读取忽略 Gecko 无名布局 Pane 的深度开销。新增可选实验性 Firefox 系 BiDi 后端，支持自动启动或显式回环端点、DOM 大纲、页面动作和截图。插件启动的 Firefox 在后台运行，设置页选 Firefox 系时自动关闭并锁定“显示浏览器窗口”，换回其他浏览器时恢复；先用 Windows 默认的 Firefox 系浏览器（按 ProgId），再查 App Paths，注册表输出按 OEM 代码页解码，中文目录下的浏览器也能找到；服务崩溃或被结束后留下的配置锁，在原进程不在时自动接管；页面大纲里列表、行、表格等容器只保留子元素没显示的文字，每段文字只出现一次，标签页 ID 缩短为 16 位十六进制。自动可见启动及跨 MCP 共享会话尚未实现。Add Gecko default-depth accessibility and an opt-in experimental BiDi lane; see [scope and setup](docs/browser-bidi.md). The Firefox it starts runs headless (settings turn the window switch off), the Windows default Firefox-family browser comes first, Chinese install paths are read correctly, a dead owner's profile lock is taken over, and outlines name each text once with 64-bit tab ids.
 
 ## 0.5.2 — 2026-10-25
 

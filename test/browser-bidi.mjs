@@ -1,13 +1,13 @@
 // No packages required. Default: offline unit tests. --live additionally starts
 // one owned headless Gecko instance; no registered Gecko => explicit skip.
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { McpTestClient } from './mcp-test-client.mjs';
-import { BidiConnection, BidiBrowserLane, GECKO_APP_ID, geckoApplication, geckoProfileName, discoverGecko, remoteValue, localValue, keyActions, bidiUrl, launchGecko } from '../mcp/browser-bidi.mjs';
+import { BidiConnection, BidiBrowserLane, GECKO_APP_ID, geckoApplication, geckoProfileName, discoverGecko, oemText, remoteValue, localValue, keyActions, bidiUrl, launchGecko } from '../mcp/browser-bidi.mjs';
 import { domElement, domOutline } from '../mcp/browser-bidi-dom.mjs';
 import { BrowserLane, appForProgId, isBrowserCall, isQuietCall } from '../mcp/browser.mjs';
 import { normalizeSettings } from '../mcp/settings.mjs';
@@ -74,11 +74,36 @@ try {
     const explicit = new BrowserLane({ env: { WCU_BROWSER_APP: 'firefox', WCU_BROWSER_EXE: exe } });
     assert.equal(await explicit.bidiBackend(), null, 'Explicit non-Gecko exe keeps the CDP route'); await explicit.shutdown();
   });
+  await test('the Windows default Firefox-family browser wins over App Paths order', async () => {
+    const install = (folder, name) => {
+      const dir = path.join(fixtureDir, folder); mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, 'application.ini'), `[App]\nName=${name}\nID=${GECKO_APP_ID}\n`);
+      const exe = path.join(dir, name.toLowerCase() + '.exe'); writeFileSync(exe, 'fixture'); return exe;
+    };
+    const firefox = install('Mozilla Firefox', 'Firefox'), vantage = install('浏览器\\Vantage Browser', 'Vantage'), queries = [];
+    const query = async args => {
+      queries.push(args[1]);
+      if (args[1] === 'HKCR\\FirefoxURL-194E8716761A8849\\shell\\open\\command') return `\r\nHKEY_CLASSES_ROOT\\FirefoxURL-194E8716761A8849\\shell\\open\\command\r\n    (Default)    REG_SZ    "${vantage}" -osint -url "%1"\r\n`;
+      if (args[1].startsWith('HKLM')) return [firefox, vantage].map(exe => `\r\nHKEY_LOCAL_MACHINE\\...\\App Paths\\${path.basename(exe)}\r\n    (Default)    REG_SZ    ${exe}\r\n`).join('');
+      return '';
+    };
+    assert.equal((await discoverGecko({}, undefined, query)).name, 'Firefox', 'Without a default, App Paths order decides');
+    assert.equal((await discoverGecko({}, 'FirefoxURL-194E8716761A8849', query)).path, vantage, 'The default ProgId comes first');
+    assert.equal(queries[2], 'HKCR\\FirefoxURL-194E8716761A8849\\shell\\open\\command');
+    const lane = new BrowserLane({ env: { WCU_BROWSER_APP: 'firefox', WCU_BROWSER_HEADLESS: '1' } }); lane.progId = 'FirefoxURL-194E8716761A8849';
+    assert.equal((await lane.bidiBackend()).progId, 'FirefoxURL-194E8716761A8849', 'Choosing Firefox passes the default ProgId on'); await lane.shutdown();
+  });
 } finally { rmSync(fixtureDir, { recursive: true, force: true }); }
+await test('reg.exe output in the OEM code page keeps Chinese paths', () => {
+  const gbk = Buffer.concat([Buffer.from('D:\\'), Buffer.from('c8edbcfe', 'hex'), Buffer.from('\\Vantage Browser\\vantage.exe')]);
+  assert.equal(oemText(gbk, '936'), 'D:\\软件\\Vantage Browser\\vantage.exe');
+  assert.equal(oemText(Buffer.from('C:\\Program Files'), '437'), 'C:\\Program Files', 'An OEM page TextDecoder lacks falls back to UTF-8');
+});
 await test('settings and existing browser/quiet routing accept Gecko without new tools', () => {
   assert.equal(normalizeSettings({ browserApp: 'firefox' }).browserApp, 'firefox');
   assert.ok(isBrowserCall({ elementId: 't123abc:42' })); assert.ok(isQuietCall('click', { browserTab: 't123abc' }));
   assert.equal(isQuietCall('launch_app', { target: 'notepad.exe' }), true);
+  assert.equal(isQuietCall('launch_app', { target: 'notepad.exe', activate: true }), false, 'Bringing the app forward shows the takeover indicator, as activate_window does');
   assert.equal(appForProgId('MSEdgeHTM'), 'edge'); assert.equal(appForProgId('ChromeHTML'), 'chrome');
 });
 await test('Firefox OS default retains Chromium fallback until explicitly selected', async () => {
@@ -90,13 +115,26 @@ await test('Firefox OS default retains Chromium fallback until explicitly select
 await test('visible launch refuses before profile or process side effects', async () => {
   await assert.rejects(launchGecko({ headless: false }), /VISIBLE_UNVERIFIED/);
 });
-await test('kept profiles are executable-specific and a second owner never spawns', async () => {
+await test('kept profiles are executable-specific; a live owner blocks, a dead owner\'s lock is taken over', async () => {
   assert.notEqual(geckoProfileName('C:/Firefox/browser.exe'), geckoProfileName('C:/Vantage/browser.exe'));
   const root = mkdtempSync(path.join(process.env.WCU_TEST_OUTPUT || os.tmpdir(), 'wcu-bidi-lock-'));
   try {
-    const executable = path.join(root, 'never-spawn.exe'), profile = path.join(root, geckoProfileName(executable));
-    mkdirSync(profile); writeFileSync(path.join(profile, 'dsh-bidi-owner'), '99999');
-    await assert.rejects(launchGecko({ executable, root, headless: true, keep: true }), /BROWSER_PROFILE_BUSY/);
+    const executable = path.join(root, 'fixture.exe'), profile = path.join(root, geckoProfileName(executable)), lock = path.join(profile, 'dsh-bidi-owner');
+    let spawned = 0;
+    const spawnImpl = () => {
+      spawned++; const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.pid = 99996;
+      child.kill = () => child.emit('exit', null, 'SIGTERM');
+      queueMicrotask(() => child.stderr.emit('data', 'WebDriver BiDi listening on ws://127.0.0.1:1234\n')); return child;
+    };
+    mkdirSync(profile); writeFileSync(lock, String(process.ppid));
+    await assert.rejects(launchGecko({ executable, root, keep: true, spawnImpl }), /BROWSER_PROFILE_BUSY.*running process/);
+    assert.equal(spawned, 0, 'A second owner never spawns');
+    // Windows process ids are multiples of 4, so 99999 is never a live process:
+    // the lock of a server that crashed or was killed.
+    writeFileSync(lock, '99999');
+    const owned = await launchGecko({ executable, root, keep: true, spawnImpl });
+    assert.equal(spawned, 1); assert.equal(readFileSync(lock, 'utf8'), String(process.pid));
+    await owned.stop(); assert.equal(existsSync(lock), false); assert.equal(existsSync(profile), true, 'The kept profile stays');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 await test('owned launch has isolated flags, parses split stderr and cleanup is idempotent', async () => {
@@ -298,18 +336,32 @@ await test('DOM value validation preserves invalid number and dispatches setter 
 await test('DOM outline heuristics label fields, omit hidden nodes, walk open shadow roots and flag frames', () => {
   const saved = { document: globalThis.document, location: globalThis.location, getComputedStyle: globalThis.getComputedStyle };
   const root = { activeElement: null, getElementById: () => null };
-  const el = (tagName, text = '', attrs = {}, children = []) => ({ tagName, textContent: text, innerText: text, children,
+  const el = (tagName, text = '', attrs = {}, children = []) => ({ nodeType: 1, tagName, textContent: text, innerText: text,
+    childNodes: [...(text ? [{ nodeType: 3, data: text }] : []), ...children],
     type: tagName === 'INPUT' ? 'text' : undefined, value: tagName === 'INPUT' ? '内容' : undefined,
     tabIndex: -1, getAttribute: name => attrs[name] ?? null, hasAttribute: name => name in attrs,
     getRootNode: () => root, getClientRects: () => [1], matches: () => false });
   const field = el('INPUT'); field.labels = [{ textContent: '姓名' }];
-  const shadow = el('DIV'); shadow.shadowRoot = { children: [el('BUTTON', '影子按钮')] };
+  const shadow = el('DIV'); shadow.shadowRoot = { childNodes: [el('BUTTON', '影子按钮')] };
+  // A container keeps only the text no listed element inside it shows, and a
+  // label's text stays with its control.
+  const wrapped = el('INPUT'); wrapped.labels = [{ textContent: '城市' }];
+  const label = el('LABEL', '城市', {}, [wrapped]); label.control = wrapped;
+  const main = el('MAIN', '开头的说明', {}, [el('UL', '', {}, [el('LI', '', {}, [el('A', '链接一')]), el('LI', '纯文字')]), label,
+    el('TABLE', '', {}, [el('TR', '', {}, [el('TD', '单元格')])])]);
   try {
     globalThis.location = { href: 'https://fixture.test' }; globalThis.getComputedStyle = () => ({ display: 'block', visibility: 'visible' });
-    globalThis.document = { title: '测试页', children: [el('H1', '标题'), field, el('BUTTON', '隐藏', { 'aria-hidden': 'true' }), shadow, el('IFRAME')] };
-    const outline = domOutline(); assert.deepEqual(outline.entries.map(e => [e.role, e.name]), [['heading', '标题'], ['textbox', '姓名'], ['button', '影子按钮']]);
+    globalThis.document = { title: '测试页', childNodes: [el('H1', '标题'), field, el('BUTTON', '隐藏', { 'aria-hidden': 'true' }), shadow, el('IFRAME'), main] };
+    const outline = domOutline(); assert.deepEqual(outline.entries.map(e => [e.role, e.name]), [['heading', '标题'], ['textbox', '姓名'], ['button', '影子按钮'],
+      ['main', '开头的说明'], ['list', ''], ['listitem', ''], ['link', '链接一'], ['listitem', '纯文字'], ['textbox', '城市'], ['table', ''], ['row', ''], ['cell', '单元格']]);
+    assert.ok(outline.entries.every(e => !('own' in e)));
     assert.equal(outline.entries[1].value, '内容'); assert.equal(outline.iframes, 1); assert.equal(domOutline(1).truncated, true);
   } finally { Object.assign(globalThis, saved); }
+});
+await test('tab ids are short and the started Firefox is reported headless', async () => {
+  const { tab } = fixture(); assert.match(tab.key, /^t[0-9a-f]{16}$/);
+  const lane = new BidiBrowserLane({ env: {}, executable: { path: 'C:/fixture/firefox.exe', name: 'Firefox' } });
+  assert.equal((await lane.health()).visible, false, 'Show the browser window does not apply to the Firefox the plugin starts');
 });
 await test('window annotation only associates owned Gecko PID and Mozilla class', async () => {
   const { lane } = fixture(); lane.owned = { child: { pid: 123 } };
@@ -324,13 +376,18 @@ else {
   if (!executable) console.log('SKIP live Gecko: no registered Firefox-family executable found');
   else {
     const root = process.env.WCU_TEST_OUTPUT || path.join(os.tmpdir(), 'wcu-bidi-live'); mkdirSync(root, { recursive: true });
-    const lane = new BidiBrowserLane({ executable, env: { ...process.env, WCU_BROWSER_HEADLESS: '1', WCU_BROWSER_PROFILE: root },
+    // Show the browser window stays on (HEADLESS 0): the started Firefox must
+    // still run headless instead of failing every call.
+    const lane = new BidiBrowserLane({ executable, env: { ...process.env, WCU_BROWSER_HEADLESS: '0', WCU_BROWSER_PROFILE: root },
       trace: process.env.WCU_BIDI_TRACE ? (kind, data) => console.log(JSON.stringify({ kind, data })) : undefined });
     try {
-      const html = '<meta charset="utf-8"><title>BiDi Fixture</title><h1>测试标题</h1><label>关键词<input></label><button onclick="document.querySelector(\'p\').textContent=\'已点击\'">提交</button><p>未点击</p><label>记住<input type="checkbox"></label><select aria-label="城市"><option value="bj">北京</option><option value="sh">上海</option></select><div contenteditable="true" aria-label="编辑器">原文</div><button onclick="alert(\'你好\')">弹窗</button><div style="height:2000px"></div>';
+      const html = '<meta charset="utf-8"><title>BiDi Fixture</title><h1>测试标题</h1><label>关键词<input></label><button onclick="document.querySelector(\'p\').textContent=\'已点击\'">提交</button><p>未点击</p><label>记住<input type="checkbox"></label><select aria-label="城市"><option value="bj">北京</option><option value="sh">上海</option></select><div contenteditable="true" aria-label="编辑器">原文</div><button onclick="alert(\'你好\')">弹窗</button><ul><li><a href="#one">链接一</a></li><li>纯文字</li></ul><div style="height:2000px"></div>';
       const r = await lane.run('set_value', { elementId: 'new-tab', value: 'data:text/html;charset=utf-8,' + encodeURIComponent(html) });
       const tab = r.meta.opened.id, element = async query => (await lane.run('find', { browserTab: tab, query })).meta.results[0].id;
-      assert.match(r.text, /heading "测试标题"/);
+      assert.match(r.text, /heading "测试标题"/); assert.match(tab, /^t[0-9a-f]{16}$/);
+      assert.match(r.text, /list ""/); assert.match(r.text, /link "链接一"/); assert.match(r.text, /listitem "纯文字"/);
+      assert.equal((r.text.match(/链接一/g) ?? []).length, 1, 'A link text appears once, not again in its list and list item');
+      assert.equal((r.text.match(/关键词/g) ?? []).length, 1, 'A label text appears once, as its field name');
       const field = await element('关键词');
       assert.equal((await lane.run('set_value', { elementId: field, value: '中文' })).meta.verifyValue, '中文');
       await lane.run('focus', { elementId: field }); await lane.run('keypress', { browserTab: tab, keys: ['ctrl', 'a'] });

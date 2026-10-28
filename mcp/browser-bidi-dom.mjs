@@ -8,8 +8,16 @@ export function domOutline(limit = 10000) {
     H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading',
     UL: 'list', OL: 'list', LI: 'listitem', TABLE: 'table', TR: 'row', TH: 'columnheader', TD: 'cell',
     MAIN: 'main', NAV: 'navigation', P: 'text', SUMMARY: 'button' };
-  const visit = (root, depth = 0) => {
-    for (const el of root.children ?? []) {
+  // Roles named by their content, as in ARIA, plus paragraphs. A container
+  // (list, row, table, main…) is named only by the text that no listed element
+  // inside it shows, so a text appears once instead of again in every
+  // container around it, and find reaches the element that holds it.
+  const fromContent = new Set(['link', 'button', 'heading', 'cell', 'columnheader', 'rowheader', 'gridcell', 'checkbox', 'radio', 'switch',
+    'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'tab', 'tooltip', 'text']);
+  const visit = (root, depth, owner) => {
+    for (const el of root.childNodes ?? []) {
+      if (el.nodeType === 3) { owner?.own?.push(el.data); continue; }
+      if (el.nodeType !== 1) continue;
       if (++visited > limit) { truncated = true; return; }
       const style = getComputedStyle(el);
       if (/^(SCRIPT|STYLE|TEMPLATE|NOSCRIPT)$/.test(el.tagName) || el.hidden || el.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden') continue;
@@ -18,23 +26,34 @@ export function domOutline(limit = 10000) {
       if (el.tagName === 'INPUT') role = ({ checkbox: 'checkbox', radio: 'radio', button: 'button', submit: 'button', reset: 'button', number: 'spinbutton', range: 'slider', hidden: null })[el.type] ?? (el.type === 'hidden' ? null : 'textbox');
       if (el.isContentEditable) role ??= 'textbox';
       if (!role && (el.hasAttribute('onclick') || el.tabIndex >= 0)) role = 'generic';
+      let entry = null;
       if (role && el.getClientRects().length && !['none', 'presentation'].includes(role)) {
         const labelled = clean((el.getAttribute('aria-labelledby') ?? '').split(/\s+/).map(id => el.getRootNode().getElementById?.(id)?.textContent ?? '').join(' '));
         const label = clean([...(el.labels ?? [])].map(item => item.textContent).join(' '));
+        const field = /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
         const name = labelled || clean(el.getAttribute('aria-label')) || label || clean(el.alt) ||
-          (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) ? clean(el.placeholder || el.title || (role === 'button' ? el.value : '')) : clean(el.innerText || el.textContent || el.title));
+          (field ? clean(el.placeholder || el.title || (role === 'button' ? el.value : '')) : fromContent.has(role) ? clean(el.innerText || el.textContent || el.title) : '');
         const value = el.type === 'password' ? '' : el.tagName === 'SELECT' ? [...el.selectedOptions].map(o => o.text).join(', ') :
           el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? 'checked' : 'unchecked') : typeof el.value === 'string' ? el.value : el.isContentEditable ? el.textContent : '';
-        entries.push({ node: el, role, name: name.slice(0, 1000), value: clean(value).slice(0, 1000), depth,
+        entry = { node: el, role, name: name.slice(0, 1000), value: clean(value).slice(0, 1000), depth,
           states: [el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true' ? 'disabled' : '', el.readOnly ? 'readonly' : '',
-            el.checked ? 'checked' : '', el === el.getRootNode().activeElement ? 'focused' : ''].filter(Boolean) });
+            el.checked ? 'checked' : '', el === el.getRootNode().activeElement ? 'focused' : ''].filter(Boolean) };
+        if (!name && !field && !entry.value) entry.own = [];
+        entries.push(entry);
       }
-      if (el.shadowRoot) visit(el.shadowRoot, depth + 1);
-      visit(el, depth + (role ? 1 : 0));
+      // Text inside goes to the nearest listed element; a label's text already
+      // names its control. Blocks and listed children separate the words.
+      const inner = entry ?? (el.tagName === 'LABEL' && el.control ? null : owner);
+      const block = !entry && !style.display.startsWith('inline');
+      if (block) owner?.own?.push(' ');
+      if (el.shadowRoot) visit(el.shadowRoot, depth + 1, inner);
+      visit(el, depth + (role ? 1 : 0), inner);
+      if (block || entry) owner?.own?.push(' ');
       if (truncated) return;
     }
   };
-  visit(document);
+  visit(document, 0, null);
+  for (const entry of entries) if (entry.own) { entry.name = clean(entry.own.join('')).slice(0, 1000) || clean(entry.node.title); delete entry.own; }
   return { title: document.title, url: location.href, entries, iframes, truncated };
 }
 

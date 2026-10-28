@@ -69,8 +69,13 @@ app.whenReady().then(async()=>{
   await until("!!document.querySelector('[data-wincu-firefox-notice]')");
   assert.match(await evaluate("document.querySelector('[data-wincu-firefox-notice]').textContent"),/实验|隐藏|BiDi/);
   assert.equal(await evaluate("!!document.querySelector('[data-wincu-signin-notice]')"),false,'Firefox must not offer Chromium visible sign-in instructions');
+  assert.deepEqual(await evaluate("(()=>{const s=document.getElementById('wincu-page-browserVisible');return [s.checked,s.disabled]})()"),[false,true],'The Firefox that DSH starts has no window, so choosing Firefox turns the window switch off');
+  assert.deepEqual(await evaluate("(()=>{const art=document.querySelector('label.wcu-art[for=\"wincu-page-browserApp\"]'),cap=art.querySelector('text').getBoundingClientRect(),box=art.getBoundingClientRect();return [art.querySelector('text').textContent,cap.left>=box.left&&cap.right<=box.right]})()"),['Firefox',true],'The browser picture names Firefox inside its frame');
+  await new Promise(resolve=>setTimeout(resolve,300));
+  await savePicture('settings-firefox.png');
   await chooseApp('chrome');
   await until("!document.querySelector('[data-wincu-signin-edge]')");
+  assert.deepEqual(await evaluate("(()=>{const s=document.getElementById('wincu-page-browserVisible');return [s.checked,s.disabled]})()"),[true,false],'Leaving Firefox turns the window switch back');
   await evaluate("document.getElementById('wincu-page-browserVisible').click()");
   await until("!!document.querySelector('[data-wincu-signin-hidden]')");
   await evaluate("document.getElementById('wincu-page-browserVisible').click()");

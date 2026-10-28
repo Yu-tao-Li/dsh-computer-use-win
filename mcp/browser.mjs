@@ -204,16 +204,16 @@ export function isBrowserCall(args) {
 // Calls that use neither the user's pointer nor keyboard take a quiet lease: it
 // still honours a stopped series, but shows no indicator and arms no Esc stop.
 // They are Browser Use calls, discovery and delays, reads of the screen and
-// of UI Automation (unless activate:true brings a window forward first), and
-// element actions that start in the background (window messages, UIA
-// patterns). One of those that turns out to need real input fails with
+// of UI Automation and app launches (unless activate:true brings a window
+// forward), and element actions that start in the background (window
+// messages, UIA patterns). One of those that turns out to need real input fails with
 // WCU_NEEDS_INPUT before sending any, and the server runs it again loudly.
 const READS = new Set(['snapshot', 'tree', 'accessibility_tree', 'find', 'element_info', 'screenshot', 'ocr', 'wait_for']);
 export const BACKGROUND_FIRST = new Set(['invoke', 'set_value', 'scroll', 'type_text']);
 export function isQuietCall(action, args = {}) {
-  if (isBrowserCall(args) || ['health', 'list_windows', 'wait', 'launch_app'].includes(action)) return true;
+  if (isBrowserCall(args) || ['health', 'list_windows', 'wait'].includes(action)) return true;
   if (!args || args.activate === true) return false;
-  if (READS.has(action)) return true;
+  if (READS.has(action) || action === 'launch_app') return true;
   // Window messages posted to the target window.
   if ((['click', 'double_click', 'keypress'].includes(action) && args.dispatch === 'background') || (action === 'type_text' && args.method === 'background')) return true;
   // method:'auto' types into a focused Win32 edit with EM_REPLACESEL first.
@@ -665,8 +665,8 @@ export class BrowserLane {
         } catch { }
       }
       if (!this.env.WCU_BROWSER_BIDI_URL && this.env.WCU_BROWSER_EXE && !customGecko) return null;
-      // The experimental lane is opt-in: a Firefox OS default must not turn
-      // an existing default/visible Chromium workflow into a headless error.
+      // The experimental lane is opt-in: a Firefox OS default keeps the
+      // visible Chromium browser rather than switching to headless Gecko.
       if (!this.env.WCU_BROWSER_BIDI_URL && !customGecko && this.app !== 'firefox') return null;
       await this.resolveApp();
       const { BidiBrowserLane, geckoApplication, discoverGecko } = await import('./browser-bidi.mjs');
@@ -676,8 +676,11 @@ export class BrowserLane {
         return this.bidi;
       }
       const custom = geckoApplication(this.env.WCU_BROWSER_EXE);
-      const executable = custom ?? await discoverGecko(this.env, this.progId);
-      this.bidi = new BidiBrowserLane({ env: this.env, executable });
+      // The Windows default browser goes first when it is a Firefox-family one,
+      // so a fork such as Vantage wins over a plain Firefox installed beside it.
+      const progId = custom ? undefined : this.progId ?? await defaultProgId();
+      const executable = custom ?? await discoverGecko(this.env, progId);
+      this.bidi = new BidiBrowserLane({ env: this.env, executable, progId });
       this.bidi.seriesActive = () => this.seriesActive();
       return this.bidi;
     })();

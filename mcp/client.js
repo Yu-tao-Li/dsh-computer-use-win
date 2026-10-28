@@ -236,8 +236,8 @@ window.__ModuleLoader__.load({
     // the page first names it. Each hint sits behind an info icon.
     Object.assign(dictionaries.zh,{title:'电脑操控（Computer Use）',intro:'让 DSH 操作 Windows 桌面程序和网页。',moreInfo:'说明',pluginDescription:'让 AI 操作 Windows 桌面程序和网页，可设置浏览器操控、接管提示、停止快捷键和工具。',
       browserTitle:'浏览器操控（Browser Use）',browserInfo:'DSH 专用浏览器单独启动，不会用到你自己的浏览器。默认每次使用临时的空白配置，不带你的登录、Cookie 和浏览记录；打开“记住登录”后改用长期保留的配置。退出 DSH 或空闲 10 分钟后自动关闭。',
-      browserApp:'使用的浏览器',browserAppHint:'Firefox 系为实验功能：自动启动时请关闭“显示浏览器窗口”；也可连接自行启动的 BiDi 端点。默认跟随 Windows 默认浏览器；默认不是 Chrome 或 Edge 时回退到其中已安装的浏览器。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
-      browserApp_default:'默认浏览器',browserApp_edge:'Edge',browserApp_chrome:'Chrome',browserApp_firefox:'Firefox 系（实验性）',firefoxNotice:'Firefox 系目前支持隐藏自动启动，需关闭“显示浏览器窗口”。连接自行启动的 BiDi 端点时可保留可见窗口；每个端点只能有一个控制会话。记住登录使用独立 Firefox 配置，暂不提供自动可见登录流程。',browserAppShort:'默认',
+      browserApp:'使用的浏览器',browserAppHint:'默认跟随 Windows 的默认浏览器；默认浏览器不是 Edge 或 Chrome 时，使用已安装的 Chrome 或 Edge。Firefox 系（Firefox、LibreWolf、Floorp、Waterfox、Vantage 等）在这里手动选，Windows 默认的那一个优先。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
+      browserApp_default:'默认浏览器',browserApp_edge:'Edge',browserApp_chrome:'Chrome',browserApp_firefox:'Firefox 系（实验性）',firefoxNotice:'Firefox 系为实验功能：DSH 启动的 Firefox 在后台运行，没有窗口，所以“显示浏览器窗口”已关闭。想看到窗口，可以自己带 --remote-debugging-port 启动浏览器，再用 WCU_BROWSER_BIDI_URL（BiDi 地址）连接；一个浏览器同一时间只接受一个控制会话。记住登录会给 Firefox 单独保留一个配置，但没有窗口，暂时不能在里面手动登录。',browserAppShort:'默认',
       browserSignIn:'记住登录（cookies）',browserSignInHint:'默认关闭：DSH 浏览器每次用全新的临时配置，网站看不到任何登录。打开后改用长期保留的配置，你在它窗口里登录过的网站会一直保持登录，见下方说明。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
       signInSetup:'怎么用',signInStep1:'DSH 浏览器改用长期保留的配置。在它的窗口（蓝框）里登录过的网站，下次还是登录状态。你的浏览器里不用做任何设置，也不会弹出允许提示。',
       signInStep2:'第一次用到要登录的网站时，DSH 会请你在它的窗口里登录一次。密码和验证码由你自己输入，DSH 不代填。',
@@ -249,14 +249,14 @@ window.__ModuleLoader__.load({
       copy:'复制',copied:'已复制',
       browserFirst:'网页优先用浏览器操控',browserFirstHint:'能直接读写网页时在后台完成，不移动鼠标；浏览器自己的模态弹窗可能来到前台。桌面程序、浏览器工具栏和读不到的网页内容，仍由电脑操控完成。',
       browserVisible:'显示浏览器窗口',browserVisibleHint:'开启时打开一个可见的 DSH 浏览器窗口，窗口框是 DSH 蓝；DSH 正在操作的标签页，图标换成蓝色箭头，网页上的小箭头标出它点的位置，不遮挡网页内容，也不移动你的鼠标。普通网页操作在后台完成；浏览器自己的模态弹窗可能短暂来到前台。关闭后浏览器在后台运行，看不到窗口。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
-      toolsTitle:'工具',toolsInfo:'全部：启动时加载 24 个工具。精简：只加载 10 个常用工具，减少上下文占用。懒启动：启动时只加载管理入口，开始桌面任务时再加载，会多一次工具调用。自定义：自己挑选，切换方案时保留清单。保存后在当前动作结束时生效。',
+      toolsTitle:'工具',toolsInfo:'全部：启动时加载 25 个工具。精简：只加载 11 个常用工具，减少上下文占用。懒启动：启动时只加载管理入口，开始桌面任务时再加载，会多一次工具调用。自定义：自己挑选，切换方案时保留清单。保存后在当前动作结束时生效。',
       indicatorTitle:'接管提示',indicatorInfo:'DSH 用鼠标和键盘操作桌面时，用屏幕边缘、提示条和鼠标标签提醒你。浏览器操控、读取界面和在后台完成的控件操作不显示这些提示。',
       indicator:'屏幕边缘与提示条',appearance:'更多选项',preview:'预览',delay:'操作后保留提示',
       escTitle:'按 Esc 停止',stopHint:'Esc 只停止当前这一轮操作；下次发起任务或说“继续”即可再次使用，无需到设置恢复。普通鼠标移动和其他按键不会停止。浏览器操控在后台进行，不占用 Esc，要停止请用 DSH 里的停止按钮。'});
     Object.assign(dictionaries.en,{title:'Computer Use',intro:'Let DSH operate Windows desktop apps and web pages.',moreInfo:'Details',pluginDescription:'Let the agent use Windows apps and web pages, with Browser Use, control indicators, stop shortcuts and tool selection.',
       browserTitle:'Browser Use',browserInfo:'The DSH browser starts separately and never uses your own browser. By default it starts each time with a temporary empty profile: none of your sign-ins, cookies or history. With “Keep sign-ins” on, it keeps one profile instead. It closes when DSH exits or after 10 idle minutes.',
-      browserApp:'Browser',browserAppHint:'Firefox-family support is experimental: turn off Show browser window for automatic launch, or connect a separately started BiDi endpoint. Default follows Windows, with Chrome/Edge fallback for other defaults. Changes apply after the current action and close open DSH browsers.',
-      browserApp_default:'Default browser',browserApp_edge:'Edge',browserApp_chrome:'Chrome',browserApp_firefox:'Firefox family (experimental)',firefoxNotice:'Automatic Firefox launch currently requires Show browser window off. A separately started BiDi endpoint may be visible; only one controlling session can connect. Kept sign-ins use a separate Firefox profile; automatic visible sign-in is not available yet.',browserAppShort:'Default',
+      browserApp:'Browser',browserAppHint:'Follows the Windows default browser; when that is neither Edge nor Chrome, an installed Chrome or Edge is used. Firefox-family browsers (Firefox, LibreWolf, Floorp, Waterfox, Vantage and others) are chosen here; the Windows default one comes first. Changes apply after the current action and close open DSH browsers.',
+      browserApp_default:'Default browser',browserApp_edge:'Edge',browserApp_chrome:'Chrome',browserApp_firefox:'Firefox family (experimental)',firefoxNotice:'Firefox-family support is experimental. The Firefox that DSH starts runs in the background without a window, so Show the browser window is off. To see a window, start the browser yourself with --remote-debugging-port and connect it through WCU_BROWSER_BIDI_URL (its BiDi address); a browser accepts one controlling session at a time. Keep sign-ins keeps a separate Firefox profile, but with no window you cannot sign in to it by hand yet.',browserAppShort:'Default',
       browserSignIn:'Keep sign-ins (cookies)',browserSignInHint:'Off by default: the DSH browser starts each time with a fresh temporary profile, so sites see no sign-ins. When on, it keeps one profile, and sites you sign in to in its window stay signed in; see below. Changes apply after the current action and close open DSH browsers.',
       signInSetup:'How it works',signInStep1:'The DSH browser keeps its profile. Sites you sign in to in its window (the blue frame) are still signed in next time. Nothing to set up in your own browser, and no prompts to allow.',
       signInStep2:'The first time a task needs a site that asks you to sign in, DSH asks you to sign in once in its window. You type passwords and codes yourself; DSH does not fill them in.',
@@ -268,7 +268,7 @@ window.__ModuleLoader__.load({
       copy:'Copy',copied:'Copied',
       browserFirst:'Prefer Browser Use for web pages',browserFirstHint:'Read and operate pages directly in the background without moving the pointer. Browser-native modal dialogs may activate their window. Desktop apps, the browser toolbar and page content it cannot read still go through Computer Use.',
       browserVisible:'Show the browser window',browserVisibleHint:'When on, a visible DSH browser window opens with a DSH-blue frame. The tab DSH works in shows a blue arrow as its icon, and a small arrow on the page marks where it clicks; nothing covers the page and your pointer stays put. Ordinary page actions run in the background; browser-native modal dialogs may briefly activate the window. When off, the browser runs in the background with no window. Changes apply after the current action and close open DSH browsers.',
-      toolsTitle:'Tools',toolsInfo:'All: load 24 tools at startup. Lite: 10 common tools, less context. Lazy: only the management entry at startup; tools load at the first desktop task, adding one tool call. Custom: your own selection, kept when you switch presets. Saved changes apply after the current action.',
+      toolsTitle:'Tools',toolsInfo:'All: load 25 tools at startup. Lite: 11 common tools, less context. Lazy: only the management entry at startup; tools load at the first desktop task, adding one tool call. Custom: your own selection, kept when you switch presets. Saved changes apply after the current action.',
       indicatorTitle:'Takeover indicator',indicatorInfo:'Screen edges, a banner and a pointer tag show when DSH uses your mouse and keyboard. Browser Use, reading the screen and control actions done in the background show none of them.',
       indicator:'Screen edges and banner',appearance:'More options',preview:'Preview',delay:'Keep visible after an action',
       escTitle:'Press Esc to stop',stopHint:'Esc stops this operation series. A new task or a request to continue resumes automatically, with no settings change. Ordinary pointer movement and other keys do not stop control. Browser Use runs in the background and does not use Esc; stop it with the stop button in DSH.'});
@@ -383,7 +383,13 @@ window.__ModuleLoader__.load({
       const [noteView,setNoteView] = React.useState(null), [noteSaving,setNoteSaving] = React.useState(false);
       const savedKey = JSON.stringify(Object.fromEntries(Object.keys(defaults).map(key=>[key,saved[key]])));
       React.useEffect(()=>{if(!dirty)setDraft(saved);},[savedKey,dirty]);
-      const change = (field,value) => {const next={...draft,[field]:value};setDraft(next);setDirty(Object.keys(defaults).some(key=>!equal(next[key],saved[key])));setMessage('');};
+      // The Firefox that DSH starts has no window yet, so choosing Firefox turns
+      // the window switch off, and choosing another browser turns it back.
+      const visibleBeforeFirefox=React.useRef(null);
+      const change = (field,value) => {const next={...draft,[field]:value};
+        if(field==='browserApp'&&value==='firefox'&&draft.browserApp!=='firefox'){visibleBeforeFirefox.current=draft.browserVisible;next.browserVisible=false;}
+        else if(field==='browserApp'&&draft.browserApp==='firefox'&&value!=='firefox'&&visibleBeforeFirefox.current!==null){next.browserVisible=visibleBeforeFirefox.current;visibleBeforeFirefox.current=null;}
+        setDraft(next);setDirty(Object.keys(defaults).some(key=>!equal(next[key],saved[key])));setMessage('');};
       const selectTools=(names,enabled)=>{const selected=new Set(draft.enabledTools);for(const name of names)enabled?selected.add(name):selected.delete(name);change('enabledTools',allToolNames.filter(name=>selected.has(name)));};
       React.useEffect(()=>{
         if(!recording)return;
@@ -440,8 +446,8 @@ window.__ModuleLoader__.load({
       // Chinese characters), so a narrow column never leaves it alone on a line.
       const title=(text,hint,props)=>{const cut=/[\u2e80-\u9fff\uff00-\uffef]$/.test(text)?text.length-2:text.lastIndexOf(' ')+1;return h(props?.htmlFor?'label':'span',{className:'wcu-item-title',...props},text.slice(0,cut),h('span',{className:'wcu-nowrap'},text.slice(cut),hint&&info(hint)));};
       const picture=art=>h('div',{className:'wcu-art','aria-hidden':true},art);
-      const toggle=(field,label)=>h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch','aria-label':t(label),checked:draft[field],disabled,onChange:e=>change(field,e.target.checked)});
-      const switchItem=(field,label,hint,art)=>item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-'+field,'aria-hidden':true},art),title(t(label),hint,{htmlFor:idPrefix+'-'+field}),toggle(field,label));
+      const toggle=(field,label,locked)=>h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch','aria-label':t(label),checked:draft[field],disabled:disabled||locked,onChange:e=>change(field,e.target.checked)});
+      const switchItem=(field,label,hint,art,locked)=>item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-'+field,'aria-hidden':true},art),title(t(label),hint,{htmlFor:idPrefix+'-'+field}),toggle(field,label,locked));
       const field=(label,control)=>h('div',{className:'wcu-field'},label,control);
       const allowedTools=['full','lazy'].includes(draft.toolPreset)?allToolNames:activeTools;
       const keycap=(key,label)=>h('kbd',{className:'wcu-key',key},label);
@@ -459,8 +465,8 @@ window.__ModuleLoader__.load({
           head(idPrefix+'-browser-title','browserTitle','browserInfo'),
           h('div',{className:'wcu-grid'},
             switchItem('browserFirst','browserFirst','browserFirstHint',arts.browserFirst(draft.browserFirst)),
-            switchItem('browserVisible','browserVisible','browserVisibleHint',arts.browserVisible(draft.browserVisible)),
-            item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-browserApp','aria-hidden':true},arts.app(draft.browserApp==='default'?t('browserAppShort'):t('browserApp_'+draft.browserApp))),
+            switchItem('browserVisible','browserVisible','browserVisibleHint',arts.browserVisible(draft.browserVisible),draft.browserApp==='firefox'),
+            item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-browserApp','aria-hidden':true},arts.app(draft.browserApp==='default'?t('browserAppShort'):draft.browserApp==='firefox'?'Firefox':t('browserApp_'+draft.browserApp))),
               title(t('browserApp'),'browserAppHint',{htmlFor:idPrefix+'-browserApp'}),
               h('select',{className:'wcu-control',id:idPrefix+'-browserApp',value:draft.browserApp,disabled,onChange:e=>change('browserApp',e.target.value)},
                 ...['default','edge','chrome','firefox'].map(app=>h('option',{key:app,value:app},t('browserApp_'+app))))),

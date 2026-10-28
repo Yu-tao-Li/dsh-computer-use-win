@@ -11,8 +11,25 @@ import { domOutline, domElement, domFocused } from './browser-bidi-dom.mjs';
 export const GECKO_APP_ID = '{ec8030f7-c20a-464f-9b0e-13a3a9e97384}';
 const fail = (code, detail) => { throw new Error(`${code}: ${detail}`); };
 const check = request => { if (request?.cancelled) fail('COMPUTER_USE_CANCELLED', 'cancelled'); };
-const runFile = (exe, args) => new Promise(resolve => execFile(exe, args,
-  { windowsHide: true, timeout: 5000 }, (error, stdout) => resolve(error ? '' : String(stdout))));
+const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
+
+// reg.exe prints in the OEM code page (GBK on Chinese Windows), so a browser
+// installed under a Chinese folder came back garbled when read as UTF-8.
+const OEM_ENCODINGS = { 874: 'windows-874', 932: 'shift_jis', 936: 'gbk', 949: 'euc-kr', 950: 'big5' };
+export function oemText(bytes, page) {
+  try { return new TextDecoder(OEM_ENCODINGS[page] ?? `cp${page}`).decode(bytes); } catch { return new TextDecoder().decode(bytes); }
+}
+const regBytes = args => new Promise(resolve => execFile('reg.exe', args,
+  { windowsHide: true, timeout: 5000, encoding: 'buffer' }, (error, stdout) => resolve(error ? null : stdout)));
+let oemPage;
+async function regQuery(args) {
+  const bytes = await regBytes(args);
+  if (!bytes) return '';
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { }
+  oemPage ??= regBytes(['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage', '/v', 'OEMCP'])
+    .then(output => /OEMCP\s+REG_SZ\s+(\d+)/.exec(output?.toString('latin1') ?? '')?.[1]);
+  return oemText(bytes, await oemPage);
+}
 
 export function geckoApplication(executable) {
   if (!executable || !existsSync(executable)) return null;
@@ -26,8 +43,9 @@ export function geckoApplication(executable) {
   return null;
 }
 
-// Enumerate App Paths; do not require firefox.exe or browserName=firefox.
-export async function discoverGecko(env = process.env, progId) {
+// The Windows default browser first when it is a Firefox-family one (its
+// ProgId), then App Paths; do not require firefox.exe or browserName=firefox.
+export async function discoverGecko(env = process.env, progId, query = regQuery) {
   if (env.WCU_BROWSER_EXE) {
     const app = geckoApplication(env.WCU_BROWSER_EXE);
     if (!app) fail('BROWSER_ENGINE_MISMATCH', 'WCU_BROWSER_EXE has no Firefox-family application.ini ID');
@@ -35,13 +53,13 @@ export async function discoverGecko(env = process.env, progId) {
   }
   const candidates = [];
   if (/^FirefoxURL-/i.test(progId ?? '')) {
-    const command = await runFile('reg.exe', ['query', `HKCR\\${progId}\\shell\\open\\command`, '/ve']);
+    const command = await query(['query', `HKCR\\${progId}\\shell\\open\\command`, '/ve']);
     const value = /REG_SZ\s+(.*)/.exec(command)?.[1];
     const exe = /^"([^"]+\.exe)"/i.exec(value ?? '')?.[1] ?? /^(.+?\.exe)(?:\s|$)/i.exec(value ?? '')?.[1];
     if (exe) candidates.push(exe);
   }
   for (const hive of ['HKCU', 'HKLM']) {
-    const output = await runFile('reg.exe', ['query', `${hive}\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths`, '/s']);
+    const output = await query(['query', `${hive}\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths`, '/s']);
     for (const match of output.matchAll(/REG_(?:EXPAND_)?SZ\s+"?([^\r\n]+?\.exe)"?\s*$/gmi)) {
       candidates.push(match[1].replace(/%([^%]+)%/g, (_, key) => env[key] ?? `%${key}%`));
     }
@@ -123,9 +141,18 @@ export async function launchGecko({ executable, root, headless = true, keep = fa
   mkdirSync(root, { recursive: true });
   const profile = keep ? path.join(root, geckoProfileName(executable)) : mkdtempSync(path.join(root, `bidi-${process.pid}-`));
   mkdirSync(profile, { recursive: true });
-  let lock;
-  try { lock = path.join(profile, 'dsh-bidi-owner'); writeFileSync(lock, String(process.pid), { flag: 'wx' }); }
-  catch (error) { fail('BROWSER_PROFILE_BUSY', `BiDi profile already owned; never share a single session (${error.code})`); }
+  const lock = path.join(profile, 'dsh-bidi-owner');
+  for (;;) {
+    try { writeFileSync(lock, String(process.pid), { flag: 'wx' }); break; }
+    catch (error) {
+      // A server that crashed or was killed leaves its lock behind. Take the
+      // profile over once that process is gone, as profileLock does for Chromium.
+      let owner = 0;
+      if (error.code === 'EEXIST') try { owner = Number(readFileSync(lock, 'utf8')); } catch (readError) { if (readError.code === 'ENOENT') continue; }
+      if (owner > 0 && owner !== process.pid && !processAlive(owner)) { rmSync(lock, { force: true }); continue; }
+      fail('BROWSER_PROFILE_BUSY', `BiDi profile already owned${owner ? ` by running process ${owner}` : ''}; never share a single session (${error.code})`);
+    }
+  }
   const args = ['-no-remote', '-new-instance', '-profile', profile, '-headless', '--remote-debugging-port', '0', 'about:blank'];
   let child;
   try {
@@ -199,8 +226,8 @@ export function keyActions(keys) {
 }
 
 export class BidiBrowserLane {
-  constructor({ env = process.env, connection, executable, trace = () => {} } = {}) {
-    this.env = env; this.connection = connection; this.executable = executable; this.trace = trace;
+  constructor({ env = process.env, connection, executable, progId, trace = () => {} } = {}) {
+    this.env = env; this.connection = connection; this.executable = executable; this.progId = progId; this.trace = trace;
     this.key = 'b' + randomBytes(8).toString('hex'); this.tabs = new Map(); this.contexts = new Map();
     this.nextId = 0; this.queue = Promise.resolve(); this.stopping = false; this.seriesActive = () => false;
     if (connection) this.listen(connection);
@@ -229,11 +256,14 @@ export class BidiBrowserLane {
     this.launching ??= (async () => {
       let endpoint = this.env.WCU_BROWSER_BIDI_URL;
       if (!endpoint) {
-        this.executable ??= await discoverGecko(this.env);
+        this.executable ??= await discoverGecko(this.env, this.progId);
         if (!this.executable) fail('BROWSER_LANE_UNAVAILABLE', 'no registered Firefox-family application found; set WCU_BROWSER_EXE');
+        // Always headless: a visible Gecko window that never takes the
+        // foreground is not verified yet. Settings turn 显示浏览器窗口 off for
+        // Firefox, and health and list_windows report visible:false.
         this.owned = await launchGecko({ executable: this.executable.path,
           root: this.env.WCU_BROWSER_PROFILE || path.join(this.env.LOCALAPPDATA || os.tmpdir(), 'dsh-computer-use-win', 'agent-browser'),
-          headless: this.env.WCU_BROWSER_HEADLESS === '1', keep: this.env.WCU_BROWSER_SIGNIN === '1', trace: this.trace });
+          headless: true, keep: this.env.WCU_BROWSER_SIGNIN === '1', trace: this.trace });
         endpoint = this.owned.endpoint;
       }
       try {
@@ -258,7 +288,9 @@ export class BidiBrowserLane {
     if (!info.context) fail('BROWSER_BIDI_CONTEXT', 'browser returned an invalid context; check content-process startup errors');
     let tab = this.contexts.get(info.context);
     if (!tab) {
-      tab = { key: 't' + randomBytes(16).toString('hex'), context: info.context, ids: new Map(), byShared: new Map(), promptWaiters: new Set(), last: null, title: '', url: info.url ?? 'about:blank', dialog: null };
+      // 64 bits, as the Chromium lane's tab ids: unique across server runs, and
+      // half the cost of 128 on every outline line that repeats the tab id.
+      tab = { key: 't' + randomBytes(8).toString('hex'), context: info.context, ids: new Map(), byShared: new Map(), promptWaiters: new Set(), last: null, title: '', url: info.url ?? 'about:blank', dialog: null };
       this.tabs.set(tab.key, tab); this.contexts.set(tab.context, tab);
     }
     if (info.url !== undefined) tab.url = info.url;
@@ -440,14 +472,14 @@ export class BidiBrowserLane {
     if (this.connection && !this.connection.closed) await this.refresh();
     result.browserLane = { browsers: this.connection && !this.connection.closed ? [{ id: this.key, name: this.executable?.name ?? 'Gecko', source: this.owned ? 'agent' : 'configured', backend: 'bidi',
       processId: this.owned?.child.pid, visible: this.owned ? false : null, newTab: `${this.key}:new-tab`, tabs: [...this.tabs.values()].map(tab => this.describe(tab)) }] : [],
-      use: 'set_value elementId new-tab with URL opens a background Gecko tab. DOM outline is heuristic. Automatic launch requires browserVisible=false; WCU_BROWSER_BIDI_URL connects an explicitly configured endpoint.' };
+      use: 'set_value elementId new-tab with URL opens a background Gecko tab. DOM outline is heuristic. The Firefox that the plugin starts is headless (no window); WCU_BROWSER_BIDI_URL connects an explicitly configured endpoint.' };
     for (const window of result.windows ?? []) if (this.owned?.child.pid && window.processId === this.owned.child.pid && window.className === 'MozillaWindowClass') window.browser = this.key;
     return result;
   }
   async health() {
-    if (!this.env.WCU_BROWSER_BIDI_URL) this.executable ??= await discoverGecko(this.env);
+    if (!this.env.WCU_BROWSER_BIDI_URL) this.executable ??= await discoverGecko(this.env, this.progId);
     return { enabled: this.env.WCU_BROWSER_LANE !== 'off', app: 'firefox', resolvedApp: 'firefox', backend: 'bidi', experimental: true,
-      agentBrowser: this.executable?.path ?? null, configuredEndpoint: Boolean(this.env.WCU_BROWSER_BIDI_URL), visible: this.env.WCU_BROWSER_BIDI_URL ? null : this.env.WCU_BROWSER_HEADLESS !== '1', keepSignIns: this.env.WCU_BROWSER_SIGNIN === '1',
+      agentBrowser: this.executable?.path ?? null, configuredEndpoint: Boolean(this.env.WCU_BROWSER_BIDI_URL), visible: this.env.WCU_BROWSER_BIDI_URL ? null : false, keepSignIns: this.env.WCU_BROWSER_SIGNIN === '1',
       connected: this.connection && !this.connection.closed ? [{ id: this.key, source: this.owned ? 'agent' : 'configured' }] : [], limitations: ['automatic launch is headless only', 'DOM outline', 'one session per browser; no sharing or reconnect broker', 'no indicator', 'unscaled screenshots'] };
   }
   async shutdown() {

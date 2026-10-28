@@ -16,7 +16,7 @@ Your [**Star ⭐ ↗**](https://github.com/Yu-tao-Li/dsh-computer-use-win) keeps
 
 This plugin lets a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) agent see and use the real Windows apps and web pages on your computer. It can find buttons and text fields, read text on the screen, click, type, and switch or manage windows. Web pages are worked on in DSH's own browser in the background by default, without moving your pointer or taking the foreground.
 
-**Web pages in the background · 23 desktop tools + 1 management entry · Clear indicators when the mouse or keyboard is used · Press Esc to stop at any time · Chinese and English settings**
+**Web pages in the background · 24 desktop tools + 1 management entry · Clear indicators when the mouse or keyboard is used · Press Esc to stop at any time · Chinese and English settings**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/how-it-works-en-dark.png">
@@ -100,7 +100,7 @@ Each desktop action is a row with a mouse icon, such as “Entered text”, “S
 
 #### 2.3 Settings page
 
-The settings are under Computer Use, the tab with the mouse icon on the left (电脑操控 in the Chinese interface). Browser Use comes first, with four items: Prefer Browser Use for web pages, Show the browser window, Browser and Keep sign-ins (cookies). Below it, pick how tools are loaded: All, Lite, Lazy or Custom. All (24 tools) is the default. The small picture to the left of each item follows its setting, and the explanations sit behind ⓘ icons. Collapse folds the Star and Issue note at the top into a single link, as in the screenshot, and Expand brings it back.
+The settings are under Computer Use, the tab with the mouse icon on the left (电脑操控 in the Chinese interface). Browser Use comes first, with four items: Prefer Browser Use for web pages, Show the browser window, Browser and Keep sign-ins (cookies). Below it, pick how tools are loaded: All, Lite, Lazy or Custom. All (25 tools) is the default. The small picture to the left of each item follows its setting, and the explanations sit behind ⓘ icons. Collapse folds the Star and Issue note at the top into a single link, as in the screenshot, and Expand brings it back.
 
 ![The settings page: the mouse-icon tab on the left (电脑操控 in the Chinese interface) and the folded project link at the top; the Browser Use group with Prefer Browser Use for web pages, Show the browser window, Browser and Keep sign-ins, each with a small picture on its left; below it the All, Lite, Lazy and Custom tool presets](assets/desktop-settings-overview-hd.png)
 
@@ -181,9 +181,9 @@ Change these in **Settings → Computer Use**, then click Save changes. The page
 |---|---|
 | Prefer Browser Use for web pages | On by default. Pages it can read and operate directly are handled in the background, without moving the pointer or taking the foreground; desktop apps and page content it cannot read go to Computer Use |
 | Show the browser window | On by default, so you can watch the DSH browser; turn it off to run the browser in the background with no window |
-| Browser | Follows the Windows default browser, or choose Edge or Chrome; when the default is neither, an installed Chrome or Edge is used |
+| Browser | Follows the Windows default browser, or choose Edge, Chrome or the Firefox family (experimental); when the default is neither Edge nor Chrome, an installed Chrome or Edge is used. The Firefox family starts with the Windows default one; see [Firefox-family browsers](docs/browser-bidi.md) |
 | Keep sign-ins (cookies) | Off by default. When on, the DSH browser keeps one profile, and sites you sign in to in its window are still signed in next time; nothing to set up in your own browser and no prompts to allow. The settings page says how to sign in, where the sign-ins are kept and the risks; see 7.4 |
-| Tool loading | **All** (24 tools, the default); **Lite** (10 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
+| Tool loading | **All** (25 tools, the default); **Lite** (11 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
 | Screen indicator | Turn the edge glow and the status bar on or off. Change the text, put the bar at the top or bottom, and choose how long it stays after a turn ends (0.2–3 seconds) |
 | Pointer indicator | Turn the glow and DSH tag at the pointer on or off on their own. Your Windows pointer style is not changed, and the tag stays clear of enlarged pointers |
 | Visible in remote sessions and recordings | On by default, so UU Remote, screen sharing and recordings can show the indicators too. It keeps up when you change monitors, layout or scaling |
@@ -226,7 +226,7 @@ When the task says what to confirm, the agent checks the result instead of stopp
 
 #### 7.1 Tool list
 
-There are **23 desktop tools and 1 management entry**. The table uses short names. The full name is `windows_computer_use_<name>`, and DSH usually adds a `mcp__wincu__` prefix.
+There are **24 desktop tools and 1 management entry**. The table uses short names. The full name is `windows_computer_use_<name>`, and DSH usually adds a `mcp__wincu__` prefix.
 
 | Purpose | Tools |
 |---|---|
@@ -235,13 +235,15 @@ There are **23 desktop tools and 1 management entry**. The table uses short name
 | Screenshots and text recognition | `screenshot` · `ocr` |
 | Mouse | `click` · `double_click` · `move` · `drag` · `scroll` |
 | Type and operate controls | `type_text` · `keypress` · `focus` · `invoke` · `set_value` |
-| Manage windows | `activate_window` · `move_window` · `close_window` |
+| Launch apps, manage windows | `launch_app` · `activate_window` · `move_window` · `close_window` |
 | Wait and confirm | `wait_for` · `wait` |
 | Manage tools | `tools` |
 
+`launch_app` starts programs through the Windows desktop (Explorer), so they keep running after the tool call ends. Command interpreters and script hosts such as cmd and PowerShell start only without arguments; run commands with DSH's own shell tool.
+
 #### 7.2 Lite preset and the management entry
 
-Lite includes `list_windows`, `find`, `click`, `scroll`, `type_text`, `keypress`, `ocr`, `screenshot`, `wait_for` and `tools`.
+Lite includes `list_windows`, `find`, `click`, `scroll`, `type_text`, `keypress`, `ocr`, `screenshot`, `wait_for`, `launch_app` and `tools`.
 
 Through the `tools` entry, the agent can read a tool's description, and unload or reload tools you have allowed. `reset` returns to your saved startup set. Unloading a tool does not remove its description or results from the conversation.
 
@@ -255,7 +257,7 @@ Electron apps, Chrome and Edge are all built on Chromium. Such an app builds the
 
 #### 7.4 Browser lane
 
-For web pages, the plugin does not have to read screenshots or move the mouse. It reads the page structure over the Chrome DevTools Protocol (CDP), then clicks, fills and selects elements directly. All of this happens inside the browser: your mouse does not move, the clipboard is not used and no window comes to the front, so tabs in the background work too. There are still 24 tools; what is new is a `browserTab` argument and page element IDs:
+For web pages, the plugin does not have to read screenshots or move the mouse. It reads the page structure over the Chrome DevTools Protocol (CDP), then clicks, fills and selects elements directly. All of this happens inside the browser: your mouse does not move, the clipboard is not used and no window comes to the front, so tabs in the background work too. Browser Use adds no tools; what is new is a `browserTab` argument and page element IDs:
 
 1. The result of `list_windows` includes `browserLane`, which lists the tabs of connected browsers. Each tab has an ID such as `t1a2b`.
 2. Pass that ID as `browserTab` to `snapshot`, `accessibility_tree`, `find`, `type_text`, `keypress`, `scroll`, `screenshot` or `wait_for` to read or operate that page. Every element on the page comes with an ID such as `t1a2b:57`, which works directly in `click`, `set_value`, `focus`, `invoke`, `scroll` and `element_info`. After each action, the result shows what changed on the page. An element ID is valid only for the page it was read from: read the page again after it navigates. After the plugin's server restarts, tab IDs change too, so call `list_windows` first.
@@ -263,7 +265,7 @@ For web pages, the plugin does not have to read screenshots or move the mouse. I
 
 The browser comes from one of two places:
 
-- **The agent browser (default).** The first `new-tab` opens a visible browser window without bringing it to the front. Which browser is a setting: by default the Windows default browser, and an installed Chrome or Edge when that is neither. It starts from a fresh temporary profile every time, and its tabs run in a separate isolated context, so they never see your cookies, sign-ins or history. It exits with the plugin process and closes itself after 10 idle minutes. Edge signs a new profile in to your Windows Microsoft account on its own; the agent's tabs stay in the isolated context and cannot use that sign-in, the window shows no account, and the temporary profile is deleted after the browser closes. Turn off Show the browser window in settings to run it in the background with no window. Browser Use shows no screen edges or pointer tag.
+- **The agent browser (default).** The first `new-tab` opens a visible browser window without bringing it to the front. Which browser is a setting: by default the Windows default browser, and an installed Chrome or Edge when that is neither; the Firefox family is an experimental choice that runs in the background (see [Firefox-family browsers](docs/browser-bidi.md)). It starts from a fresh temporary profile every time, and its tabs run in a separate isolated context, so they never see your cookies, sign-ins or history. It exits with the plugin process and closes itself after 10 idle minutes. Edge signs a new profile in to your Windows Microsoft account on its own; the agent's tabs stay in the isolated context and cannot use that sign-in, the window shows no account, and the temporary profile is deleted after the browser closes. Turn off Show the browser window in settings to run it in the background with no window. Browser Use shows no screen edges or pointer tag.
 - **Keep sign-ins.** For tasks that need you signed in, turn on Keep sign-ins (cookies) in settings; it is off by default. The DSH browser then stops starting from a temporary profile and keeps one profile per browser (`kept-edge`, `kept-chrome` under `%LOCALAPPDATA%\dsh-computer-use-win\agent-browser`): sites you sign in to in its window (the blue frame) are still signed in for later tasks, also sites where you did not tick “remember me”. The first time a task needs a site that asks you to sign in, the agent asks you to sign in once in that window; you type passwords and codes yourself. Your own browser is never touched: no remote debugging to turn on and no prompts to allow. With Edge, Edge signs this profile in with the Microsoft account of your Windows, so Microsoft’s own sites are signed in already; choose Chrome to avoid that. Sign-ins stay when you turn the switch off; to remove them all, exit DSH and delete that folder. Risks: DSH acts as you on the sites you signed in to there; page text can try to steer the agent; and while the DSH browser runs, other programs on this computer can connect to it through its debugging port.
 
 The browser lane does not read content inside iframes yet; there the agent switches to Computer Use and reads and operates it through UIA. With the browser window shown, Chrome's own JavaScript dialogs (alert, confirm and the like) sometimes come to the front briefly. Shortcuts such as Ctrl+L and Ctrl+T belong to the browser window and never reach the page; use `address`, `new-tab` and `close_window` instead. Environment variables and result formats are in the [MCP tools reference](docs/wiki/mcp-tools.md#browser-lane).
@@ -327,7 +329,7 @@ MIT licensed. Derived from [cgissing/windows-computer-use](https://github.com/cg
 
 这个插件让 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里的 agent 看到并操作你电脑上真实的 Windows 程序和网页：找到按钮和输入框，读出屏幕上的文字，点击、打字，切换和管理窗口。网页默认在 DSH 自己的浏览器里后台完成，不动你的鼠标，也不抢前台。
 
-**网页在后台完成 · 23 个桌面工具 + 1 个管理入口 · 用到鼠标键盘时有明显提示 · 按 Esc 随时停止 · 中英文设置界面**
+**网页在后台完成 · 24 个桌面工具 + 1 个管理入口 · 用到鼠标键盘时有明显提示 · 按 Esc 随时停止 · 中英文设置界面**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/how-it-works-zh-dark.png">
@@ -411,7 +413,7 @@ DSH Web 和单独的 MCP 客户端会用你电脑上的 Node.js 运行插件，�
 
 #### 2.3 设置页
 
-设置在左侧的“电脑操控”（鼠标图标）里。最上面是浏览器操控的四项：网页优先用浏览器操控、显示浏览器窗口、使用的浏览器、记住登录（cookies）。下面选工具加载方案：全部、精简、懒启动或自定义，默认是“全部”（24 个工具）。每项左边的小图跟着设置变化，说明收在 ⓘ 图标里。顶部的 Star 和 Issue 说明可以折叠成一个链接，下图就是折叠后的样子，点“展开”就能恢复。
+设置在左侧的“电脑操控”（鼠标图标）里。最上面是浏览器操控的四项：网页优先用浏览器操控、显示浏览器窗口、使用的浏览器、记住登录（cookies）。下面选工具加载方案：全部、精简、懒启动或自定义，默认是“全部”（25 个工具）。每项左边的小图跟着设置变化，说明收在 ⓘ 图标里。顶部的 Star 和 Issue 说明可以折叠成一个链接，下图就是折叠后的样子，点“展开”就能恢复。
 
 ![电脑操控设置页：左侧是带鼠标图标的电脑操控选项卡，顶部是折叠后的项目链接；浏览器操控分组里有网页优先用浏览器操控、显示浏览器窗口、使用的浏览器、记住登录四项，每项左边有小示意图；下面是全部、精简、懒启动、自定义四种工具加载方案](assets/desktop-settings-overview-hd.png)
 
@@ -492,9 +494,9 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 |---|---|
 | 网页优先用浏览器操控 | 默认打开。网页能直接读写时在后台完成，不动鼠标、不抢前台；桌面程序和读不到的网页内容再交给电脑操控 |
 | 显示浏览器窗口 | 默认打开，能看到 DSH 浏览器在做什么；关掉后它在后台运行，没有窗口 |
-| 使用的浏览器 | 默认跟随 Windows 的默认浏览器，也可以选 Edge 或 Chrome；默认浏览器不是这两个时，用已安装的 Chrome 或 Edge |
+| 使用的浏览器 | 默认跟随 Windows 的默认浏览器，也可以选 Edge、Chrome 或 Firefox 系（实验）；默认浏览器不是 Edge 或 Chrome 时，用已安装的 Chrome 或 Edge。选 Firefox 系时先用 Windows 默认的那一个，见 [Firefox 系浏览器](docs/browser-bidi.md) |
 | 记住登录（cookies） | 默认关闭。打开后 DSH 专用浏览器改用长期保留的配置，你在它的窗口里登录过的网站，下次还是登录状态；你自己的浏览器里不用做任何设置，也不会弹出允许提示。设置页会说明怎么登录、登录存在哪、有哪些风险，见 7.4 |
-| 工具加载 | **全部**（24 个，默认）；**精简**（10 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
+| 工具加载 | **全部**（25 个，默认）；**精简**（11 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
 | 屏幕提示 | 开关屏幕边缘光晕和提示条；可以改提示文字，放在顶部或底部，并设置结束后多久收起（0.2–3 秒） |
 | 鼠标提示 | 单独开关鼠标旁的光斑和 DSH 标签。不会改你的系统鼠标样式，调大了的指针也会自动避开 |
 | 远程与录屏可见 | 默认打开，让 UU 远程、屏幕共享和录屏也能看到提示。换显示器、调整布局或缩放后会自动跟上 |
@@ -537,7 +539,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 
 #### 7.1 工具清单
 
-一共 **23 个桌面工具和 1 个管理入口**。下表用的是短名；完整名字是 `windows_computer_use_<短名>`，在 DSH 里通常还会加上 `mcp__wincu__` 前缀。
+一共 **24 个桌面工具和 1 个管理入口**。下表用的是短名；完整名字是 `windows_computer_use_<短名>`，在 DSH 里通常还会加上 `mcp__wincu__` 前缀。
 
 | 用途 | 工具 |
 |---|---|
@@ -546,13 +548,15 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 | 截图和文字识别 | `screenshot` · `ocr` |
 | 鼠标 | `click` · `double_click` · `move` · `drag` · `scroll` |
 | 输入文字、操作控件 | `type_text` · `keypress` · `focus` · `invoke` · `set_value` |
-| 管理窗口 | `activate_window` · `move_window` · `close_window` |
+| 打开程序、管理窗口 | `launch_app` · `activate_window` · `move_window` · `close_window` |
 | 等待和确认 | `wait_for` · `wait` |
 | 管理工具 | `tools` |
 
+`launch_app` 通过 Windows 桌面（资源管理器）启动程序，所以程序在工具调用结束后照常运行。cmd、PowerShell 这类命令解释器和脚本宿主只能不带参数启动，命令请交给 DSH 自己的命令行工具。
+
 #### 7.2 精简方案与管理入口
 
-精简方案包含 `list_windows`、`find`、`click`、`scroll`、`type_text`、`keypress`、`ocr`、`screenshot`、`wait_for` 和 `tools`。
+精简方案包含 `list_windows`、`find`、`click`、`scroll`、`type_text`、`keypress`、`ocr`、`screenshot`、`wait_for`、`launch_app` 和 `tools`。
 
 有了管理入口 `tools`，agent 可以查看某个工具的说明，也可以临时卸载或重新加载你允许的工具；`reset` 会恢复你保存的启动方案。卸载工具不会删掉对话里已有的说明和结果。
 
@@ -566,7 +570,7 @@ Electron 程序、Chrome 和 Edge 都用 Chromium 内核。这类程序要等有
 
 #### 7.4 浏览器通道
 
-处理网页时，插件可以不看截图、不动鼠标：它通过 Chrome DevTools 协议（CDP）直接读网页的结构，再按元素点击、填写和选择。这些操作都在浏览器内部完成，不移动你的鼠标，不用剪贴板，也不把窗口切到前台，放在后台的标签页同样可以操作。工具还是 24 项，只多了一个 `browserTab` 参数和网页元素 ID：
+处理网页时，插件可以不看截图、不动鼠标：它通过 Chrome DevTools 协议（CDP）直接读网页的结构，再按元素点击、填写和选择。这些操作都在浏览器内部完成，不移动你的鼠标，不用剪贴板，也不把窗口切到前台，放在后台的标签页同样可以操作。浏览器操控没有新增工具，只多了一个 `browserTab` 参数和网页元素 ID：
 
 1. `list_windows` 的结果里有 `browserLane`，列出已连接浏览器的标签页。每个标签页有一个 ID，例如 `t1a2b`。
 2. 把这个 ID 作为 `browserTab` 传给 `snapshot`、`accessibility_tree`、`find`、`type_text`、`keypress`、`scroll`、`screenshot` 或 `wait_for`，就是在读或操作这个网页。网页里的每个元素都带 ID，例如 `t1a2b:57`，可以直接交给 `click`、`set_value`、`focus`、`invoke`、`scroll` 和 `element_info`。每次操作后，结果里会附上页面发生的变化。元素 ID 只对读到它的那个页面有效：页面跳转后要重新读；插件服务重启后，标签页 ID 也会换，要先调用 `list_windows`。
@@ -574,7 +578,7 @@ Electron 程序、Chrome 和 Edge 都用 Chromium 内核。这类程序要等有
 
 浏览器有两种来源：
 
-- **agent 浏览器（默认）**：第一次用 `new-tab` 时，插件在后台创建一个可见但不抢前台的浏览器窗口。用哪个浏览器可以在设置里选，默认跟随 Windows 的默认浏览器；默认浏览器不是 Edge 或 Chrome 时，用已安装的 Chrome 或 Edge。它每次都从新的临时配置开始，标签页放在单独的隔离环境里，看不到你的 Cookie、登录状态和浏览记录。插件进程退出时它跟着退出，空闲 10 分钟也会自己关掉。如果用的是 Edge，Edge 会自动把这个临时配置登录到 Windows 的微软账户；agent 的标签页留在隔离环境里，用不到这个登录状态，窗口上也不显示账户；临时配置在浏览器关闭后删除。在设置里关掉“显示浏览器窗口”，它就在后台运行，没有窗口。浏览器操控不显示屏幕边缘和鼠标标签。
+- **agent 浏览器（默认）**：第一次用 `new-tab` 时，插件在后台创建一个可见但不抢前台的浏览器窗口。用哪个浏览器可以在设置里选，默认跟随 Windows 的默认浏览器；默认浏览器不是 Edge 或 Chrome 时，用已安装的 Chrome 或 Edge；也可以选 Firefox 系，这是实验功能，在后台运行，见 [Firefox 系浏览器](docs/browser-bidi.md)。它每次都从新的临时配置开始，标签页放在单独的隔离环境里，看不到你的 Cookie、登录状态和浏览记录。插件进程退出时它跟着退出，空闲 10 分钟也会自己关掉。如果用的是 Edge，Edge 会自动把这个临时配置登录到 Windows 的微软账户；agent 的标签页留在隔离环境里，用不到这个登录状态，窗口上也不显示账户；临时配置在浏览器关闭后删除。在设置里关掉“显示浏览器窗口”，它就在后台运行，没有窗口。浏览器操控不显示屏幕边缘和鼠标标签。
 - **记住登录**：需要登录的任务，可以在设置里打开“记住登录（cookies）”，默认关闭。打开后，DSH 专用浏览器不再每次用临时配置，而是给每个浏览器保留一个配置（`%LOCALAPPDATA%\dsh-computer-use-win\agent-browser` 下的 `kept-edge`、`kept-chrome`）：你在它的窗口（蓝框）里登录过的网站，之后的任务里还是登录状态，没勾“记住我”的网站也一样。第一次用到要登录的网站时，agent 会请你在这个窗口里登录一次，密码和验证码由你自己输入。你自己的浏览器始终不碰，不用开远程调试，也不会弹出允许提示。用 Edge 时，Edge 会自动用 Windows 上的微软账户登录这个配置，微软自家的网站直接是登录状态；不想这样就选 Chrome。关掉开关后登录仍然保留；要全部清除，退出 DSH 后删除上面的文件夹。风险：DSH 会以你的身份操作你在这里登录过的网站；网页上的文字可能诱导 agent；DSH 浏览器开着时，本机其他程序也能通过它的调试端口连上它。
 
 浏览器通道还读不到 iframe 里的内容，遇到时 agent 会改用电脑操控，通过 UIA 读取和操作。显示浏览器窗口时，Chrome 自己的 JavaScript 弹窗（alert、confirm 这类）有时会短暂切到前台。Ctrl+L、Ctrl+T 这类快捷键属于浏览器窗口，网页内部收不到，请改用 `address`、`new-tab` 和 `close_window`。环境变量和返回格式见 [MCP 工具文档](docs/wiki/mcp-tools.md#browser-lane)。
