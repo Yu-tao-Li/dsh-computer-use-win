@@ -50,11 +50,18 @@ const env = { ...process.env, WCU_INDICATOR: '0' };
 const browser = spawn(firefox, ['-no-remote', '-new-instance', '-profile', profile, url], { windowsHide: false, stdio: 'ignore' });
 const client = new McpTestClient(process.execPath, [path.join(import.meta.dirname, '../mcp/server.mjs')], { env });
 const results = [];
+// A loaded CI runner can keep Firefox's UI thread busy past the backend's
+// 200 ms responsiveness probe. The backend then skips that read on purpose
+// (truncationReason targetUnresponsive), so the read is taken again.
 async function call(action, args) {
-  const response = await client.call('windows_computer_use_' + action, args);
-  assert.ok(!response.isError, JSON.stringify(response));
-  const result = JSON.parse(response.content.find(part => part.type === 'text').text);
-  results.push({ action, args, result }); return result;
+  for (let attempt = 1; ; attempt++) {
+    const response = await client.call('windows_computer_use_' + action, args);
+    assert.ok(!response.isError, JSON.stringify(response));
+    const result = JSON.parse(response.content.find(part => part.type === 'text').text);
+    results.push({ action, args, result });
+    if (result.truncationReason !== 'targetUnresponsive' || attempt === 10) return result;
+    await delay(500);
+  }
 }
 const names = node => node ? [node.name, ...(node.children || []).flatMap(names)] : [];
 let hwnd = 0;
