@@ -47,6 +47,6 @@ try{
  for(const child of children)assert.notEqual(child.state,3,child._error?.message);
  assert.ok(slots.includes('settings.section'),'Modern settings must mount with real service access checks');
  assert.ok(slots.includes('conversation.chat.node'),'Activity summary must mount with real service access checks');
- assert.equal(slots.filter(name=>name==='tool.call.toolview').length,48,'All 24 tools must register both public name prefixes without duplicate child-slot declarations');
+ assert.equal(slots.filter(name=>name==='tool.call.toolview').length,50,'All 25 tools must register both public name prefixes without duplicate child-slot declarations');
 }finally{await ctx.fiber.dispose();}
 console.log(JSON.stringify({passed:true,hostDiscovery:true,loaderRow:row.name,dependencies:meta.meta.inject,serviceInjectionChecked:true}));

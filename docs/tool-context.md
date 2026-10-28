@@ -8,7 +8,7 @@ Choose Lite / All / Lazy / Custom in the outer preset selector; All is the defau
 
 选择 `toolPreset: "lazy"` 时，用户允许全部 24 项，但启动只注册管理入口。先用 `enable` 加载任务所需工具；已有 `names: ["screenshot","click"]` 支持一次加载多项。新增 `names: ["*"]` 可一次启用全部已允许的桌面工具，或配合 `disable` 卸载它们，始终保留管理入口。通配符必须单独使用，不能用于 `list`、`describe` 或 `reset`。精简和自定义方案的限制同样适用于通配符。`reset` 在懒启动中回到 1 项；重新连接也回到保存的启动方案。
 
-`toolPreset: "lazy"` permits all 24 tools but starts with management only. Enable the tools needed for a task using a name array, or use `names: ["*"]` with enable/disable for all allowed desktop tools. Management stays loaded. The wildcard must stand alone and is rejected for list/describe/reset. Lite and Custom restrictions still apply. Reset and reconnect return Lazy to its single management entry.
+`toolPreset: "lazy"` permits all 25 tools but starts with management only. Enable the tools needed for a task using a name array, or use `names: ["*"]` with enable/disable for all allowed desktop tools. Management stays loaded. The wildcard must stand alone and is rejected for list/describe/reset. Lite and Custom restrictions still apply. Reset and reconnect return Lazy to its single management entry.
 
 收益来自尚未加载的工具定义；加载后的定义仍占上下文，已有对话记录不会删除。桌面任务需要额外的加载调用。0.5.0 同口径列表为：全部 20,243、精简 9,030、懒启动 510 字符（较全部减少 97.5%），并非 token 数。
 
@@ -56,6 +56,6 @@ The examples above accept short or complete original names. Standard MCP tool-li
 
 Set `WCU_TOOL_MODE=lazy` for standalone Lazy startup. An explicit `WCU_ENABLED_TOOLS` still restricts permissions and must include `tools`.
 
-Standalone MCP defaults to all tools. Without `WCU_ENABLED_TOOLS`, `WCU_TOOL_MODE=lite` retains nine common tools plus management, while `full` loads all tools. An explicit JSON array in `WCU_ENABLED_TOOLS`, such as `["screenshot","wait"]`, takes precedence and permits an empty selection. Unknown names fail validation. The standalone server has no third-party runtime dependencies. The DSH adapter consumes the host's existing Schemastery and MCP bridge as optional peers.
+Standalone MCP defaults to all tools. Without `WCU_ENABLED_TOOLS`, `WCU_TOOL_MODE=lite` retains ten common tools plus management, while `full` loads all tools. An explicit JSON array in `WCU_ENABLED_TOOLS`, such as `["screenshot","wait"]`, takes precedence and permits an empty selection. Unknown names fail validation. The standalone server has no third-party runtime dependencies. The DSH adapter consumes the host's existing Schemastery and MCP bridge as optional peers.
 
 Measured `tools/list` for 0.4.0: 43,495 characters in 0.3.1, 9,046 in Lite and 20,259 in Full. Token counts depend on the target tokenizer and host request. Type, enum, bounds, required-property and default validation remains intact; only model-facing prose is shortened.

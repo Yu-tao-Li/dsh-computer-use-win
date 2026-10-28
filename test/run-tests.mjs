@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 if (process.platform !== 'win32') throw new Error('These backend regression tests require Windows.');
 const checkout = fileURLToPath(new URL('../', import.meta.url));
 const powershell = process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe';
-const root = await mkdtemp(path.join(os.tmpdir(), 'wcu-isolated-tests-'));
+const root = await mkdtemp(path.join(process.env.WCU_TEST_OUTPUT || os.tmpdir(), 'wcu-isolated-tests-'));
 if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `artifactRoot=${root}\n`);
 const suites = [
   ['source-encoding', process.execPath, ['test/source-encoding.mjs']],
@@ -26,6 +26,10 @@ const suites = [
   ['profile-resolution', process.execPath, ['test/profile-resolution.mjs']],
   ['bundle-startup', process.execPath, ['test/bundle-startup.mjs']],
   ['backend-lifecycle', process.execPath, ['test/backend-lifecycle.mjs']],
+  ['backend-startup-error', process.execPath, ['test/backend-startup-error.mjs']],
+  ['helper-assembly-load', powershell, ['-NoProfile', '-File', 'test/helper-assembly-load.ps1']],
+  ['helper-assembly-concurrency', process.execPath, ['test/helper-assembly-concurrency.mjs']],
+  ['launch-app', process.execPath, ['test/launch-app.mjs']],
   ['observation-contract', process.execPath, ['test/observation-contract.mjs']],
   ['activation-cancellation', process.execPath, ['test/activation-cancellation.mjs']],
   ['native-window-discovery', process.execPath, ['test/native-window-discovery.mjs']],
@@ -37,9 +41,11 @@ const suites = [
   ['quiet-native-mcp', process.execPath, ['test/quiet-native-mcp.mjs']],
   ['uia-chromium-smoke', process.execPath, ['test/uia-chromium-smoke.mjs', path.join(root, 'uia-chromium-smoke')]],
   ['uia-chromium-lazy-smoke', process.execPath, ['test/uia-chromium-lazy-smoke.mjs', path.join(root, 'uia-chromium-lazy-smoke')]],
+  ['uia-gecko-smoke', process.execPath, ['test/uia-gecko-smoke.mjs', path.join(root, 'uia-gecko-smoke')]],
   ['sparse-canvas-smoke', process.execPath, ['test/sparse-canvas-smoke.mjs', path.join(root, 'sparse-canvas-smoke')]],
   ['browser-namespace', process.execPath, ['test/browser-namespace.mjs']],
   ['browser-transport', process.execPath, ['test/browser-transport.mjs']],
+  ['browser-bidi-offline', process.execPath, ['test/browser-bidi.mjs']],
   ['browser-lane', process.execPath, ['test/browser-lane.mjs']],
   ['browser-visible', process.execPath, ['test/browser-visible.mjs']],
   ['browser-reconnect', process.execPath, ['test/browser-reconnect.mjs']],
@@ -51,8 +57,11 @@ const suites = [
   ['less-takeover-contract', powershell, ['-NoProfile', '-File', 'test/less-takeover-contract.ps1']]
 ];
 const results = [];
+const selected = process.env.WCU_TEST_SUITES?.split(',').filter(Boolean);
+if (selected?.some(name => !suites.some(suite => suite[0] === name))) throw new Error('Unknown WCU_TEST_SUITES selection');
 console.log(`Isolated test artifacts: ${root}`);
 for (const [name, command, args] of suites) {
+  if (selected && !selected.includes(name)) continue;
   const temp = path.join(root, name);
   await mkdir(temp);
   const start = Date.now();
@@ -67,7 +76,7 @@ for (const [name, command, args] of suites) {
   await writeFile(path.join(temp, 'stdout.log'), result.stdout || '');
   await writeFile(path.join(temp, 'stderr.log'), (result.stderr || '') + (result.error ? '\n' + result.error.message : ''));
   // Keep stage timings visible in successful CI jobs as well as failures.
-  if (['bundle-startup','uia-native-smoke','uia-chromium-smoke','uia-chromium-lazy-smoke','browser-lane'].includes(name) && result.stdout) console.log(result.stdout.trimEnd());
+  if (['bundle-startup','uia-native-smoke','uia-chromium-smoke','uia-chromium-lazy-smoke','uia-gecko-smoke','browser-lane'].includes(name) && result.stdout) console.log(result.stdout.trimEnd());
   const passed = result.status === 0 && !result.error;
   results.push({ name, passed, exitCode: result.status, durationMs: Date.now() - start });
   await writeFile(path.join(root, 'results.json'), JSON.stringify({ powershell, node: process.version, results }, null, 2) + '\n');

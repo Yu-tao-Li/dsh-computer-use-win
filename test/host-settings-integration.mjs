@@ -39,12 +39,12 @@ const fiber=ctx.plugin(adapter,raw);entry={id:1,options:{id:'mcp-dsh-computer-us
 const until=async test=>{const deadline=Date.now()+30000;while(!await test()){if(Date.now()>deadline)throw Error('Host integration condition timed out; fixture='+root);await new Promise(r=>setTimeout(r,40))}};
 try {
   await fiber;
-  await until(()=>tools.schemas().length===24);
+  await until(()=>tools.schemas().length===25);
   await until(()=>settings.describe().some(x=>x.ns===entry.options.id&&x.autoGenerate===false));
   const row=settings.describe().find(x=>x.ns===entry.options.id);
   assert.ok(row,'Modern DSH must expose the plugin Config form');
   assert.equal(row.autoGenerate,false,'Use the purpose-built settings page');
-  assert.equal(row.value.enabledTools.length,24,'Even legacy profiles default to all tools until a selection is saved');
+  assert.equal(row.value.enabledTools.length,25,'Even legacy profiles default to all tools until a selection is saved');
   const originalFiber=fiber.uid;
   await settings.mutate(entry.options.id,[{op:'set',path:['indicatorPosition'],value:'bottom'},{op:'set',path:['indicatorIdleMs'],value:1200}],row.revision);
   assert.equal(fiber.uid,originalFiber,'Volatile settings must keep the owner instance alive');
@@ -91,18 +91,18 @@ try {
   await assert.rejects(settings.update(entry.options.id,{enabledTools:['unknown']}));
   assert.deepEqual(settings.describe().find(x=>x.ns===entry.options.id).value.enabledTools,[]);
   await settings.update(entry.options.id,{enabledTools:row.value.enabledTools});
-  await until(()=>tools.schemas().length===24);
+  await until(()=>tools.schemas().length===25);
   await settings.update(entry.options.id,{toolPreset:'custom',enabledTools:['wait']});
   await until(()=>tools.schemas().length===1);
   await settings.update(entry.options.id,{toolPreset:'lite'});
-  await until(()=>tools.schemas().length===10);
+  await until(()=>tools.schemas().length===11);
   await settings.update(entry.options.id,{toolPreset:'full'});
-  await until(()=>tools.schemas().length===24);
+  await until(()=>tools.schemas().length===25);
   assert.deepEqual(settings.describe().find(x=>x.ns===entry.options.id).value.enabledTools,['wait'],'Changing a preset must preserve the custom list');
   await settings.update(entry.options.id,{toolPreset:'custom'});
   await until(()=>tools.schemas().length===1);
   await settings.update(entry.options.id,{toolPreset:'full',enabledTools:row.value.enabledTools});
-  await until(()=>tools.schemas().length===24);
+  await until(()=>tools.schemas().length===25);
   for (const key of ['browserFirst','browserVisible']) {
     assert.equal(settings.describe().find(x=>x.ns===entry.options.id).value[key],true);
     await settings.update(entry.options.id,{[key]:false});
@@ -127,7 +127,7 @@ try {
   await manage({operation:'enable',names:['wait','health']});
   await until(()=>tools.schemas().length===3);
   await manage({operation:'enable',names:['*']});
-  await until(()=>tools.schemas().length===24);
+  await until(()=>tools.schemas().length===25);
   // Restart a fresh official bridge from the persisted settings, not runtime state.
   const restarted=new Context();
   restarted.provide('systemPrompt',{tools(){return ()=>{}},section(){return ()=>{}},getSectionOrder(){return 0}});
@@ -144,19 +144,19 @@ try {
   await manage({operation:'reset'});
   await until(()=>tools.schemas().length===1);
   await settings.update(entry.options.id,{toolPreset:'full'});
-  await until(()=>tools.schemas().length===24);
+  await until(()=>tools.schemas().length===25);
   await settings.update(entry.options.id,{toolPreset:'lazy'});
   await until(()=>tools.schemas().length===1);
   await settings.update(entry.options.id,{toolPreset:'custom',enabledTools:['wait']});
   await until(()=>tools.schemas().length===1&&tools.schemas()[0].name.endsWith('windows_computer_use_wait'));
   await settings.update(entry.options.id,{toolPreset:'full'});
-  await until(()=>tools.schemas().length===24);
+  await until(()=>tools.schemas().length===25);
   await assert.rejects(settings.update(entry.options.id,{toolPreset:'unknown'}));
   assert.equal(fiber.uid,originalFiber,'Tool changes keep the adapter owner while refreshing its bridge');
   await settings.update(entry.options.id,{resumeToken:1,previewToken:1});
   await until(async()=>JSON.parse(await readFile(liveFile,'utf8')).resumeToken===1);
   const report={passed:true,hostVersion:require('@deepseek-ai/dsh/package.json').version,bridgeVersion:require('@deepseek-ai/dsh-mcp-client/package.json').version,
-    namespace:entry.options.id,volatileSettings:true,liveDisplayConfig:true,toolSelectionReload:[24,2,0,24],presetReload:[1,10,24,1,24,1,24,1,1,24],lazyPresetPersistence:true,lazyWorkerRestart:true,lazyDynamicRegistry:[1,3,24,1,2,1],customSelectionPreserved:true,allToolsDefault:true,toolSelectionPersistence:true,invalidToolRejected:true,
+    namespace:entry.options.id,volatileSettings:true,liveDisplayConfig:true,toolSelectionReload:[25,2,0,25],presetReload:[1,11,25,1,25,1,25,1,1,25],lazyPresetPersistence:true,lazyWorkerRestart:true,lazyDynamicRegistry:[1,3,25,1,2,1],customSelectionPreserved:true,allToolsDefault:true,toolSelectionPersistence:true,invalidToolRejected:true,
     remoteVisibilityPersistence:true,remoteVisibilityLiveConfig:true,previewAndResumeSignals:true,cursorIndicatorPersistence:true,cursorIndicatorLiveConfig:true,shortcutPersistence:true,shortcutValidation:true,shortcutClear:true,lockedConfigWriteRetried:true,existingUserProfilesModified:false,physicalInputSent:false,profileFixture:root};
   await writeFile(path.join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 } finally {await ctx.fiber.dispose();process.env.TEMP=previousTemp;process.env.TMP=previousTmp;}

@@ -20,7 +20,8 @@ assert.equal(bridgeConfig({browserVisible:false}).env.WCU_BROWSER_HEADLESS,'1');
 // The browser follows the Windows default, and sign-ins are off until the user turns them on.
 assert.equal(normalizeSettings({}).browserApp,'default');
 assert.equal(normalizeSettings({}).browserSignIn,false);
-assert.throws(()=>normalizeSettings({browserApp:'firefox'}));
+assert.equal(normalizeSettings({browserApp:'firefox'}).browserApp,'firefox');
+assert.throws(()=>normalizeSettings({browserApp:'unknown-browser'}));
 assert.throws(()=>normalizeSettings({browserSignIn:'true'}));
 assert.notEqual(toolSelectionKey({}),toolSelectionKey({browserApp:'edge'}));
 assert.notEqual(toolSelectionKey({}),toolSelectionKey({browserSignIn:true}));

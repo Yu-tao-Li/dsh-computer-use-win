@@ -8,8 +8,10 @@ $ErrorActionPreference = "Stop"
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $script:BackendStartupWatch = [System.Diagnostics.Stopwatch]::StartNew()
+$script:BackendStage = 'start'
 function Write-BackendStage {
   param([string]$Stage)
+  $script:BackendStage = $Stage
   if ([string]$env:WCU_BACKEND_TRACE -eq '1') {
     [Console]::Error.WriteLine(('stage={0} elapsedMs={1}' -f $Stage, $script:BackendStartupWatch.ElapsedMilliseconds))
   }
@@ -409,6 +411,32 @@ function Get-CsHash {
   return ([BitConverter]::ToString($bytes).Replace("-", "").Substring(0, 16)).ToLowerInvariant()
 }
 
+# Load a helper compiled into %TEMP%, compiling it first when no cached copy
+# exists. The bytes are read rather than passed to Assembly.LoadFrom: .NET
+# Framework refuses LoadFrom for an unsigned DLL it treats as coming from a
+# remote or internet location (0x80131515), which left every tool failing with
+# "Backend process exited" on some machines (#54). The compiler writes a
+# file of its own and only a complete one is moved into place, because another
+# backend may be reading the cache at the same time.
+function Import-HelperAssembly {
+  param([string]$Path, [scriptblock]$Compile)
+  if (-not (Test-Path -LiteralPath $Path)) {
+    $partial = $Path -replace '\.dll$', (".$PID." + [Guid]::NewGuid().ToString('N') + '.dll')
+    try {
+      & $Compile $partial
+      try { [System.IO.File]::Move($partial, $Path) }
+      catch { if (-not (Test-Path -LiteralPath $Path)) { throw } }
+      if (Test-Path -LiteralPath $partial) {
+        [void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($partial))
+        return
+      }
+    } finally {
+      if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue }
+    }
+  }
+  [void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($Path))
+}
+
 function Load-Assemblies {
   # DPI awareness MUST be set before any GDI+/WinForms assembly is loaded:
   # loading System.Windows.Forms/System.Drawing initializes GDI, which locks
@@ -416,11 +444,11 @@ function Load-Assemblies {
   # 150%-scaled values like 3414x960 instead of physical 5120x1440).
   if (-not ("WindowsComputerUseNative" -as [type])) {
     Write-BackendStage 'native-load-start'
-    $dll = Join-Path $env:TEMP ("wcu-native-" + (Get-CsHash -Source $script:WcuCs) + ".dll")
-    if (-not (Test-Path $dll)) {
-      Add-Type -TypeDefinition $script:WcuCs -OutputAssembly $dll
-    }
-    [void][System.Reflection.Assembly]::LoadFrom($dll)
+    # Add-Type targets the current runtime. A Core-built helper cannot be used
+    # by Windows PowerShell 5.1 even when its C# source is identical.
+    $runtimeKey = $PSVersionTable.PSEdition.ToLowerInvariant() + '-clr' + [Environment]::Version.Major
+    $dll = Join-Path $env:TEMP ("wcu-native-" + $runtimeKey + '-' + (Get-CsHash -Source $script:WcuCs) + ".dll")
+    Import-HelperAssembly -Path $dll -Compile { param($out) Add-Type -TypeDefinition $script:WcuCs -OutputAssembly $out }
   }
   Write-BackendStage 'native-load-complete'
   Set-DpiAware
@@ -1260,7 +1288,8 @@ function Get-OcrHelper {
   # Compile (once, cached) and load the C# WinRT OCR helper.
   if ("WindowsComputerUseOcr" -as [type]) { return }
   $dll = Join-Path $env:TEMP ("wcu-ocr-" + (Get-CsHash -Source $script:WcuOcrCs) + ".dll")
-  if (-not (Test-Path $dll)) {
+  Import-HelperAssembly -Path $dll -Compile {
+    param($target)
     $wd = "C:\Windows\System32\WinMetadata"
     # Only the winmds the C# code touches (plus the framework facades csc
     # needs for WinRT binding). Keeping the set small also keeps the command
@@ -1280,19 +1309,19 @@ function Get-OcrHelper {
     if (-not (Test-Path $fw)) { $fw = "C:\Windows\Microsoft.NET\Framework\v4.0.30319" }
     $csc = Join-Path $fw "csc.exe"
     if (-not (Test-Path $csc)) { throw "OCR unavailable: csc.exe not found at $fw." }
-    $src = "$dll.cs"
+    $src = "$target.cs"
     [System.IO.File]::WriteAllText($src, $script:WcuOcrCs)
     # Each /r must be its own argument (PowerShell would otherwise hand the
     # whole joined string to csc as one file name).
     $refArgs = ($winmdRefs + @((Join-Path $fw "System.Runtime.dll"), (Join-Path $fw "System.dll"), (Join-Path $fw "System.Runtime.WindowsRuntime.dll"))) | ForEach-Object { "/r:$_" }
-    $cscArgList = @("/nologo", "/target:library", "/out:$dll") + $refArgs + @($src)
+    $cscArgList = @("/nologo", "/target:library", "/out:$target") + $refArgs + @($src)
     $out = & $csc @cscArgList 2>&1
+    Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
     if ($LASTEXITCODE -ne 0) {
       $msg = (($out | Out-String).Trim())
       throw "OCR helper compile failed: " + $msg.Substring(0, [Math]::Min(300, $msg.Length))
     }
   }
-  [void][System.Reflection.Assembly]::LoadFrom($dll)
 }
 
 function Invoke-Ocr {
@@ -1512,7 +1541,8 @@ function Get-WgcHelper {
   if ("WgcCapture" -as [type]) { return }
   if ($script:WgcCompileFailed) { throw "WGC helper previously failed to compile (missing .NET Core reference pack); WGC capture is disabled on this machine." }
   $dll = Join-Path $env:TEMP ("wcu-wgc-" + (Get-CsHash -Source $script:WgcCs) + ".dll")
-  if (-not (Test-Path $dll)) {
+  Import-HelperAssembly -Path $dll -Compile {
+    param($target)
     $wd = "C:\Windows\System32\WinMetadata"
     # Reference whichever graphics winmds exist: older Windows ships separate
     # Windows.Graphics.{DirectX,Direct3D11,Imaging,Capture}.winmd; Windows 11
@@ -1524,7 +1554,7 @@ function Get-WgcHelper {
     $fw = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319"
     $csc = Join-Path $fw "csc.exe"
     if (-not (Test-Path $csc)) { throw "WGC unavailable: csc.exe not found." }
-    $src = "$dll.cs"
+    $src = "$target.cs"
     [System.IO.File]::WriteAllText($src, $script:WgcCs)
     $refArgs = $need | ForEach-Object { "/r:" + $_ }
     $refArgs += @("/r:System.dll", "/r:System.Drawing.dll", "/r:System.Runtime.WindowsRuntime.dll")
@@ -1540,15 +1570,15 @@ function Get-WgcHelper {
       $coreRef = Get-ChildItem $refPack -Recurse -Filter "System.Runtime.dll" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
       if ($coreRef) { $refArgs += ("/r:" + $coreRef) }
     }
-    $cscArgs = @("/nologo", "/target:library", "/out:$dll") + $refArgs + @($src)
+    $cscArgs = @("/nologo", "/target:library", "/out:$target") + $refArgs + @($src)
     $out = & $csc $cscArgs 2>&1
+    Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
     if ($LASTEXITCODE -ne 0) {
       $msg = (($out | Out-String).Trim())
       $script:WgcCompileFailed = $true
       throw "WGC helper compile failed: " + $msg.Substring(0, [Math]::Min(300, $msg.Length))
     }
   }
-  [void][System.Reflection.Assembly]::LoadFrom($dll)
 }
 
 function Invoke-WgcCapture {
@@ -1689,12 +1719,13 @@ function Convert-Tree {
   $info = Convert-ElementInfo -Element $Element -Id "uia:$Path" -Depth $Depth -DetailLevel $DetailLevel -UseCache
   $Count.Value++
   # Chromium nests a page six or more levels down, under unnamed layout panes
-  # (NonClientView, ClientView, View...). In window-scoped trees those panes do
+  # (NonClientView, ClientView, View...), and Firefox-family browsers put it
+  # under three unnamed Gecko panes (#56). In window-scoped trees those panes do
   # not use up maxDepth, so the default depths reach the page; 16 extra levels
   # bound the recursion. Desktop trees stay an overview of every window.
   $childLevel = $Level + 1
-  if ($Traversal.chromiumLayout -and $info.controlType -eq 'Pane' -and [string]::IsNullOrEmpty($info.name) -and
-      (Invoke-Safe { $Element.Cached.FrameworkId } '') -eq 'Chrome') { $childLevel = $Level }
+  if ($Traversal.browserLayout -and $info.controlType -eq 'Pane' -and [string]::IsNullOrEmpty($info.name) -and
+      (Invoke-Safe { $Element.Cached.FrameworkId } '') -in @('Chrome', 'Gecko')) { $childLevel = $Level }
   $childrenOut = New-Object System.Collections.Generic.List[object]
   if ($childLevel -le $MaxDepth -and $Depth -lt $MaxDepth + 16 -and $Count.Value -lt $MaxNodes -and (Test-TreeBudget $Traversal)) {
     try {
@@ -2453,7 +2484,7 @@ function Get-TreeResult {
   $responsive = Get-WindowResponsive $window
   $cache = New-ElementCacheRequest $detailLevel
   $walker = New-Object System.Windows.Automation.TreeWalker -ArgumentList (Get-ViewCondition $viewMode $includeOffscreen)
-  $traversal = @{watch=$stopwatch; budgetMs=$budgetMs; cache=$cache; walker=$walker; reason=$null; error=$null; chromiumLayout=($Scope -ne 'desktop')}
+  $traversal = @{watch=$stopwatch; budgetMs=$budgetMs; cache=$cache; walker=$walker; reason=$null; error=$null; browserLayout=($Scope -ne 'desktop')}
   $tree = $null
   $count = 0
   $pages = $null
@@ -2499,6 +2530,101 @@ function Get-TreeResult {
 # Action dispatch (shared by one-shot and persistent modes)
 # ============================================================================
 
+function Resolve-LaunchTarget {
+  param([string]$Target)
+  $targetValue = [Environment]::ExpandEnvironmentVariables($Target.Trim())
+  if ([string]::IsNullOrWhiteSpace($targetValue) -or $targetValue -match '[\x00-\x1f]') { throw 'LAUNCH_INVALID_TARGET: supply an executable, shortcut, installed app name or AppUserModelID.' }
+  # Resolve files and application commands without interpreting shell syntax.
+  $file = $null
+  if ([IO.Path]::IsPathRooted($targetValue)) {
+    if ($targetValue -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))') { throw 'LAUNCH_INVALID_TARGET: supply a fully qualified absolute path, not a drive-relative or root-relative path.' }
+    if (-not (Test-Path -LiteralPath $targetValue -PathType Leaf)) { throw "LAUNCH_NOT_FOUND: $targetValue" }
+    $file = (Get-Item -LiteralPath $targetValue).FullName
+  } elseif ($targetValue -notmatch '[/\\:]') {
+    $command = Get-Command -Name $targetValue -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $targetValue -or $_.Name -ieq ($targetValue + '.exe') } | Select-Object -First 1
+    if ($command) { $file = $command.Source }
+    if (-not $file) {
+      $exeName = if ($targetValue.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) { $targetValue } else { $targetValue + '.exe' }
+      foreach ($hive in @('HKCU:', 'HKLM:')) {
+        $key = Get-Item -LiteralPath ($hive + '\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\' + $exeName) -ErrorAction SilentlyContinue
+        if ($key) {
+          $candidate = [Environment]::ExpandEnvironmentVariables(([string]$key.GetValue('')).Trim('"'))
+          if (Test-Path -LiteralPath $candidate -PathType Leaf) { $file = (Get-Item -LiteralPath $candidate).FullName; break }
+        }
+      }
+    }
+  }
+  if ($file) {
+    if ([IO.Path]::GetExtension($file) -notin @('.exe', '.com', '.lnk')) { throw 'LAUNCH_INVALID_TARGET: only .exe, .com and .lnk files are supported.' }
+    return @{ target=$file; kind='file' }
+  }
+  # Exact matching prevents an ambiguous display name from launching the wrong app.
+  $apps = @(Get-StartApps -ErrorAction Stop | Where-Object { $_.AppID -ieq $targetValue -or $_.Name -ieq $targetValue })
+  if ($apps.Count -eq 0) { throw "LAUNCH_NOT_FOUND: '$targetValue'. Supply a full executable path or an installed AppUserModelID." }
+  if ($apps.Count -ne 1) { throw "LAUNCH_AMBIGUOUS: '$targetValue' matches several installed apps; use its AppUserModelID or full executable path." }
+  return @{ target=('shell:AppsFolder\' + $apps[0].AppID); kind='installed-app' }
+}
+
+function Invoke-LaunchApp {
+  param([object]$InputObject)
+  $resolved = Resolve-LaunchTarget ([string](Get-Prop $InputObject 'target' ''))
+  $arguments = [string](Get-Prop $InputObject 'arguments' '')
+  $directory = [string](Get-Prop $InputObject 'workingDirectory' '')
+  if ($arguments -match '[\x00\r\n]' -or $directory -match '[\x00-\x1f]') { throw 'LAUNCH_INVALID_ARGUMENTS: arguments and workingDirectory must be single-line strings.' }
+  if ($directory) {
+    $directory = [Environment]::ExpandEnvironmentVariables($directory)
+    if ($directory -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))' -or -not (Test-Path -LiteralPath $directory -PathType Container)) { throw 'LAUNCH_INVALID_DIRECTORY: supply an existing fully qualified absolute directory.' }
+    $directory = (Get-Item -LiteralPath $directory).FullName
+  }
+  if ($resolved.kind -eq 'installed-app' -and ($arguments -or $directory)) { throw 'LAUNCH_INVALID_ARGUMENTS: AppUserModelID launches do not accept arguments or workingDirectory.' }
+  # Command interpreters and script hosts run whatever their arguments say, so
+  # with arguments launch_app would be a command channel the user never sees.
+  # They start only without arguments; commands belong to DSH's own shell tool.
+  # A shortcut is judged by the program it starts.
+  if ($resolved.kind -eq 'file' -and $arguments.Trim()) {
+    $program = $resolved.target
+    if ([IO.Path]::GetExtension($program) -ieq '.lnk') {
+      $shell = $null; $link = $null
+      try { $shell = New-Object -ComObject WScript.Shell; $link = $shell.CreateShortcut($program); $program = [string]$link.TargetPath }
+      finally { foreach ($com in @($link, $shell)) { if ($null -ne $com) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($com) } } }
+    }
+    $commandHosts = @('cmd', 'powershell', 'pwsh', 'wt', 'wsl', 'bash', 'conhost', 'wscript', 'cscript', 'mshta', 'rundll32', 'regsvr32', 'msiexec', 'forfiles', 'schtasks')
+    $name = [IO.Path]::GetFileNameWithoutExtension($program)
+    if ($name -in $commandHosts) { throw "LAUNCH_COMMAND_REFUSED: $name runs the commands in its arguments. launch_app starts command interpreters and script hosts only without arguments; run commands with DSH's own shell tool." }
+  }
+  $waitMs = [int](Get-Prop $InputObject 'waitMs' 1500)
+  if ($waitMs -lt 0 -or $waitMs -gt 10000) { throw 'LAUNCH_INVALID_ARGUMENTS: waitMs must be 0-10000.' }
+  $before = @(Get-NativeWindowList -MaxWindows 1000 | ForEach-Object { $_.ToArray() } | ForEach-Object { $_.nativeWindowHandle })
+  $shellWindows = $null; $desktop = $null; $document = $null; $application = $null
+  try {
+    # The desktop folder view belongs to Explorer. Its ShellExecute starts the
+    # application with the desktop environment/lifetime, outside the short-lived
+    # tool's kill-on-close Job (#55). No elevation or breakaway flag is requested.
+    $shellWindows = [Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]'9BA05972-F6A8-11CF-A442-00A0C90A8F39'))
+    $location = 0; $root = $null; $desktopHwnd = 0
+    $desktop = $shellWindows.FindWindowSW([ref]$location, [ref]$root, 8, [ref]$desktopHwnd, 1)
+    if ($null -eq $desktop) { throw 'The interactive Explorer desktop is unavailable.' }
+    $document = $desktop.Document
+    $application = $document.Application
+    [void](Test-Failsafe)
+    $show = if ([bool](Get-Prop $InputObject 'activate' $false)) { 1 } else { 4 }
+    $application.ShellExecute($resolved.target, $arguments, $directory, 'open', $show)
+  } catch {
+    throw ('LAUNCH_SHELL_FAILED: ' + $_.Exception.Message + ' An interactive Explorer desktop is required; the request is not retried as a tool child process.')
+  } finally {
+    foreach ($com in @($application, $document, $desktop, $shellWindows)) {
+      if ($null -ne $com -and [Runtime.InteropServices.Marshal]::IsComObject($com)) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($com) }
+    }
+  }
+  if ($waitMs) { Start-Sleep -Milliseconds $waitMs }
+  $observed = @(Get-NativeWindowList -MaxWindows 1000 | ForEach-Object { $_.ToArray() } | Where-Object { $before -notcontains $_.nativeWindowHandle })
+  return [ordered]@{
+    ok=$true; action='launch_app'; target=$resolved.target; launchMethod='explorer-shell'; verification='dispatched'
+    observedNewWindows=$observed
+    note='The shell accepted the request. New windows are observations, not confirmed matches; an app may reuse an existing window or show none. Verify with list_windows/wait_for. activate=false requests no activation, but applications may activate themselves.'
+  }
+}
+
 function Invoke-Action {
   param([string]$Action, [object]$inputObject = $null)
 
@@ -2507,12 +2633,13 @@ function Invoke-Action {
   # operation series (host turn) this call belongs to.
   $script:WcuQuiet = [bool](Get-Prop $inputObject '_wcuQuiet' $false)
   $script:WcuSeries = Get-Prop $inputObject '_wcuSeries' $null
-  if ($Action -in @('click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','close_window','move_window') -or (Get-Prop $inputObject 'activate' $false)) {
+  if ($Action -in @('launch_app','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','close_window','move_window') -or (Get-Prop $inputObject 'activate' $false)) {
     if ($env:WCU_CANCEL_EVENT) { [WindowsComputerUseNative]::SetStopListener([int](Get-Prop $inputObject '_wcuTakeoverPid' 0)) }
     [void](Test-Failsafe)
   }
 
   switch ($Action) {
+    "launch_app" { return (Invoke-LaunchApp $inputObject) }
     "health" {
       $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
       # Health checks backend availability independently of any application's
@@ -3289,13 +3416,23 @@ function Invoke-Action {
 # Entry points
 # ============================================================================
 
-# Resolve the built-in JSON/Add-Type commands from this PowerShell installation,
-# without searching inherited third-party module paths on the first request.
-Write-BackendStage 'utility-import-start'
-Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
-Write-BackendStage 'utility-import-complete'
-Load-Assemblies
-Set-DpiAware
+try {
+  # Resolve the built-in JSON/Add-Type commands from this PowerShell installation,
+  # without searching inherited third-party module paths on the first request.
+  Write-BackendStage 'utility-import-start'
+  Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
+  Write-BackendStage 'utility-import-complete'
+  Load-Assemblies
+  Set-DpiAware
+} catch {
+  # One line the server can quote. Otherwise a startup failure reached the
+  # model only as "Backend process exited" (#54).
+  $inner = $_.Exception
+  while ($inner.InnerException) { $inner = $inner.InnerException }
+  $hresult = if ($inner.HResult) { ' (HRESULT 0x{0:X8})' -f $inner.HResult } else { '' }
+  [Console]::Error.WriteLine(('WCU_BACKEND_STARTUP_FAILED stage={0}: {1}{2}' -f $script:BackendStage, ($_.Exception.Message -replace '\s+', ' ').Trim(), $hresult))
+  exit 3
+}
 Write-BackendStage 'backend-ready'
 
 if ($Persistent) {

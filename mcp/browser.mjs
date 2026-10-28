@@ -102,7 +102,7 @@ async function watchProfile(profile, url, pid) {
 
 // The Windows default browser as an APPS key, or null for any other browser.
 export function appForProgId(progId) {
-  return /^MSEdge/i.test(progId ?? '') ? 'edge' : /^Chrome/i.test(progId ?? '') ? 'chrome' : null;
+  return /^MSEdge/i.test(progId ?? '') ? 'edge' : /^Chrome/i.test(progId ?? '') ? 'chrome' : /^FirefoxURL-/i.test(progId ?? '') ? 'firefox' : null;
 }
 
 // The ProgId of the default https handler. Windows 11 keeps the current choice
@@ -204,16 +204,16 @@ export function isBrowserCall(args) {
 // Calls that use neither the user's pointer nor keyboard take a quiet lease: it
 // still honours a stopped series, but shows no indicator and arms no Esc stop.
 // They are Browser Use calls, discovery and delays, reads of the screen and
-// of UI Automation (unless activate:true brings a window forward first), and
-// element actions that start in the background (window messages, UIA
-// patterns). One of those that turns out to need real input fails with
+// of UI Automation and app launches (unless activate:true brings a window
+// forward), and element actions that start in the background (window
+// messages, UIA patterns). One of those that turns out to need real input fails with
 // WCU_NEEDS_INPUT before sending any, and the server runs it again loudly.
 const READS = new Set(['snapshot', 'tree', 'accessibility_tree', 'find', 'element_info', 'screenshot', 'ocr', 'wait_for']);
 export const BACKGROUND_FIRST = new Set(['invoke', 'set_value', 'scroll', 'type_text']);
 export function isQuietCall(action, args = {}) {
   if (isBrowserCall(args) || ['health', 'list_windows', 'wait'].includes(action)) return true;
   if (!args || args.activate === true) return false;
-  if (READS.has(action)) return true;
+  if (READS.has(action) || action === 'launch_app') return true;
   // Window messages posted to the target window.
   if ((['click', 'double_click', 'keypress'].includes(action) && args.dispatch === 'background') || (action === 'type_text' && args.method === 'background')) return true;
   // method:'auto' types into a focused Win32 edit with EM_REPLACESEL first.
@@ -626,7 +626,7 @@ export class BrowserLane {
   constructor({ env = process.env } = {}) {
     this.env = env;
     this.disabled = env.WCU_BROWSER_LANE === 'off';
-    this.app = Object.hasOwn(APPS, env.WCU_BROWSER_APP ?? '') ? env.WCU_BROWSER_APP : 'default';
+    this.app = env.WCU_BROWSER_APP === 'firefox' || Object.hasOwn(APPS, env.WCU_BROWSER_APP ?? '') ? env.WCU_BROWSER_APP : 'default';
     this.keepSignIns = env.WCU_BROWSER_SIGNIN === '1';
     this.agentDir = env.WCU_BROWSER_PROFILE || path.join(localAppData, 'dsh-computer-use-win', 'agent-browser');
     this.browsers = new Map(); // ws url -> browser record
@@ -648,8 +648,43 @@ export class BrowserLane {
   // The browser picked in settings, else the Windows default when it is Edge or
   // Chrome, else null. Read once per server.
   resolveApp() {
-    this.appReady ??= (this.app === 'default' ? defaultProgId().then(appForProgId) : Promise.resolve(this.app)).then(app => (this.resolvedApp = app));
+    this.appReady ??= (this.app === 'default' ? defaultProgId().then(id => { this.progId = id; return appForProgId(id); }) : Promise.resolve(this.app)).then(app => (this.resolvedApp = app));
     return this.appReady;
+  }
+
+  async bidiBackend() {
+    this.bidiReady ??= (async () => {
+      // Keep Chromium-only deployments and test fixtures independent of the
+      // optional Gecko module. Probe the engine ID before dynamically importing.
+      let customGecko = false;
+      if (this.env.WCU_BROWSER_EXE) for (const relative of ['application.ini', 'browser/application.ini']) {
+        try {
+          const ini = readFileSync(path.join(path.dirname(this.env.WCU_BROWSER_EXE), relative), 'utf8');
+          const app = /(?:^|\r?\n)\[App\]\s*\r?\n([\s\S]*?)(?=\r?\n\[|$)/i.exec(ini)?.[1] ?? '';
+          if (/^ID=\{ec8030f7-c20a-464f-9b0e-13a3a9e97384\}\s*$/mi.test(app)) customGecko = true;
+        } catch { }
+      }
+      if (!this.env.WCU_BROWSER_BIDI_URL && this.env.WCU_BROWSER_EXE && !customGecko) return null;
+      // The experimental lane is opt-in: a Firefox OS default keeps the
+      // visible Chromium browser rather than switching to headless Gecko.
+      if (!this.env.WCU_BROWSER_BIDI_URL && !customGecko && this.app !== 'firefox') return null;
+      await this.resolveApp();
+      const { BidiBrowserLane, geckoApplication, discoverGecko } = await import('./browser-bidi.mjs');
+      if (this.env.WCU_BROWSER_BIDI_URL) {
+        this.bidi = new BidiBrowserLane({ env: this.env });
+        this.bidi.seriesActive = () => this.seriesActive();
+        return this.bidi;
+      }
+      const custom = geckoApplication(this.env.WCU_BROWSER_EXE);
+      // The Windows default browser goes first when it is a Firefox-family one,
+      // so a fork such as Vantage wins over a plain Firefox installed beside it.
+      const progId = custom ? undefined : this.progId ?? await defaultProgId();
+      const executable = custom ?? await discoverGecko(this.env, progId);
+      this.bidi = new BidiBrowserLane({ env: this.env, executable, progId });
+      this.bidi.seriesActive = () => this.seriesActive();
+      return this.bidi;
+    })();
+    return this.bidiReady;
   }
 
   // Only a browser connected on purpose, through WCU_BROWSER_CDP_URL.
@@ -665,7 +700,7 @@ export class BrowserLane {
   agentExecutable(app = this.resolvedApp) {
     if (this.env.WCU_BROWSER_EXE) return { key: 'custom', name: path.basename(this.env.WCU_BROWSER_EXE, '.exe'), path: this.env.WCU_BROWSER_EXE };
     const roots = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, localAppData].filter(Boolean);
-    for (const key of new Set([app, ...FALLBACK_APPS].filter(Boolean))) for (const root of roots) {
+    for (const key of new Set([app, ...FALLBACK_APPS].filter(key => Object.hasOwn(APPS, key)))) for (const root of roots) {
       const file = path.join(root, APPS[key].exe);
       try { if (statSync(file).isFile()) return { key, name: APPS[key].name, path: file }; } catch { }
     }
@@ -887,6 +922,7 @@ export class BrowserLane {
   // browser itself, so the cookies of its last half minute are saved; close()
   // ends whatever is still running after timeoutMs.
   async shutdown(timeoutMs = CLOSE_MS) {
+    await this.bidi?.shutdown();
     const kept = [...this.browsers.values()].filter(browser => browser.kept && browser.status === 'connected' && !browser.cdp.closed);
     const running = browser => browser.child ? browser.child.exitCode === null && browser.child.signalCode === null : browser.pid ? processAlive(browser.pid) : !browser.cdp.closed;
     await Promise.allSettled(kept.map(browser => profileLock(browser.kept, async () => {
@@ -907,6 +943,7 @@ export class BrowserLane {
   }
 
   close() {
+    this.bidi?.close();
     clearInterval(this.idleTimer);
     for (const browser of this.browsers.values()) {
       if (browser.kept) {
@@ -1050,6 +1087,12 @@ export class BrowserLane {
       use: 'Pass browserTab (a tab id) to snapshot/accessibility_tree/find/type_text/keypress/scroll/screenshot/wait_for to work on that page in the background; its element ids (t1a2b:57) work in click/set_value/focus/invoke/scroll/element_info. set_value elementId "new-tab" value "<url>" opens a background tab ' +
         (this.keepSignIns ? 'in the DSH browser, whose profile is kept: sites the user signed in to there are still signed in' : 'in a separate agent browser without sign-ins') + (listed.some(browser => browser.source !== 'agent') ? '; "<browser id>:new-tab" opens it in that connected browser.' : '.')
     };
+    const bidi = await this.bidiBackend();
+    if (bidi) {
+      const extra = await bidi.annotateWindows({ windows: result.windows });
+      result.browserLane.browsers.push(...(extra.browserLane?.browsers ?? []));
+      result.browserLane.use = extra.browserLane?.use ?? result.browserLane.use;
+    }
     return result;
   }
 
@@ -1451,6 +1494,11 @@ export class BrowserLane {
   // Entry point for every lane-routed tool call. A call the user stopped takes
   // the badge off at once; otherwise it lingers (rest).
   async run(action, args, request) {
+    const bidi = await this.bidiBackend();
+    const tabKey = ELEMENT_ID.exec(args.elementId ?? '')?.[1] ?? args.browserTab;
+    const browserKey = NEW_TAB.exec(args.elementId ?? '')?.[1];
+    // Keep explicitly configured CDP tabs reachable when the new-tab engine is Gecko.
+    if (bidi && !this.tabs.has(tabKey) && !(browserKey && [...this.browsers.values()].some(browser => browser.key === browserKey))) return bidi.run(action, args, request);
     this.lastUsed = Date.now();
     for (const browser of this.browsers.values()) if (browser.kept && !browser.cdp?.closed) joinProfile(browser);
     const call = { tabs: new Set() };
@@ -1784,6 +1832,8 @@ export class BrowserLane {
   }
 
   async health() {
+    const bidi = await this.bidiBackend();
+    if (bidi) return bidi.health();
     await this.resolveApp();
     const executable = this.agentExecutable();
     return { enabled: !this.disabled, visible: this.env.WCU_BROWSER_HEADLESS !== '1', app: this.app, ...(this.resolvedApp !== undefined ? { resolvedApp: this.resolvedApp } : {}), keepSignIns: this.keepSignIns,

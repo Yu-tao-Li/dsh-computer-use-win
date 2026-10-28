@@ -4,7 +4,7 @@ window.__ModuleLoader__.load({
   factory: (require) => {
     const React = require('react'), h = React.createElement;
     const NS = 'windowsComputerUse.settings';
-    const allToolNames='health snapshot accessibility_tree list_windows find element_info click double_click move drag scroll type_text keypress focus invoke set_value activate_window wait ocr screenshot wait_for close_window move_window tools'.split(' ');
+    const allToolNames='health snapshot accessibility_tree list_windows find element_info click double_click move drag scroll type_text keypress focus invoke set_value activate_window wait ocr screenshot wait_for close_window move_window launch_app tools'.split(' ');
     const toolGroups=[
       ['observe',[
         ['health','检查连接','Check connection','检查桌面工具是否可用','Check desktop tool availability'],
@@ -25,6 +25,7 @@ window.__ModuleLoader__.load({
         ['keypress','按键与组合键','Press keys','发送按键或组合键','Send a key or key combination']
       ]],
       ['windows',[
+        ['launch_app','启动应用','Launch an app','通过桌面启动应用，工具结束后仍可使用','Start an app that remains open after the tool exits'],
         ['list_windows','查看窗口列表','List windows','查找已打开的窗口','Find open windows'],
         ['activate_window','切换窗口','Activate a window','将目标窗口切到前台','Bring a window to the foreground'],
         ['move_window','移动窗口','Move a window','调整窗口在屏幕上的位置','Reposition a window'],
@@ -39,7 +40,7 @@ window.__ModuleLoader__.load({
         ['tools','工具说明与管理','Tool reference and management','查看说明并管理已获准的工具','Describe and manage user-allowed tools']
       ]]
     ];
-    const liteToolNames='list_windows find click scroll type_text keypress ocr screenshot wait_for tools'.split(' ');
+    const liteToolNames='list_windows find click scroll type_text keypress ocr screenshot wait_for launch_app tools'.split(' ');
     const defaults = {browserFirst:true,browserVisible:true,browserApp:'default',browserSignIn:false,toolPreset:'full',enabledTools:allToolNames,indicatorEnabled:true,cursorIndicatorEnabled:true,remoteIndicatorVisible:true,indicatorText:'DSH 正在控制电脑',indicatorPosition:'top',indicatorIdleMs:800,stopShortcut:''};
     const equal=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
     const dictionaries = {
@@ -47,8 +48,8 @@ window.__ModuleLoader__.load({
       en: {nav:'Computer Use',title:'Windows computer use',intro:'See when the agent controls your desktop. Press Esc to stop.',mode:'Tool mode',lite:'Lite',full:'Full',modeHint:'Lite keeps common tools and loads others on demand. A mode change reloads tools after the current action finishes.',indicator:'Show takeover indicator',indicatorHint:'Show the screen-edge glow and banner. Esc remains available when the indicator is off.',text:'Banner text',position:'Banner position',top:'Top of screen',bottom:'Bottom of screen',delay:'Hide delay after an action (ms)',delayHint:'Keep the indicator between consecutive actions. Range: 200–3000 ms.',corner:'Keep the mouse-corner failsafe',cornerHint:'Parking the pointer in the top-left corner for about 500 ms can refuse further input. Ordinary mouse movement does not stop control.',stop:'Stop and resume',stopHint:'Physical Esc keeps desktop input paused. Other mouse/keyboard input and agent-generated Esc do not stop control. Check the task before resuming.',resume:'Resume desktop control',resumed:'Desktop control resume requested',preview:'Preview takeover indicator',previewed:'Preview requested; resume first if you previously stopped with Esc.',save:'Save',discard:'Discard changes',saved:'Saved',failed:'Save failed',unavailable:'Writable settings are unavailable. Open this page in your local DSH host.',invalid:'Use 1–120 characters on one line and an integer hide delay between 200 and 3000.',persistFailed:'The host did not confirm the saved settings. Refresh and retry.'}
     };
     const extraCopy={
-      zh:{intro:'选择 agent 使用的工具，设置接管提示与停止方式。',toolsTitle:'工具模式',toolsHint:'精简模式覆盖日常操作，需要时可继续加载更多工具。',lite:'精简',full:'全能',liteSummary:'常用工具，减少上下文占用',fullSummary:'启动时提供全部桌面工具',liteCount:'10 个初始工具',fullCount:'24 个初始工具',modeAfter:'切换模式会等当前动作结束后生效。',indicatorTitle:'接管提示',indicator:'显示屏幕边缘与提示条',indicatorHint:'让你知道 agent 何时正在操作电脑。',position:'提示位置',top:'顶部',bottom:'底部',preview:'预览接管提示',previewHint:'请先保存更改，再预览屏幕上的实际效果。',previewOff:'提示已关闭',previewOn:'接管时的屏幕示意',previewNote:'提示不抢焦点，鼠标可以穿透。',appearance:'提示的更多选项',text:'提示文字',delay:'操作后保留提示',delayHint:'连续动作保持显示，减少闪烁。200–3000 毫秒。',stop:'停止与恢复',escTitle:'按 Esc 停止操作',stopHint:'停止后保持暂停，准备好再恢复。普通鼠标移动和其他按键不会停止接管。',resume:'恢复桌面控制',extraStop:'其他停止方式',corner:'用鼠标停止操作',cornerHint:'鼠标在屏幕左上角停留约 500 毫秒后拒绝后续输入；关闭后仍可按 Esc 停止。',save:'保存更改',discard:'放弃更改',dirty:'有未保存的更改',clean:'更改后点击保存',ms:'毫秒'},
-      en:{intro:'Choose the agent’s tools and how desktop control is shown and stopped.',toolsTitle:'Tool mode',toolsHint:'Lite covers everyday tasks. More tools can be loaded when needed.',lite:'Lite',full:'Full',liteSummary:'Common tools with less context',fullSummary:'All desktop tools at startup',liteCount:'10 initial tools',fullCount:'24 initial tools',modeAfter:'Mode changes take effect after the current action finishes.',indicatorTitle:'Takeover indicator',indicator:'Show screen edges and a banner',indicatorHint:'See when the agent is operating your computer.',position:'Banner position',top:'Top',bottom:'Bottom',preview:'Preview indicator',previewHint:'Save changes before previewing the actual screen indicator.',previewOff:'Indicator is off',previewOn:'Screen preview during control',previewNote:'The indicator keeps focus and lets clicks pass through.',appearance:'More indicator options',text:'Banner text',delay:'Keep visible after an action',delayHint:'Stay visible between consecutive actions. 200–3000 milliseconds.',stop:'Stop and resume',escTitle:'Press Esc to stop',stopHint:'Control stays paused until you resume. Ordinary mouse movement and other keys do not stop it.',resume:'Resume desktop control',extraStop:'Additional stop option',corner:'Top-left mouse-corner failsafe',cornerHint:'Refuse further input after the pointer stays in the top-left corner for about 500 ms. Turn off to use Esc alone.',save:'Save changes',discard:'Discard changes',dirty:'Unsaved changes',clean:'Save after making changes',ms:'ms'}
+      zh:{intro:'选择 agent 使用的工具，设置接管提示与停止方式。',toolsTitle:'工具模式',toolsHint:'精简模式覆盖日常操作，需要时可继续加载更多工具。',lite:'精简',full:'全能',liteSummary:'常用工具，减少上下文占用',fullSummary:'启动时提供全部桌面工具',liteCount:'11 个初始工具',fullCount:'25 个初始工具',modeAfter:'切换模式会等当前动作结束后生效。',indicatorTitle:'接管提示',indicator:'显示屏幕边缘与提示条',indicatorHint:'让你知道 agent 何时正在操作电脑。',position:'提示位置',top:'顶部',bottom:'底部',preview:'预览接管提示',previewHint:'请先保存更改，再预览屏幕上的实际效果。',previewOff:'提示已关闭',previewOn:'接管时的屏幕示意',previewNote:'提示不抢焦点，鼠标可以穿透。',appearance:'提示的更多选项',text:'提示文字',delay:'操作后保留提示',delayHint:'连续动作保持显示，减少闪烁。200–3000 毫秒。',stop:'停止与恢复',escTitle:'按 Esc 停止操作',stopHint:'停止后保持暂停，准备好再恢复。普通鼠标移动和其他按键不会停止接管。',resume:'恢复桌面控制',extraStop:'其他停止方式',corner:'用鼠标停止操作',cornerHint:'鼠标在屏幕左上角停留约 500 毫秒后拒绝后续输入；关闭后仍可按 Esc 停止。',save:'保存更改',discard:'放弃更改',dirty:'有未保存的更改',clean:'更改后点击保存',ms:'毫秒'},
+      en:{intro:'Choose the agent’s tools and how desktop control is shown and stopped.',toolsTitle:'Tool mode',toolsHint:'Lite covers everyday tasks. More tools can be loaded when needed.',lite:'Lite',full:'Full',liteSummary:'Common tools with less context',fullSummary:'All desktop tools at startup',liteCount:'11 initial tools',fullCount:'25 initial tools',modeAfter:'Mode changes take effect after the current action finishes.',indicatorTitle:'Takeover indicator',indicator:'Show screen edges and a banner',indicatorHint:'See when the agent is operating your computer.',position:'Banner position',top:'Top',bottom:'Bottom',preview:'Preview indicator',previewHint:'Save changes before previewing the actual screen indicator.',previewOff:'Indicator is off',previewOn:'Screen preview during control',previewNote:'The indicator keeps focus and lets clicks pass through.',appearance:'More indicator options',text:'Banner text',delay:'Keep visible after an action',delayHint:'Stay visible between consecutive actions. 200–3000 milliseconds.',stop:'Stop and resume',escTitle:'Press Esc to stop',stopHint:'Control stays paused until you resume. Ordinary mouse movement and other keys do not stop it.',resume:'Resume desktop control',extraStop:'Additional stop option',corner:'Top-left mouse-corner failsafe',cornerHint:'Refuse further input after the pointer stays in the top-left corner for about 500 ms. Turn off to use Esc alone.',save:'Save changes',discard:'Discard changes',dirty:'Unsaved changes',clean:'Save after making changes',ms:'ms'}
     };
     for(const lang of ['zh','en'])Object.assign(dictionaries[lang],extraCopy[lang]);
     Object.assign(dictionaries.zh,{intro:'选择 agent 使用的工具，设置接管提示与停止方式。',extraStop:'其他停止方式',corner:'用鼠标停止操作',cornerHint:'将鼠标移到桌面最左上角，停留约半秒，工具就会停止点击和输入。移开鼠标后可继续；Esc 始终可用。',githubLink:'GitHub · dsh-computer-use-win ↗',starRequest:'您的 Star 就是我更新的动力，球球了，这对我很重要！',issueBefore:'如果有问题，欢迎去',issueLink:'提 Issue',issueAfter:'，您来许愿，我来实现！我的响应也会很迅速的！'});
@@ -235,8 +236,8 @@ window.__ModuleLoader__.load({
     // the page first names it. Each hint sits behind an info icon.
     Object.assign(dictionaries.zh,{title:'电脑操控（Computer Use）',intro:'让 DSH 操作 Windows 桌面程序和网页。',moreInfo:'说明',pluginDescription:'让 AI 操作 Windows 桌面程序和网页，可设置浏览器操控、接管提示、停止快捷键和工具。',
       browserTitle:'浏览器操控（Browser Use）',browserInfo:'DSH 专用浏览器单独启动，不会用到你自己的浏览器。默认每次使用临时的空白配置，不带你的登录、Cookie 和浏览记录；打开“记住登录”后改用长期保留的配置。退出 DSH 或空闲 10 分钟后自动关闭。',
-      browserApp:'使用的浏览器',browserAppHint:'默认跟随 Windows 的默认浏览器；默认浏览器不是 Edge 或 Chrome 时，使用已安装的 Chrome 或 Edge。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
-      browserApp_default:'默认浏览器',browserApp_edge:'Edge',browserApp_chrome:'Chrome',browserAppShort:'默认',
+      browserApp:'使用的浏览器',browserAppHint:'默认跟随 Windows 的默认浏览器；默认浏览器不是 Edge 或 Chrome 时，使用已安装的 Chrome 或 Edge。Firefox 系（Firefox、LibreWolf、Floorp、Waterfox、Vantage 等）在这里手动选，Windows 默认的那一个优先。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
+      browserApp_default:'默认浏览器',browserApp_edge:'Edge',browserApp_chrome:'Chrome',browserApp_firefox:'Firefox 系（实验性）',firefoxNotice:'Firefox 系为实验功能：DSH 启动的 Firefox 在后台运行，没有窗口，所以“显示浏览器窗口”已关闭。想看到窗口，可以自己带 --remote-debugging-port 启动浏览器，再用 WCU_BROWSER_BIDI_URL（BiDi 地址）连接；一个浏览器同一时间只接受一个控制会话。记住登录会给 Firefox 单独保留一个配置，但没有窗口，暂时不能在里面手动登录。',browserAppShort:'默认',
       browserSignIn:'记住登录（cookies）',browserSignInHint:'默认关闭：DSH 浏览器每次用全新的临时配置，网站看不到任何登录。打开后改用长期保留的配置，你在它窗口里登录过的网站会一直保持登录，见下方说明。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
       signInSetup:'怎么用',signInStep1:'DSH 浏览器改用长期保留的配置。在它的窗口（蓝框）里登录过的网站，下次还是登录状态。你的浏览器里不用做任何设置，也不会弹出允许提示。',
       signInStep2:'第一次用到要登录的网站时，DSH 会请你在它的窗口里登录一次。密码和验证码由你自己输入，DSH 不代填。',
@@ -248,14 +249,14 @@ window.__ModuleLoader__.load({
       copy:'复制',copied:'已复制',
       browserFirst:'网页优先用浏览器操控',browserFirstHint:'能直接读写网页时在后台完成，不移动鼠标；浏览器自己的模态弹窗可能来到前台。桌面程序、浏览器工具栏和读不到的网页内容，仍由电脑操控完成。',
       browserVisible:'显示浏览器窗口',browserVisibleHint:'开启时打开一个可见的 DSH 浏览器窗口，窗口框是 DSH 蓝；DSH 正在操作的标签页，图标换成蓝色箭头，网页上的小箭头标出它点的位置，不遮挡网页内容，也不移动你的鼠标。普通网页操作在后台完成；浏览器自己的模态弹窗可能短暂来到前台。关闭后浏览器在后台运行，看不到窗口。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
-      toolsTitle:'工具',toolsInfo:'全部：启动时加载 24 个工具。精简：只加载 10 个常用工具，减少上下文占用。懒启动：启动时只加载管理入口，开始桌面任务时再加载，会多一次工具调用。自定义：自己挑选，切换方案时保留清单。保存后在当前动作结束时生效。',
+      toolsTitle:'工具',toolsInfo:'全部：启动时加载 25 个工具。精简：只加载 11 个常用工具，减少上下文占用。懒启动：启动时只加载管理入口，开始桌面任务时再加载，会多一次工具调用。自定义：自己挑选，切换方案时保留清单。保存后在当前动作结束时生效。',
       indicatorTitle:'接管提示',indicatorInfo:'DSH 用鼠标和键盘操作桌面时，用屏幕边缘、提示条和鼠标标签提醒你。浏览器操控、读取界面和在后台完成的控件操作不显示这些提示。',
       indicator:'屏幕边缘与提示条',appearance:'更多选项',preview:'预览',delay:'操作后保留提示',
       escTitle:'按 Esc 停止',stopHint:'Esc 只停止当前这一轮操作；下次发起任务或说“继续”即可再次使用，无需到设置恢复。普通鼠标移动和其他按键不会停止。浏览器操控在后台进行，不占用 Esc，要停止请用 DSH 里的停止按钮。'});
     Object.assign(dictionaries.en,{title:'Computer Use',intro:'Let DSH operate Windows desktop apps and web pages.',moreInfo:'Details',pluginDescription:'Let the agent use Windows apps and web pages, with Browser Use, control indicators, stop shortcuts and tool selection.',
       browserTitle:'Browser Use',browserInfo:'The DSH browser starts separately and never uses your own browser. By default it starts each time with a temporary empty profile: none of your sign-ins, cookies or history. With “Keep sign-ins” on, it keeps one profile instead. It closes when DSH exits or after 10 idle minutes.',
-      browserApp:'Browser',browserAppHint:'Follows the Windows default browser. When that is neither Edge nor Chrome, an installed Chrome or Edge is used. Changes apply after the current action and close open DSH browsers.',
-      browserApp_default:'Default browser',browserApp_edge:'Edge',browserApp_chrome:'Chrome',browserAppShort:'Default',
+      browserApp:'Browser',browserAppHint:'Follows the Windows default browser; when that is neither Edge nor Chrome, an installed Chrome or Edge is used. Firefox-family browsers (Firefox, LibreWolf, Floorp, Waterfox, Vantage and others) are chosen here; the Windows default one comes first. Changes apply after the current action and close open DSH browsers.',
+      browserApp_default:'Default browser',browserApp_edge:'Edge',browserApp_chrome:'Chrome',browserApp_firefox:'Firefox family (experimental)',firefoxNotice:'Firefox-family support is experimental. The Firefox that DSH starts runs in the background without a window, so Show the browser window is off. To see a window, start the browser yourself with --remote-debugging-port and connect it through WCU_BROWSER_BIDI_URL (its BiDi address); a browser accepts one controlling session at a time. Keep sign-ins keeps a separate Firefox profile, but with no window you cannot sign in to it by hand yet.',browserAppShort:'Default',
       browserSignIn:'Keep sign-ins (cookies)',browserSignInHint:'Off by default: the DSH browser starts each time with a fresh temporary profile, so sites see no sign-ins. When on, it keeps one profile, and sites you sign in to in its window stay signed in; see below. Changes apply after the current action and close open DSH browsers.',
       signInSetup:'How it works',signInStep1:'The DSH browser keeps its profile. Sites you sign in to in its window (the blue frame) are still signed in next time. Nothing to set up in your own browser, and no prompts to allow.',
       signInStep2:'The first time a task needs a site that asks you to sign in, DSH asks you to sign in once in its window. You type passwords and codes yourself; DSH does not fill them in.',
@@ -267,7 +268,7 @@ window.__ModuleLoader__.load({
       copy:'Copy',copied:'Copied',
       browserFirst:'Prefer Browser Use for web pages',browserFirstHint:'Read and operate pages directly in the background without moving the pointer. Browser-native modal dialogs may activate their window. Desktop apps, the browser toolbar and page content it cannot read still go through Computer Use.',
       browserVisible:'Show the browser window',browserVisibleHint:'When on, a visible DSH browser window opens with a DSH-blue frame. The tab DSH works in shows a blue arrow as its icon, and a small arrow on the page marks where it clicks; nothing covers the page and your pointer stays put. Ordinary page actions run in the background; browser-native modal dialogs may briefly activate the window. When off, the browser runs in the background with no window. Changes apply after the current action and close open DSH browsers.',
-      toolsTitle:'Tools',toolsInfo:'All: load 24 tools at startup. Lite: 10 common tools, less context. Lazy: only the management entry at startup; tools load at the first desktop task, adding one tool call. Custom: your own selection, kept when you switch presets. Saved changes apply after the current action.',
+      toolsTitle:'Tools',toolsInfo:'All: load 25 tools at startup. Lite: 11 common tools, less context. Lazy: only the management entry at startup; tools load at the first desktop task, adding one tool call. Custom: your own selection, kept when you switch presets. Saved changes apply after the current action.',
       indicatorTitle:'Takeover indicator',indicatorInfo:'Screen edges, a banner and a pointer tag show when DSH uses your mouse and keyboard. Browser Use, reading the screen and control actions done in the background show none of them.',
       indicator:'Screen edges and banner',appearance:'More options',preview:'Preview',delay:'Keep visible after an action',
       escTitle:'Press Esc to stop',stopHint:'Esc stops this operation series. A new task or a request to continue resumes automatically, with no settings change. Ordinary pointer movement and other keys do not stop control. Browser Use runs in the background and does not use Esc; stop it with the stop button in DSH.'});
@@ -382,7 +383,13 @@ window.__ModuleLoader__.load({
       const [noteView,setNoteView] = React.useState(null), [noteSaving,setNoteSaving] = React.useState(false);
       const savedKey = JSON.stringify(Object.fromEntries(Object.keys(defaults).map(key=>[key,saved[key]])));
       React.useEffect(()=>{if(!dirty)setDraft(saved);},[savedKey,dirty]);
-      const change = (field,value) => {const next={...draft,[field]:value};setDraft(next);setDirty(Object.keys(defaults).some(key=>!equal(next[key],saved[key])));setMessage('');};
+      // The Firefox that DSH starts has no window yet, so choosing Firefox turns
+      // the window switch off, and choosing another browser turns it back.
+      const visibleBeforeFirefox=React.useRef(null);
+      const change = (field,value) => {const next={...draft,[field]:value};
+        if(field==='browserApp'&&value==='firefox'&&draft.browserApp!=='firefox'){visibleBeforeFirefox.current=draft.browserVisible;next.browserVisible=false;}
+        else if(field==='browserApp'&&draft.browserApp==='firefox'&&value!=='firefox'&&visibleBeforeFirefox.current!==null){next.browserVisible=visibleBeforeFirefox.current;visibleBeforeFirefox.current=null;}
+        setDraft(next);setDirty(Object.keys(defaults).some(key=>!equal(next[key],saved[key])));setMessage('');};
       const selectTools=(names,enabled)=>{const selected=new Set(draft.enabledTools);for(const name of names)enabled?selected.add(name):selected.delete(name);change('enabledTools',allToolNames.filter(name=>selected.has(name)));};
       React.useEffect(()=>{
         if(!recording)return;
@@ -439,8 +446,8 @@ window.__ModuleLoader__.load({
       // Chinese characters), so a narrow column never leaves it alone on a line.
       const title=(text,hint,props)=>{const cut=/[\u2e80-\u9fff\uff00-\uffef]$/.test(text)?text.length-2:text.lastIndexOf(' ')+1;return h(props?.htmlFor?'label':'span',{className:'wcu-item-title',...props},text.slice(0,cut),h('span',{className:'wcu-nowrap'},text.slice(cut),hint&&info(hint)));};
       const picture=art=>h('div',{className:'wcu-art','aria-hidden':true},art);
-      const toggle=(field,label)=>h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch','aria-label':t(label),checked:draft[field],disabled,onChange:e=>change(field,e.target.checked)});
-      const switchItem=(field,label,hint,art)=>item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-'+field,'aria-hidden':true},art),title(t(label),hint,{htmlFor:idPrefix+'-'+field}),toggle(field,label));
+      const toggle=(field,label,locked)=>h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch','aria-label':t(label),checked:draft[field],disabled:disabled||locked,onChange:e=>change(field,e.target.checked)});
+      const switchItem=(field,label,hint,art,locked)=>item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-'+field,'aria-hidden':true},art),title(t(label),hint,{htmlFor:idPrefix+'-'+field}),toggle(field,label,locked));
       const field=(label,control)=>h('div',{className:'wcu-field'},label,control);
       const allowedTools=['full','lazy'].includes(draft.toolPreset)?allToolNames:activeTools;
       const keycap=(key,label)=>h('kbd',{className:'wcu-key',key},label);
@@ -458,15 +465,16 @@ window.__ModuleLoader__.load({
           head(idPrefix+'-browser-title','browserTitle','browserInfo'),
           h('div',{className:'wcu-grid'},
             switchItem('browserFirst','browserFirst','browserFirstHint',arts.browserFirst(draft.browserFirst)),
-            switchItem('browserVisible','browserVisible','browserVisibleHint',arts.browserVisible(draft.browserVisible)),
-            item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-browserApp','aria-hidden':true},arts.app(draft.browserApp==='default'?t('browserAppShort'):t('browserApp_'+draft.browserApp))),
+            switchItem('browserVisible','browserVisible','browserVisibleHint',arts.browserVisible(draft.browserVisible),draft.browserApp==='firefox'),
+            item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-browserApp','aria-hidden':true},arts.app(draft.browserApp==='default'?t('browserAppShort'):draft.browserApp==='firefox'?'Firefox':t('browserApp_'+draft.browserApp))),
               title(t('browserApp'),'browserAppHint',{htmlFor:idPrefix+'-browserApp'}),
               h('select',{className:'wcu-control',id:idPrefix+'-browserApp',value:draft.browserApp,disabled,onChange:e=>change('browserApp',e.target.value)},
-                ...['default','edge','chrome'].map(app=>h('option',{key:app,value:app},t('browserApp_'+app))))),
+                ...['default','edge','chrome','firefox'].map(app=>h('option',{key:app,value:app},t('browserApp_'+app))))),
             switchItem('browserSignIn','browserSignIn','browserSignInHint',arts.signIn(draft.browserSignIn))),
           // Kept sign-ins need nothing set up, but how to sign in, where the
           // sign-ins stay and the risks remain in view while the switch is on.
-          draft.browserSignIn&&h('div',{className:'wcu-notice','data-wincu-signin-notice':true},
+          draft.browserApp==='firefox'&&h('p',{className:'wcu-notice','data-wincu-firefox-notice':true},t('firefoxNotice')),
+          draft.browserSignIn&&draft.browserApp!=='firefox'&&h('div',{className:'wcu-notice','data-wincu-signin-notice':true},
             h('strong',null,t('signInSetup')),
             h('ol',null,h('li',null,t('signInStep1')),h('li',null,t('signInStep2')),
               !draft.browserVisible&&h('li',{'data-wincu-signin-hidden':true},t('signInStepHidden')),
@@ -508,9 +516,9 @@ window.__ModuleLoader__.load({
         h('footer',{className:'wcu-footer'},h('span',{className:'wcu-status',role:'status','aria-live':'polite','data-tone':message?tone:undefined},message||t(dirty?'dirty':'clean')),
           h('div',{className:'wcu-actions'},button('discard',{disabled:!dirty||saving||recording,onClick:()=>{setDraft(saved);setDirty(false);setMessage('');setRecordMessage('');}}),button('save',{className:'wcu-primary',disabled:!dirty||disabled,onClick:save}))));
     }
-    const actionKeys={snapshot:'see',screenshot:'see',accessibility_tree:'read',list_windows:'windows',find:'findControl',element_info:'read',click:'clickAction',double_click:'doubleClick',move:'movePointer',drag:'dragAction',scroll:'scrollAction',type_text:'typeAction',keypress:'keyAction',focus:'focusAction',invoke:'invokeAction',set_value:'valueAction',activate_window:'windowAction',wait:'waitAction',ocr:'ocrAction',wait_for:'verifyAction',close_window:'closeAction',move_window:'moveWindowAction',health:'healthAction',tools:'toolsAction'};
-    Object.assign(dictionaries.zh,{see:'查看了屏幕',read:'读取了界面控件',windows:'查看了打开的窗口',findControl:'查找了界面控件',clickAction:'点击了目标位置',doubleClick:'双击了目标位置',movePointer:'移动了鼠标',dragAction:'拖动了目标',scrollAction:'滚动了页面',typeAction:'输入了文本',keyAction:'发送了按键',focusAction:'聚焦了目标控件',invokeAction:'操作了目标控件',valueAction:'填写了控件内容',windowAction:'切换了目标窗口',waitAction:'等待了界面响应',ocrAction:'识别了屏幕文字',verifyAction:'检查了操作结果',closeAction:'请求关闭窗口',moveWindowAction:'移动了窗口',healthAction:'检查了桌面服务',toolsAction:'查看了工具配置',working:'正在操作…',completed:'已完成',failedAction:'未完成',stoppedAction:'已停止',seriesTitle:'本轮桌面操作',sentOnly:'操作已发送，效果待确认',showDetails:'查看步骤和截图',searchSubmitted:'在浏览器中提交了搜索',searchObserved:'在浏览器中搜索了',seriesCount:'步操作',stepError:'操作失败',and:'，并'});
-    Object.assign(dictionaries.en,{see:'Viewed the screen',read:'Read interface controls',windows:'Listed open windows',findControl:'Looked for controls',clickAction:'Clicked the target',doubleClick:'Double-clicked the target',movePointer:'Moved the pointer',dragAction:'Dragged the target',scrollAction:'Scrolled the page',typeAction:'Entered text',keyAction:'Sent a key press',focusAction:'Focused a control',invokeAction:'Operated a control',valueAction:'Filled in a control',windowAction:'Switched windows',waitAction:'Waited for the interface',ocrAction:'Read screen text',verifyAction:'Checked the result',closeAction:'Requested window close',moveWindowAction:'Moved a window',healthAction:'Checked desktop service',toolsAction:'Viewed tool settings',working:'Working…',completed:'Completed',failedAction:'Incomplete',stoppedAction:'Stopped',seriesTitle:'Desktop activity',sentOnly:'Input sent; effect unconfirmed',showDetails:'Steps and screenshots',searchSubmitted:'Submitted a browser search for',searchObserved:'Searched the browser for',seriesCount:'steps',stepError:'Action failed',and:', then '});
+    const actionKeys={snapshot:'see',screenshot:'see',accessibility_tree:'read',list_windows:'windows',find:'findControl',element_info:'read',click:'clickAction',double_click:'doubleClick',move:'movePointer',drag:'dragAction',scroll:'scrollAction',type_text:'typeAction',keypress:'keyAction',focus:'focusAction',invoke:'invokeAction',set_value:'valueAction',activate_window:'windowAction',wait:'waitAction',ocr:'ocrAction',wait_for:'verifyAction',close_window:'closeAction',move_window:'moveWindowAction',launch_app:'launchAction',health:'healthAction',tools:'toolsAction'};
+    Object.assign(dictionaries.zh,{see:'查看了屏幕',read:'读取了界面控件',windows:'查看了打开的窗口',findControl:'查找了界面控件',clickAction:'点击了目标位置',doubleClick:'双击了目标位置',movePointer:'移动了鼠标',dragAction:'拖动了目标',scrollAction:'滚动了页面',typeAction:'输入了文本',keyAction:'发送了按键',focusAction:'聚焦了目标控件',invokeAction:'操作了目标控件',valueAction:'填写了控件内容',windowAction:'切换了目标窗口',waitAction:'等待了界面响应',ocrAction:'识别了屏幕文字',verifyAction:'检查了操作结果',closeAction:'请求关闭窗口',moveWindowAction:'移动了窗口',launchAction:'请求启动应用',healthAction:'检查了桌面服务',toolsAction:'查看了工具配置',working:'正在操作…',completed:'已完成',failedAction:'未完成',stoppedAction:'已停止',seriesTitle:'本轮桌面操作',sentOnly:'操作已发送，效果待确认',showDetails:'查看步骤和截图',searchSubmitted:'在浏览器中提交了搜索',searchObserved:'在浏览器中搜索了',seriesCount:'步操作',stepError:'操作失败',and:'，并'});
+    Object.assign(dictionaries.en,{see:'Viewed the screen',read:'Read interface controls',windows:'Listed open windows',findControl:'Looked for controls',clickAction:'Clicked the target',doubleClick:'Double-clicked the target',movePointer:'Moved the pointer',dragAction:'Dragged the target',scrollAction:'Scrolled the page',typeAction:'Entered text',keyAction:'Sent a key press',focusAction:'Focused a control',invokeAction:'Operated a control',valueAction:'Filled in a control',windowAction:'Switched windows',waitAction:'Waited for the interface',ocrAction:'Read screen text',verifyAction:'Checked the result',closeAction:'Requested window close',moveWindowAction:'Moved a window',launchAction:'Requested app launch',healthAction:'Checked desktop service',toolsAction:'Viewed tool settings',working:'Working…',completed:'Completed',failedAction:'Incomplete',stoppedAction:'Stopped',seriesTitle:'Desktop activity',sentOnly:'Input sent; effect unconfirmed',showDetails:'Steps and screenshots',searchSubmitted:'Submitted a browser search for',searchObserved:'Searched the browser for',seriesCount:'steps',stepError:'Action failed',and:', then '});
     const shortTool=name=>String(name||'').replace(/^(?:mcp__wincu__)?windows_computer_use_/,'');
     const desktopTool=name=>/^(?:mcp__wincu__)?windows_computer_use_(?!health$|tools$)[a-z_]+$/.test(name||'');
     const objectArgs=value=>{if(typeof value==='string')try{return JSON.parse(value);}catch{return {};}return value&&typeof value==='object'?value:{};};
@@ -543,7 +551,7 @@ window.__ModuleLoader__.load({
     function activityBody(call,renderFactorySlot,loadImage,t){
       const data=receipt(call.message),images=(call.message?.content||[]).filter(x=>x.type==='image'&&x.attachment);
       return h(React.Fragment,null,
-        data.verification==='sent'&&h('div',{className:'wcu-activity-note'},t('sentOnly')),
+        ['sent','dispatched'].includes(data.verification)&&h('div',{className:'wcu-activity-note'},t('sentOnly')),
         ['failed','stopped'].includes(call.status)&&h('div',{role:'status'},t(call.status==='stopped'?'stoppedAction':'stepError')),
         images.length>0&&renderFactorySlot&&loadImage&&renderFactorySlot('conversation.images.content',{images,loadImage,align:'start'}));
     }

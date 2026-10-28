@@ -2,6 +2,7 @@
 // launch its configured child through the official MCP SDK. A deterministic
 // PowerShell protocol fixture keeps this transport test independent of UIA.
 import assert from 'node:assert/strict';
+import {TOOL_NAMES} from '../mcp/settings.mjs';
 import { spawnSync } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, writeFile, symlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -170,15 +171,15 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
     assert.equal(result.serverInfo.name, 'windows-computer-use');
     assert.equal(result.serverInfo.version, expectedVersion);
     assert.equal(host.config.env.WCU_TOOL_MODE, 'full');
-    assert.equal(JSON.parse(host.config.env.WCU_ENABLED_TOOLS).length,24);
-    assert.equal(result.toolCount, 24);
+    assert.equal(JSON.parse(host.config.env.WCU_ENABLED_TOOLS).length,TOOL_NAMES.length);
+    assert.equal(result.toolCount, TOOL_NAMES.length);
     assert.equal(result.healthOk, true);
     // Catch the old 12-30 second synthetic-worker stall even when it succeeds.
     // This is a test budget with ample runner headroom, not a production timeout.
     assert.ok(result.stagesMs.health < 10000, `Synthetic health exceeded 10000ms: ${JSON.stringify(result)}`);
     assert.equal(result.waitOk, true);
     assert.equal(result.resourceCount, 6);
-    console.log(`PASS ${name} bundle -> MCP initialize / 24 selected tools / health / wait / 6 resources (synthetic PowerShell worker)`);
+    console.log(`PASS ${name} bundle -> MCP initialize / ${TOOL_NAMES.length} selected tools / health / wait / 6 resources (synthetic PowerShell worker)`);
   }
   console.log(`BUNDLE_TIMING ${JSON.stringify({ phase: 'suite', durationMs: Math.round(performance.now() - suiteStarted) })}`);
 }

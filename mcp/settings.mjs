@@ -1,5 +1,5 @@
-export const TOOL_NAMES = Object.freeze(['health','snapshot','accessibility_tree','list_windows','find','element_info','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','wait','ocr','screenshot','wait_for','close_window','move_window','tools']);
-export const LITE_TOOL_NAMES = Object.freeze(['list_windows','find','click','scroll','type_text','keypress','ocr','screenshot','wait_for','tools']);
+export const TOOL_NAMES = Object.freeze(['health','snapshot','accessibility_tree','list_windows','find','element_info','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','wait','ocr','screenshot','wait_for','close_window','move_window','launch_app','tools']);
+export const LITE_TOOL_NAMES = Object.freeze(['list_windows','find','click','scroll','type_text','keypress','ocr','screenshot','wait_for','launch_app','tools']);
 export function normalizeEnabledTools(value) {
   if (!Array.isArray(value) || value.length > TOOL_NAMES.length || value.some(name => typeof name !== 'string' || !TOOL_NAMES.includes(name))) throw new Error('enabledTools must be an array of known tool names');
   const selected=new Set(value);
@@ -10,7 +10,7 @@ export function normalizeEnabledTools(value) {
 // default browser). browserSignIn: the DSH browser keeps its profile, so the
 // sites the user signs in to there stay signed in, instead of starting from a
 // temporary profile each time. The user's own browser is never used.
-export const BROWSER_APPS = Object.freeze(['default', 'edge', 'chrome']);
+export const BROWSER_APPS = Object.freeze(['default', 'edge', 'chrome', 'firefox']);
 
 export const DEFAULT_SETTINGS = Object.freeze({
   browserFirst: true, browserVisible: true, browserApp: 'default', browserSignIn: false,
@@ -69,7 +69,7 @@ export function normalizeSettings(input = {}) {
   for (const key of ['browserFirst', 'browserVisible', 'browserSignIn', 'indicatorEnabled', 'cursorIndicatorEnabled','remoteIndicatorVisible']) {
     if (typeof value[key] !== 'boolean') throw new Error(`${key} must be boolean`);
   }
-  if (!BROWSER_APPS.includes(value.browserApp)) throw new Error('browserApp must be default, edge or chrome');
+  if (!BROWSER_APPS.includes(value.browserApp)) throw new Error('browserApp must be default, edge, chrome or firefox');
   if (typeof value.indicatorText !== 'string' || !value.indicatorText.trim() || value.indicatorText.length > 120 || /[\r\n\x00-\x1f]/.test(value.indicatorText)) {
     throw new Error('indicatorText must be one line of 1–120 characters');
   }
@@ -95,7 +95,8 @@ export function toolSelectionKey(input = {}) {
 }
 
 export function browserRoutingInstructions(settings = {}, allowed = enabledToolsForSettings(settings)) {
-  const { browserFirst, browserVisible, browserSignIn } = normalizeSettings(settings);
+  const { browserFirst, browserVisible, browserSignIn, browserApp } = normalizeSettings(settings);
+  if (browserApp === 'firefox') return 'Experimental Firefox-family browser lane: the Firefox it starts runs headless, with no window; a configured WCU_BROWSER_BIDI_URL may connect a separately started browser. There is one controlling session per endpoint and no cross-MCP sharing. Use list_windows for current tab IDs and set_value elementId "new-tab" to open a URL when those tools are enabled. The outline uses DOM heuristics, not an accessibility tree. Page IDs route through WebDriver BiDi. Read the resulting page to verify each action. Automatic visible sign-in and the blue-frame status indicator are unavailable; never ask the user to turn on automatic visible launch for this backend, and never enter passwords or codes. Use an authenticated endpoint only when authorized. Honor enabled-tool restrictions and user stop/cancellation. Do not replay uncertain actions; observe first. Headless pages have no desktop window, so do not fall back to an unrelated user window. Before sending, posting, buying, deleting or changing account settings, ask the user unless they asked for exactly that step.';
   return (browserFirst
     ? 'Browser-first policy: for web-page tasks, use the browser lane whenever it can handle the requested step; Computer Use is the fallback. '
     : 'Choose the browser lane or desktop tools according to the user\'s request. ') +

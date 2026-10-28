@@ -17,7 +17,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { appForProgId, defaultProgId } from '../mcp/browser.mjs';
 import { McpTestClient } from './mcp-test-client.mjs';
 
-for (const [progId, app] of [['MSEdgeHTM', 'edge'], ['ChromeHTML', 'chrome'], ['FirefoxURL-308046B0AF4A39CB', null], ['', null], [null, null]]) assert.equal(appForProgId(progId), app, String(progId));
+for (const [progId, app] of [['MSEdgeHTM', 'edge'], ['ChromeHTML', 'chrome'], ['FirefoxURL-308046B0AF4A39CB', 'firefox'], ['', null], [null, null]]) assert.equal(appForProgId(progId), app, String(progId));
 const progId = await defaultProgId();
 assert.ok(progId === null || /^\S+$/.test(progId), `the default browser ProgId reads as one word: ${progId}`);
 

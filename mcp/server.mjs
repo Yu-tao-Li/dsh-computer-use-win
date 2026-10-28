@@ -121,10 +121,21 @@ const treeBudgetProperties = {
   }
 };
 
-const maxDepthDescription = "Levels below the root. In window-scoped trees, unnamed Chromium layout panes (Electron, Chrome/Edge, CEF, WebView2) do not count, so page content stays within the default depth.";
+const maxDepthDescription = "Levels below the root. In window-scoped trees, unnamed browser layout panes (Chromium: Electron, Chrome/Edge, CEF, WebView2; Gecko: Firefox and its forks) do not count, so page content stays within the default depth.";
 const webContentNote = " In a Chromium-based window (Electron, Chrome/Edge, CEF, WebView2) the first observation enables the page's accessibility tree; webContent reports whether it is ready.";
 
 const tools = [
+  {
+    name: "windows_computer_use_launch_app",
+    description: "Launch an executable, shortcut or installed application through the interactive Windows desktop Shell. The app outlives the tool call and MCP server; it uses the desktop's environment. Requires Explorer. A successful result means dispatched; verify the intended window with list_windows/wait_for. Applications may activate themselves even with activate:false. Runs no commands: command interpreters and script hosts (cmd, PowerShell, wscript, mshta…) start only without arguments. Does not request elevation.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["target"], properties: {
+      target: { type: "string", minLength: 1, maxLength: 32767, description: "Absolute .exe/.com/.lnk path, executable name on PATH/App Paths, exact installed app name or AppUserModelID." },
+      arguments: { type: "string", maxLength: 32767, default: "", description: "Windows command-line arguments for the executable or shortcut; quote individual arguments containing spaces. Not a shell command, and refused for command interpreters and script hosts." },
+      workingDirectory: { type: "string", maxLength: 32767, default: "", description: "Existing absolute working directory. Not supported for AppUserModelID launches." },
+      activate: { type: "boolean", default: false },
+      waitMs: { type: "integer", minimum: 0, maximum: 10000, default: 1500 }
+    } }
+  },
   {
     name: "windows_computer_use_health",
     description: "Check that the Windows UI Automation backend, screenshot capture, and input stack are available.",
@@ -505,6 +516,7 @@ const tools = [
 // Keep execution/validation schemas intact; only the model-facing prose is
 // shortened. The discovery tool returns the original definition on demand.
 const conciseDescriptions = {
+  launch_app: 'Launch an executable, shortcut or installed app through the desktop Shell; survives tool/server exit. Verify the intended window afterward; apps may activate themselves. No arguments for command interpreters or script hosts.',
   health: 'Check Windows backend availability.',
   snapshot: 'Screenshot and UIA tree. Partial trees report truncation; use OCR for sparse UIA. browserTab: page outline and viewport.',
   accessibility_tree: 'Read a bounded UIA tree; partial output does not establish absence. browserTab: page outline with element ids.',
@@ -558,7 +570,7 @@ const toolMode = process.env.WCU_TOOL_MODE || 'full';
 if (!['lite', 'full', 'lazy'].includes(toolMode)) throw new Error('WCU_TOOL_MODE must be lite, full or lazy');
 const prefix = 'windows_computer_use_';
 const discoveryName = prefix + 'tools';
-const liteNames = ['list_windows', 'find', 'click', 'scroll', 'type_text', 'keypress', 'ocr', 'screenshot', 'wait_for'];
+const liteNames = ['list_windows', 'find', 'click', 'scroll', 'type_text', 'keypress', 'ocr', 'screenshot', 'wait_for', 'launch_app'];
 if (JSON.stringify([...TOOL_NAMES].sort()) !== JSON.stringify([...tools.map(tool=>tool.name.slice(prefix.length)),'tools'].sort())) throw new Error('Tool settings catalogue does not match the MCP tool definitions');
 const configuredSelection = process.env.WCU_ENABLED_TOOLS === undefined ? null : normalizeEnabledTools(JSON.parse(process.env.WCU_ENABLED_TOOLS));
 const selectionMode = toolMode === 'lazy' ? 'lazy' : configuredSelection === null ? toolMode : configuredSelection.length === TOOL_NAMES.length ? 'full' : 'custom';
@@ -590,7 +602,7 @@ const discoveryTool = {
   description: (toolMode === 'lazy' ? 'Lazy startup: ' : '') + (managementOnly ? 'reads and operates real Windows apps (UI Automation, screenshots, OCR, input, windows); enable tools before desktop use. ' : '') + 'List capabilities; describe reads one full schema; enable/disable accepts names or ["*"] for all allowed desktop tools; reset restores startup selection.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {
     operation: { type: 'string', enum: ['list','describe','enable','disable','reset'], default: 'list' },
-    names: { type: 'array', maxItems: 23, items: { type: 'string' } }
+    names: { type: 'array', maxItems: TOOL_NAMES.length, items: { type: 'string' } }
   } }
 };
 function advertisedTools() {
@@ -793,10 +805,14 @@ function spawnBackend() {
     }
   );
   proc.stdout.setEncoding("utf8");
+  proc.stderr.setEncoding("utf8");
+  let stderrTail = "";
   // Forward backend diagnostics (parse errors, P/Invoke failures, backend
   // tracebacks) to our stderr so they surface in the MCP client's log and in CI.
+  // The tail also explains an exit to the model (#54).
   proc.stderr.on("data", (chunk) => {
     process.stderr.write(`[wcu-backend] ${chunk}`);
+    stderrTail = (stderrTail + chunk).slice(-4000);
   });
   proc.stdout.on("data", (chunk) => {
     backendBuf += chunk;
@@ -826,11 +842,25 @@ function spawnBackend() {
   });
   proc.stdin.on("error", () => { /* EPIPE when the backend dies; the exit handler fails waiters */ });
   const onDeath = (err) => {
-    failBackendWaiters(err || new Error("Backend process exited"), proc);
     if (backendProc === proc) backendProc = null;
+    if (err) { failBackendWaiters(err, proc); return; }
+    // 'exit' can precede the last stderr chunk; wait briefly for the stream.
+    const report = () => failBackendWaiters(backendExitError(proc.exitCode, stderrTail), proc);
+    if (proc.stderr.readableEnded) { report(); return; }
+    const timer = setTimeout(report, 300);
+    proc.stderr.once("end", () => { clearTimeout(timer); report(); });
   };
   proc.on("error", onDeath);
   proc.on("exit", () => onDeath());
+}
+
+// "Backend process exited" alone hid why every tool failed (#54). Quote the
+// backend's startup failure line, or else its last lines of error output.
+function backendExitError(code, stderr) {
+  const lines = stderr.split(/\r?\n/).map(line => line.trim()).filter(line => line && !/^stage=\S+ elapsedMs=\d+$/.test(line));
+  const startup = lines.findLast(line => line.startsWith("WCU_BACKEND_STARTUP_FAILED"));
+  const detail = startup || lines.filter(line => !/^(?:\+|~|At |所在位置)/.test(line)).slice(-3).join(" | ");
+  return new Error(`Backend process exited${code == null ? "" : ` (exit code ${code})`}${detail ? `: ${detail.slice(0, 600)}` : ""}`);
 }
 
 function ensureBackend() {
@@ -926,6 +956,8 @@ async function callTool(name, args, request) {
   if (actionName === "keypress" && args.keys.filter(key => !/^(ctrl|control|alt|option|shift)$/i.test(key)).length !== 1) throw new Error("INVALID_ARGUMENTS: keypress needs exactly one non-modifier key");
   if (browser) return runBrowser(actionName === "accessibility_tree" ? "tree" : actionName, args, request);
   switch (name) {
+    case "windows_computer_use_launch_app":
+      return backendText("launch_app", args, 30000, request);
     case "windows_computer_use_health": {
       const result = await runBackend("health", args, undefined, request);
       result.browserLane = await browserLane.health();

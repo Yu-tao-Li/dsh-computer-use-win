@@ -1,6 +1,7 @@
 // Browser lane end to end through the real MCP server: a headless agent
 // browser on a throwaway profile and a local fixture site. No desktop input.
 import assert from 'node:assert/strict';
+import {TOOL_NAMES} from '../mcp/settings.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import http from 'node:http';
 import { existsSync } from 'node:fs';
@@ -82,7 +83,7 @@ const idOf = (page, pattern) => {
 try {
   await client.init();
   const listed = (await client.request('tools/list')).tools;
-  assert.equal(listed.length, 24, 'The browser lane adds no tool');
+  assert.equal(listed.length, TOOL_NAMES.length, 'The browser lane adds no tool');
   for (const tool of ['snapshot', 'accessibility_tree', 'find', 'type_text', 'keypress', 'scroll', 'screenshot', 'wait_for', 'activate_window', 'close_window'])
     assert.ok(listed.find(item => item.name === prefix + tool).inputSchema.properties.browserTab, `${tool} accepts browserTab`);
   const before = foreground();
