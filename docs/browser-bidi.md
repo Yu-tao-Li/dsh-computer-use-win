@@ -1,6 +1,6 @@
 # Experimental Firefox-family Browser Use
 
-This unreleased backend implements the optional browser lane requested in #56. It is separate from the Gecko desktop accessibility fix. Chrome and Edge retain their CDP backend. The default browser choice still falls back to Chrome/Edge when the Windows default is another engine; Firefox is an explicit opt-in.
+This experimental backend implements the optional browser lane requested in #56. It is separate from the Gecko desktop accessibility fix. Chrome and Edge retain their CDP backend. The default browser choice still falls back to Chrome/Edge when the Windows default is another engine; Firefox is an explicit opt-in.
 
 ## Automatic isolated launch
 

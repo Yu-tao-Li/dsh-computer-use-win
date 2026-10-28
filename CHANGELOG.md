@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.3 — 2026-10-28
 
 - #54：编译的辅助 DLL 改为按字节加载，启动错误带阶段和 HRESULT；原生 DLL 缓存按 PowerShell/.NET 运行时区分，并发编译使用独立临时文件。Load compiled helpers from bytes, report startup failures, separate runtime-specific native caches and publish complete cache files atomically.
 - #55：新增 `launch_app`，通过交互桌面 Shell 启动应用，应用不随工具调用或 MCP 进程退出而关闭。支持可执行文件、快捷方式和已安装应用标识；返回“已发送”，需再观察窗口确认。cmd、PowerShell 这类命令解释器和脚本宿主（含指向它们的快捷方式）只能不带参数启动，带参数时返回 `LAUNCH_COMMAND_REFUSED`；`activate:true` 会把应用切到前台，所以和 `activate_window` 一样显示接管提示。Add desktop-shell app launching with explicit dispatched/observed semantics. Command interpreters and script hosts start only without arguments, and `activate:true` shows the takeover indicator.
