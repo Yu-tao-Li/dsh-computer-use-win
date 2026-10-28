@@ -50,11 +50,18 @@ const env = { ...process.env, WCU_INDICATOR: '0' };
 const browser = spawn(firefox, ['-no-remote', '-new-instance', '-profile', profile, url], { windowsHide: false, stdio: 'ignore' });
 const client = new McpTestClient(process.execPath, [path.join(import.meta.dirname, '../mcp/server.mjs')], { env });
 const results = [];
+// A loaded CI runner can keep Firefox's UI thread busy past the backend's
+// 200 ms responsiveness probe. The backend then skips that read on purpose
+// (truncationReason targetUnresponsive), so the read is taken again.
 async function call(action, args) {
-  const response = await client.call('windows_computer_use_' + action, args);
-  assert.ok(!response.isError, JSON.stringify(response));
-  const result = JSON.parse(response.content.find(part => part.type === 'text').text);
-  results.push({ action, args, result }); return result;
+  for (let attempt = 1; ; attempt++) {
+    const response = await client.call('windows_computer_use_' + action, args);
+    assert.ok(!response.isError, JSON.stringify(response));
+    const result = JSON.parse(response.content.find(part => part.type === 'text').text);
+    results.push({ action, args, result });
+    if (result.truncationReason !== 'targetUnresponsive' || attempt === 10) return result;
+    await delay(500);
+  }
 }
 const names = node => node ? [node.name, ...(node.children || []).flatMap(names)] : [];
 let hwnd = 0;
@@ -68,9 +75,11 @@ try {
   assert.ok(hwnd, 'The Firefox fixture window did not appear');
   const target = { nativeWindowHandle: hwnd };
   // Gecko's UIA provider can take most of the default 5 s budget on a CI
-  // runner (4.9 s for one tree read), so tree reads get room to finish; the
-  // depth under test stays the default.
+  // runner (4.9 s, once 11 s, for one tree read), so tree reads and wait_for
+  // (1 s per poll, 5 s in all by default) get room to finish; the depth under
+  // test stays the default.
   const budget = { treeTimeoutMs: 20000 };
+  const waitBudget = { ...budget, timeoutMs: 20000 };
   let tree;
   // The document title arrives with the page; wait for it once, then use defaults.
   for (let i = 0; i < 50; i++) { tree = await call('accessibility_tree', { ...target, ...budget }); if (names(tree.tree).includes(issue)) break; await delay(200); }
@@ -81,12 +90,12 @@ try {
   const found = await call('find', { ...target, ...budget, query: issue, controlType: 'Hyperlink', ocrFallback: false });
   assert.equal(found.source, 'uia'); assert.ok(found.results.length > 0, 'find fell short of the page'); assert.match(found.results[0].id, /^uia:rt:/);
   assert.equal((await call('element_info', { ...target, elementId: found.results[0].id })).element.name, issue);
-  assert.equal((await call('wait_for', { ...target, condition: 'element', query: 'Fixture action' })).verification, 'observed');
+  assert.equal((await call('wait_for', { ...target, ...waitBudget, condition: 'element', query: 'Fixture action' })).verification, 'observed');
   const desktop = await call('accessibility_tree', { scope: 'desktop' });
   assert.ok(!names(desktop.tree).includes(issue), 'Desktop overview must not descend into pages');
   const button = (await call('find', { ...target, ...budget, query: 'Fixture action', controlType: 'Button', ocrFallback: false })).results[0];
   await call('invoke', { ...target, elementId: button.id });
-  assert.equal((await call('wait_for', { ...target, condition: 'element', query: 'clicked', timeoutMs: 5000 })).verification, 'observed', 'The page did not receive the invoke');
+  assert.equal((await call('wait_for', { ...target, ...waitBudget, condition: 'element', query: 'clicked' })).verification, 'observed', 'The page did not receive the invoke');
   console.log(`PASS Firefox ${path.basename(path.dirname(firefox))}: default tree ${tree.nodeCount} nodes reaches the issue link, snapshot/find/element_info/wait_for reach the page, invoke clicks it, desktop overview unchanged`);
 } finally {
   await writeFile(path.join(artifacts, 'results.json'), JSON.stringify({ firefox, results, backendStderr: client.stderr }, null, 2) + '\n').catch(() => {});

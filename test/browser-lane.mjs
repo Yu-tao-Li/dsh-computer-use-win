@@ -252,14 +252,28 @@ const executable = ['Google/Chrome/Application/chrome.exe', 'Microsoft/Edge/Appl
   .flatMap(relative => [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean).map(root => path.join(root, relative))).find(existsSync);
 const userProfile = await mkdtemp(path.join(os.tmpdir(), 'wcu-browser-user-'));
 const userBrowser = spawn(executable, ['--remote-debugging-port=0', `--user-data-dir=${userProfile}`, '--no-first-run', '--headless=new', '--disable-sync', 'about:blank'], { stdio: 'ignore', windowsHide: true });
+// Use the endpoint only once the browser answers on it. A failed lane
+// connection backs off for a minute, so a port file read half written, or a
+// browser still starting on a loaded runner, would leave the listing empty.
 let endpoint;
-for (let i = 0; i < 100 && !endpoint; i++) { await delay(100); endpoint = await readFile(path.join(userProfile, 'DevToolsActivePort'), 'utf8').then(text => `http://127.0.0.1:${text.split(/\r?\n/)[0]}`, () => null); }
+for (let i = 0; i < 300 && !endpoint; i++) {
+  await delay(100);
+  const port = await readFile(path.join(userProfile, 'DevToolsActivePort'), 'utf8').then(text => /^(\d+)\r?\n/.exec(text)?.[1], () => null);
+  if (port) endpoint = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(5000) }).then(response => response.ok ? `http://127.0.0.1:${port}` : null, () => null);
+}
+assert.ok(endpoint, 'The connected browser opened its DevTools endpoint');
 const connected = new McpTestClient(process.execPath, [path.join(import.meta.dirname, '../mcp/server.mjs')], { env: { ...process.env, WCU_BROWSER_CDP_URL: endpoint, WCU_BROWSER_PROFILE: profiles } });
 try {
   await connected.init();
-  const listing = JSON.parse((await connected.call(prefix + 'list_windows', {})).content[0].text).browserLane;
-  const own = listing.browsers.find(browser => browser.source === 'configured');
-  assert.ok(own, `the configured browser is listed: ${JSON.stringify(listing)}`);
+  // list_windows waits 1.5 s for the connection, then reports it as waiting.
+  let listing, own;
+  for (let i = 0; i < 20 && !own; i++) {
+    if (i) await delay(500);
+    listing = JSON.parse((await connected.call(prefix + 'list_windows', {})).content[0].text).browserLane;
+    own = listing.browsers.find(browser => browser.source === 'configured');
+    if (!own && !listing.waitingForPermission) break;
+  }
+  assert.ok(own, `the configured browser at ${endpoint} is listed: ${JSON.stringify(listing)}`);
   assert.ok(own.tabs.some(item => item.url === 'about:blank'), 'its existing blank tab is listed');
   const opened = await connected.call(prefix + 'set_value', { elementId: own.newTab, value: site + '/page2' });
   assert.ok(!opened.isError, JSON.stringify(opened));

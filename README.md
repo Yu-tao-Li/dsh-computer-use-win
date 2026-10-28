@@ -313,7 +313,7 @@ npm ci
 npm test
 ```
 
-单独运行的 MCP 服务不依赖任何第三方包；接入 DSH 时，用的是 DSH 自带的 Schemastery 和官方 MCP 桥。开发依赖只用于测试。`npm test` 会运行 **37 套互相隔离的回归测试**，覆盖设置兼容、接管与停止、界面读取、截图、文字识别协议、输入边界和浏览器通道。它不会发出真实的键盘鼠标输入，也不会改动你装好的 DSH 配置；需要真实界面的测试只操作专用的测试窗口和临时的浏览器配置，日志写在命令输出的临时目录里。
+单独运行的 MCP 服务不依赖任何第三方包；接入 DSH 时，用的是 DSH 自带的 Schemastery 和官方 MCP 桥。开发依赖只用于测试。`npm test` 会运行 **43 套互相隔离的回归测试**，覆盖设置兼容、接管与停止、界面读取、截图、文字识别协议、输入边界和浏览器通道。它不会发出真实的键盘鼠标输入，也不会改动你装好的 DSH 配置；需要真实界面的测试只操作专用的测试窗口和临时的浏览器配置，日志写在命令输出的临时目录里。
 
 `node test/notepad-e2e.mjs` 是另一项会真实打字的测试，它会打开记事本，请在专门的测试桌面上运行。
 
@@ -626,7 +626,7 @@ npm ci
 npm test
 ```
 
-The standalone MCP server needs no third-party packages at runtime. Inside DSH, it uses DSH's own Schemastery and the official MCP bridge. Development dependencies are only for testing. `npm test` runs **37 isolated regression suites** covering settings compatibility, takeover and stopping, reading controls, capture, OCR protocols, input edge cases and the browser lane. It sends no real keyboard or mouse input and does not touch your installed DSH profiles. Tests that need a real interface use only their own test windows and temporary browser profiles, and logs go to the temporary folder the command prints.
+The standalone MCP server needs no third-party packages at runtime. Inside DSH, it uses DSH's own Schemastery and the official MCP bridge. Development dependencies are only for testing. `npm test` runs **43 isolated regression suites** covering settings compatibility, takeover and stopping, reading controls, capture, OCR protocols, input edge cases and the browser lane. It sends no real keyboard or mouse input and does not touch your installed DSH profiles. Tests that need a real interface use only their own test windows and temporary browser profiles, and logs go to the temporary folder the command prints.
 
 `node test/notepad-e2e.mjs` is a separate test that really types. It opens Notepad, so run it on a dedicated test desktop.
 
@@ -635,3 +635,15 @@ The two figures in this README are generated from the pages in `assets/diagrams/
 MIT licensed. Derived from [cgissing/windows-computer-use](https://github.com/cgissing/windows-computer-use); see [THIRD_PARTY.md](THIRD_PARTY.md) for attribution and copyright.
 
 [Plugin marketplace](https://awesome-dsh-plugin.com) · [Releases](https://github.com/Yu-tao-Li/dsh-computer-use-win/releases) · [Report an issue](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues) · [Back to English ↑](#english)
+
+---
+
+## Star 趋势 / Star History
+
+<a href="https://www.star-history.com/#Yu-tao-Li/dsh-computer-use-win&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Yu-tao-Li/dsh-computer-use-win&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Yu-tao-Li/dsh-computer-use-win&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Yu-tao-Li/dsh-computer-use-win&type=Date" />
+  </picture>
+</a>
