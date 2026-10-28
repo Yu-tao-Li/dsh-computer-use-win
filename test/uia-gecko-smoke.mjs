@@ -67,20 +67,24 @@ try {
   }
   assert.ok(hwnd, 'The Firefox fixture window did not appear');
   const target = { nativeWindowHandle: hwnd };
+  // Gecko's UIA provider can take most of the default 5 s budget on a CI
+  // runner (4.9 s for one tree read), so tree reads get room to finish; the
+  // depth under test stays the default.
+  const budget = { treeTimeoutMs: 20000 };
   let tree;
   // The document title arrives with the page; wait for it once, then use defaults.
-  for (let i = 0; i < 50; i++) { tree = await call('accessibility_tree', target); if (names(tree.tree).includes(issue)) break; await delay(200); }
+  for (let i = 0; i < 50; i++) { tree = await call('accessibility_tree', { ...target, ...budget }); if (names(tree.tree).includes(issue)) break; await delay(200); }
   assert.ok(names(tree.tree).includes(issue), 'Default-depth tree misses the page: ' + names(tree.tree).filter(Boolean).join('|').slice(0, 2000));
   assert.ok(names(tree.tree).includes('Fixture action'));
-  const snap = await call('snapshot', { ...target, includeScreenshot: false });
+  const snap = await call('snapshot', { ...target, ...budget, includeScreenshot: false });
   assert.ok(names(snap.tree).includes('Fixture action'), 'Default snapshot depth misses the page');
-  const found = await call('find', { ...target, query: issue, controlType: 'Hyperlink', ocrFallback: false });
+  const found = await call('find', { ...target, ...budget, query: issue, controlType: 'Hyperlink', ocrFallback: false });
   assert.equal(found.source, 'uia'); assert.ok(found.results.length > 0, 'find fell short of the page'); assert.match(found.results[0].id, /^uia:rt:/);
   assert.equal((await call('element_info', { ...target, elementId: found.results[0].id })).element.name, issue);
   assert.equal((await call('wait_for', { ...target, condition: 'element', query: 'Fixture action' })).verification, 'observed');
   const desktop = await call('accessibility_tree', { scope: 'desktop' });
   assert.ok(!names(desktop.tree).includes(issue), 'Desktop overview must not descend into pages');
-  const button = (await call('find', { ...target, query: 'Fixture action', controlType: 'Button', ocrFallback: false })).results[0];
+  const button = (await call('find', { ...target, ...budget, query: 'Fixture action', controlType: 'Button', ocrFallback: false })).results[0];
   await call('invoke', { ...target, elementId: button.id });
   assert.equal((await call('wait_for', { ...target, condition: 'element', query: 'clicked', timeoutMs: 5000 })).verification, 'observed', 'The page did not receive the invoke');
   console.log(`PASS Firefox ${path.basename(path.dirname(firefox))}: default tree ${tree.nodeCount} nodes reaches the issue link, snapshot/find/element_info/wait_for reach the page, invoke clicks it, desktop overview unchanged`);

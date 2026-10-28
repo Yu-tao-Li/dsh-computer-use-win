@@ -2,7 +2,7 @@
 // Only dedicated, no-window fixtures are launched; no user app or registry writes.
 import assert from 'node:assert/strict';
 import {spawn,spawnSync} from 'node:child_process';
-import {existsSync} from 'node:fs';
+import {existsSync,realpathSync} from 'node:fs';
 import {mkdir,mkdtemp,readFile,writeFile,stat} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -87,7 +87,8 @@ if(process.argv[2]==='--job-child'){
       const result=data(await client.call(prefix+'launch_app',{target,arguments:[ready,'空格 中文','a&b|c;literal','quote"inside','trailing\\'].map(quote).join(' '),workingDirectory:root,waitMs:0}));
       assert.equal(result.verification,'dispatched');assert.equal(result.launchMethod,'explorer-shell');
       const info=await readReady(ready); assert.deepEqual(info.args.slice(1),['空格 中文','a&b|c;literal','quote"inside','trailing\\']);
-      assert.equal(info.cwd.toLowerCase(),root.toLowerCase());assert.equal(info.parentName.toLowerCase(),'explorer');assert.notEqual(info.poison,'wcu-parent-only');assert.notEqual(info.electronRunAsNode,'1');
+      // TEMP can be an 8.3 short path (C:\Users\RUNNER~1 on CI); the app reports the long one.
+      assert.equal(info.cwd.toLowerCase(),realpathSync.native(root).toLowerCase());assert.equal(info.parentName.toLowerCase(),'explorer');assert.notEqual(info.poison,'wcu-parent-only');assert.notEqual(info.electronRunAsNode,'1');
       client.close();client=null; await delay(400);assert.ok(alive(info.pid),'Fixture must survive MCP exit');
       results.push({name:'launch-and-MCP-exit',targetKind:name,passed:true,result,info});await stopFixture(ready);
       client=makeClient();await client.init();

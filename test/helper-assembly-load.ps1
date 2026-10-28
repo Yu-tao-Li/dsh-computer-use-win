@@ -13,6 +13,10 @@ $isDesktop = $PSVersionTable.PSEdition -ne 'Core'
 $self = (Get-Process -Id $PID).Path
 
 function Invoke-Phase([string]$Name) {
+  # Windows PowerShell turns each stderr line of a native child into an error
+  # record, and 'Stop' would throw on the first one (CI sets WCU_BACKEND_TRACE,
+  # so the backend prints its startup stages there). Judge by the exit code.
+  $ErrorActionPreference = 'Continue'
   $out = & $self -NoProfile -NonInteractive -File $PSCommandPath -Phase $Name -Cache $Cache 2>&1
   if ($LASTEXITCODE -ne 0) { throw "Phase $Name failed ($LASTEXITCODE): $($out | Out-String)" }
   return (($out | Where-Object { "$_".StartsWith('{') } | Select-Object -Last 1) | ConvertFrom-Json)
