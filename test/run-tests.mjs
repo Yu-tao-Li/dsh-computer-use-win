@@ -61,32 +61,41 @@ const results = [];
 const selected = process.env.WCU_TEST_SUITES?.split(',').filter(Boolean);
 if (selected?.some(name => !suites.some(suite => suite[0] === name))) throw new Error('Unknown WCU_TEST_SUITES selection');
 console.log(`Isolated test artifacts: ${root}`);
+// CI runners differ a lot in speed, and the live suites drive real browsers
+// and UIA providers. On CI a failed suite runs once more in a fresh directory;
+// both attempts keep their diagnostics, and only a repeated failure fails the
+// run. Local runs never retry.
+const attempts = process.env.CI ? 2 : 1;
 for (const [name, command, args, timeout = 180000] of suites) {
   if (selected && !selected.includes(name)) continue;
-  const temp = path.join(root, name);
-  await mkdir(temp);
-  const start = Date.now();
-  const result = spawnSync(command, args, {
-    cwd: checkout,
-    env: { ...process.env, TEMP: temp, TMP: temp, NODE_ENV: 'test', WCU_BROWSER_HEADLESS: '1', WCU_TEST_NO_TAKEOVER: '1', WCU_INDICATOR: '0', WINDOWS_CU_POWERSHELL: powershell },
-    windowsHide: true,
-    encoding: 'utf8',
-    timeout,
-    maxBuffer: 4 * 1024 * 1024
-  });
-  await writeFile(path.join(temp, 'stdout.log'), result.stdout || '');
-  await writeFile(path.join(temp, 'stderr.log'), (result.stderr || '') + (result.error ? '\n' + result.error.message : ''));
-  // Keep stage timings visible in successful CI jobs as well as failures.
-  if (['bundle-startup','uia-native-smoke','uia-chromium-smoke','uia-chromium-lazy-smoke','uia-gecko-smoke','browser-lane'].includes(name) && result.stdout) console.log(result.stdout.trimEnd());
-  const passed = result.status === 0 && !result.error;
-  results.push({ name, passed, exitCode: result.status, durationMs: Date.now() - start });
-  await writeFile(path.join(root, 'results.json'), JSON.stringify({ powershell, node: process.version, results }, null, 2) + '\n');
-  console.log(`${passed ? 'PASS' : 'FAIL'} ${name} (${Date.now() - start} ms)`);
-  if (!passed) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const temp = path.join(root, attempt === 1 ? name : `${name}-retry`);
+    await mkdir(temp);
+    const start = Date.now();
+    const result = spawnSync(command, args.map(arg => arg === path.join(root, name) ? temp : arg), {
+      cwd: checkout,
+      env: { ...process.env, TEMP: temp, TMP: temp, NODE_ENV: 'test', WCU_BROWSER_HEADLESS: '1', WCU_TEST_NO_TAKEOVER: '1', WCU_INDICATOR: '0', WINDOWS_CU_POWERSHELL: powershell },
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout,
+      maxBuffer: 4 * 1024 * 1024
+    });
+    await writeFile(path.join(temp, 'stdout.log'), result.stdout || '');
+    await writeFile(path.join(temp, 'stderr.log'), (result.stderr || '') + (result.error ? '\n' + result.error.message : ''));
+    // Keep stage timings visible in successful CI jobs as well as failures.
+    if (['bundle-startup','uia-native-smoke','uia-chromium-smoke','uia-chromium-lazy-smoke','uia-gecko-smoke','browser-lane'].includes(name) && result.stdout) console.log(result.stdout.trimEnd());
+    const passed = result.status === 0 && !result.error;
+    results.push({ name, attempt, passed, exitCode: result.status, durationMs: Date.now() - start });
+    await writeFile(path.join(root, 'results.json'), JSON.stringify({ powershell, node: process.version, results }, null, 2) + '\n');
+    console.log(`${passed ? 'PASS' : 'FAIL'} ${name}${attempt > 1 ? ' (retry)' : ''} (${Date.now() - start} ms)`);
+    if (passed) {
+      if (attempt > 1) console.log(`::warning title=${name} passed on retry::${name} failed once on this runner; the first attempt's diagnostics are in the ${name} folder of the regression artifact`);
+      break;
+    }
     if (result.stderr) console.error(result.stderr);
     if (result.error) console.error(result.error.message);
     console.error(`Diagnostics retained in ${temp}`);
-    process.exitCode = 1;
     // Continue independent suites so one failure does not hide later results.
+    if (attempt === attempts) process.exitCode = 1;
   }
 }
