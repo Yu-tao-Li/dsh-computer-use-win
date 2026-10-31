@@ -19,6 +19,7 @@ const fields = {
   browserVisible: z.boolean().default(true).description('显示DSH浏览器窗口 / Show the DSH browser'),
   browserApp: z.union(BROWSER_APPS.map(value=>z.const(value))).default('default').description('使用的浏览器 / Browser'),
   browserSignIn: z.boolean().default(false).description('记住登录 / Keep sign-ins'),
+  browserAttachUser: z.boolean().default(false).description('连接我自己的浏览器（需在浏览器里点允许） / Attach to my own browser (approve in the browser)'),
   mode: z.union([z.const('lite'),z.const('full')]).default('full').description('旧版工具模式 / Legacy tool mode'),
   toolPreset: z.union(['auto','full','lite','lazy','custom'].map(value=>z.const(value))).default('auto').description('工具加载方案 / Tool preset'),
   enabledTools: z.array(z.union(TOOL_NAMES.map(name=>z.const(name)))).max(TOOL_NAMES.length).default([...TOOL_NAMES]).description('启用的工具 / Enabled tools'),
@@ -73,7 +74,7 @@ export function bridgeConfig(config = {}, runtime = {}) {
   return {
     serverName: 'wincu', transport: 'stdio', command: process.execPath,
     args: [fileURLToPath(new URL('./server.mjs', import.meta.url))],
-    env: { ELECTRON_RUN_AS_NODE: '1', WCU_BROWSER_HEADLESS: settings.browserVisible?'0':'1', WCU_BROWSER_APP: settings.browserApp, WCU_BROWSER_SIGNIN: settings.browserSignIn?'1':'0', WCU_TOOL_MODE: settings.toolPreset==='lazy'?'lazy':settings.mode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(settings),
+    env: { ELECTRON_RUN_AS_NODE: '1', WCU_BROWSER_HEADLESS: settings.browserVisible?'0':'1', WCU_BROWSER_APP: settings.browserApp, WCU_BROWSER_SIGNIN: settings.browserSignIn?'1':'0', WCU_BROWSER_ATTACH_USER: settings.browserAttachUser?'1':'0', WCU_TOOL_MODE: settings.toolPreset==='lazy'?'lazy':settings.mode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(settings),
       ...(runtime.configFile ? { WCU_CONFIG_FILE: runtime.configFile, WCU_STATE_FILE: runtime.stateFile } : {}),
       ...(runtime.activityFile ? {WCU_ACTIVITY_FILE:runtime.activityFile}: {}),
       ...(runtime.notices ? {WCU_ADAPTER_NOTICES:JSON.stringify(runtime.notices)}: {}) },

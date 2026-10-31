@@ -622,6 +622,33 @@ const SCROLL_POSITION = `function () {
   return null;
 }`;
 
+// A browser the user turned remote debugging on for, in the browser itself
+// (chrome://inspect / edge://inspect -> Allow remote debugging for this browser
+// instance), writes its port and WebSocket path to DevToolsActivePort. That
+// port changes with every launch and the HTTP /json endpoints answer 404 in
+// this mode, so the file is read again whenever candidates are listed and the
+// endpoint is used as a ws:// URL. Reaching the browser is still up to the user:
+// it asks for approval at every connection. Only listed when the
+// browserAttachUser setting opts in.
+const USER_BROWSER_PROFILES = [
+  { name: 'Chrome', dir: path.join(localAppData, 'Google', 'Chrome', 'User Data') },
+  { name: 'Edge', dir: path.join(localAppData, 'Microsoft', 'Edge', 'User Data') },
+  { name: 'Brave', dir: path.join(localAppData, 'BraveSoftware', 'Brave-Browser', 'User Data') },
+  { name: 'Chromium', dir: path.join(localAppData, 'Chromium', 'User Data') }
+];
+
+export function userBrowserEndpoints() {
+  const endpoints = [];
+  for (const { name, dir } of USER_BROWSER_PROFILES) {
+    let lines;
+    try { lines = readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').split(/\r?\n/); } catch { continue; }
+    const port = lines[0]?.trim(), wsPath = lines[1]?.trim();
+    if (!/^\d{1,5}$/.test(port) || !/^\/devtools\/browser\/[\w-]+$/.test(wsPath ?? '')) continue;
+    endpoints.push({ url: `ws://127.0.0.1:${port}${wsPath}`, name: `${name} (user)`, source: 'configured' });
+  }
+  return endpoints;
+}
+
 export class BrowserLane {
   constructor({ env = process.env } = {}) {
     this.env = env;
@@ -687,10 +714,13 @@ export class BrowserLane {
     return this.bidiReady;
   }
 
-  // Only a browser connected on purpose, through WCU_BROWSER_CDP_URL.
+  // Only a browser connected on purpose, through WCU_BROWSER_CDP_URL, or the
+  // user's own browser when the browserAttachUser setting opts in.
   candidates() {
     const configured = this.env.WCU_BROWSER_CDP_URL;
-    return configured ? [{ url: configured, name: 'Configured browser', source: 'configured' }] : [];
+    if (configured) return [{ url: configured, name: 'Configured browser', source: 'configured' }];
+    if (this.env.WCU_BROWSER_ATTACH_USER !== '1') return [];
+    return userBrowserEndpoints();
   }
 
   agentProcessAlive() {
