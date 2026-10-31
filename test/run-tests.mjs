@@ -50,6 +50,7 @@ const suites = [
   ['browser-visible', process.execPath, ['test/browser-visible.mjs']],
   ['browser-reconnect', process.execPath, ['test/browser-reconnect.mjs']],
   ['browser-signin', process.execPath, ['test/browser-signin.mjs']],
+  ['browser-attach-user', process.execPath, ['test/browser-attach-user.mjs']],
   // 22 real Chrome/Edge restarts: 90-140 s on CI runners, past 180 s on a slow one.
   ['browser-profile-lifecycle', process.execPath, ['test/browser-profile-lifecycle.mjs', path.join(root, 'browser-profile-lifecycle')], 360000],
   ['ocr-query-contract', powershell, ['-NoProfile', '-File', 'test/ocr-query-contract.ps1']],

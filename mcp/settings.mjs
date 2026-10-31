@@ -13,7 +13,7 @@ export function normalizeEnabledTools(value) {
 export const BROWSER_APPS = Object.freeze(['default', 'edge', 'chrome', 'firefox']);
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  browserFirst: true, browserVisible: true, browserApp: 'default', browserSignIn: false,
+  browserFirst: true, browserVisible: true, browserApp: 'default', browserSignIn: false, browserAttachUser: false,
   mode: 'full', toolPreset: 'auto', enabledTools: TOOL_NAMES, indicatorEnabled: true, cursorIndicatorEnabled: true, remoteIndicatorVisible: true, indicatorText: 'DSH 正在控制电脑',
   indicatorPosition: 'top', indicatorIdleMs: 800, stopShortcut: '', communityNote: 'full',
   resumeToken: 0, previewToken: 0
@@ -66,7 +66,7 @@ export function normalizeSettings(input = {}) {
   value.enabledTools=normalizeEnabledTools(value.enabledTools);
   if (!['auto','full','lite','lazy','custom'].includes(value.toolPreset)) throw new Error('toolPreset must be full, lite, lazy or custom');
   if (value.toolPreset==='auto') value.toolPreset=value.enabledTools.length===TOOL_NAMES.length?'full':'custom';
-  for (const key of ['browserFirst', 'browserVisible', 'browserSignIn', 'indicatorEnabled', 'cursorIndicatorEnabled','remoteIndicatorVisible']) {
+  for (const key of ['browserFirst', 'browserVisible', 'browserSignIn', 'browserAttachUser', 'indicatorEnabled', 'cursorIndicatorEnabled','remoteIndicatorVisible']) {
     if (typeof value[key] !== 'boolean') throw new Error(`${key} must be boolean`);
   }
   if (!BROWSER_APPS.includes(value.browserApp)) throw new Error('browserApp must be default, edge, chrome or firefox');
@@ -91,7 +91,7 @@ export function enabledToolsForSettings(input = {}) {
 // Both permission and startup state matter when deciding whether to reconnect.
 export function toolSelectionKey(input = {}) {
   const settings=normalizeSettings(input);
-  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn});
+  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser});
 }
 
 export function browserRoutingInstructions(settings = {}, allowed = enabledToolsForSettings(settings)) {

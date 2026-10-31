@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 新增“连接我自己的浏览器”（`browserAttachUser`，默认关闭）。打开后在每次列出候选时读取 Chrome、Edge、Brave、Chromium 用户数据目录里的 `DevToolsActivePort`，按其中的端口和 WebSocket 路径直接连 `ws://`：浏览器重启换了端口也仍然有效，而写死地址做不到。这种“用户在浏览器里自己开远程调试”的模式下 `/json/*` 一律 404，所以不走 HTTP 解析。连的是用户日常配置（登录、Cookie、打开的标签页），代价是每个新连接都要用户点一次“允许”，等待期间 `browserLane` 报 `waitingForPermission`。开关关闭时行为完全不变，插件仍然不会自己去找用户的浏览器。新增 `test/browser-attach-user.mjs`。 / Add Attach to my own browser (`browserAttachUser`, off by default): with it on, candidates come from `DevToolsActivePort` under the Chrome, Edge, Brave or Chromium user data directory, read again for every listing and connected as a `ws://` endpoint, so a restart that changes the port still works where a hard-coded address would not; a browser whose remote debugging the user turned on in the browser itself answers 404 on `/json/*`, so the HTTP resolution is skipped. It is the user's everyday profile (sign-ins, cookies, open tabs) and every new connection needs the user to allow it, with `browserLane` reporting `waitingForPermission` meanwhile. With the switch off nothing changes and the plugin still never looks for the user's browser. Adds `test/browser-attach-user.mjs`.
+
 ## 0.5.3 — 2026-10-28
 
 - #54：编译的辅助 DLL 改为按字节加载，启动错误带阶段和 HRESULT；原生 DLL 缓存按 PowerShell/.NET 运行时区分，并发编译使用独立临时文件。Load compiled helpers from bytes, report startup failures, separate runtime-specific native caches and publish complete cache files atomically.
