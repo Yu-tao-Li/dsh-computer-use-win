@@ -33,12 +33,62 @@ app.whenReady().then(async()=>{
     "window.clickButton=text=>Array.from(document.querySelectorAll('button')).find(b=>b.textContent===text).click();void 0;"
   );
   await until("!!document.getElementById('wincu-page-tool-screenshot')");
+  assert.equal(await evaluate("document.getElementById('wincu-page-progressOverlayEnabled').checked"),true,'Overlay is on by default');
+  assert.ok(await evaluate("!!document.querySelector('[data-wincu-open-progress]')"));
+  assert.equal(await evaluate("document.querySelector('[data-wincu-progress-details]').open"),false,'Detailed overlay settings must start collapsed');
+  // Enable/open must work immediately while unrelated settings remain unsaved.
+  await evaluate("document.getElementById('wincu-page-browserVisible').click()");
+  await evaluate("document.getElementById('wincu-page-progressOverlayEnabled').click()");
+  await until("window.snapshot.value.progressOverlayEnabled===false");
+  assert.notEqual(await evaluate("window.snapshot.value.browserVisible"),false,'Do not auto-save the browser draft');
+  assert.equal(await evaluate("document.querySelector('[data-wincu-open-progress]').disabled"),false);
+  await evaluate("document.querySelector('[data-wincu-open-progress]').click()");
+  await until("window.snapshot.value.progressPreviewToken>0&&window.snapshot.value.progressOverlayEnabled===true");
+  assert.equal(await evaluate("document.getElementById('wincu-page-browserVisible').checked"),false,'Keep the unrelated draft visible');
+  assert.notEqual(await evaluate("window.snapshot.value.browserVisible"),false,'Opening applies overlay fields only');
+  await evaluate("window.clickButton('放弃更改')");
+  await evaluate("document.getElementById('wincu-page-progressOverlayEnabled').click()");
+  await evaluate("window.clickButton('保存更改')");
+  await until("window.snapshot.value.progressOverlayEnabled===false");
+  await evaluate("document.getElementById('wincu-page-progressOverlayEnabled').click()");
+  // The overlay switches save at once and the form waits for that save; act after it settles.
+  await until("window.snapshot.value.progressOverlayEnabled===true");
+  await evaluate("document.getElementById('wincu-page-browserAttachUser').click()");
+  await until("!!document.querySelector('[data-wincu-attach-notice]')");
+  assert.ok(await evaluate("document.querySelector('[data-wincu-attach-notice]').textContent.includes('允许远程调试')"));
+  await evaluate("window.clickButton('保存更改')");
+  await until("window.snapshot.value.progressOverlayEnabled===true&&window.snapshot.value.browserAttachUser===true");
+  // One click per tick, as a person clicks: the next switch reads the rendered draft.
+  await evaluate("document.getElementById('wincu-page-browserAttachUser').click()");
+  await until("!document.getElementById('wincu-page-browserAttachUser').checked");
+  await evaluate("document.getElementById('wincu-page-progressOverlayLocked').click()");
+  await until("window.snapshot.value.progressOverlayLocked===false");
+  await evaluate("window.clickButton('保存更改')");
+  await until("window.snapshot.value.browserAttachUser===false&&window.snapshot.value.progressOverlayLocked===false");
+  await evaluate("document.getElementById('wincu-page-progressOverlayLocked').click()");
+  await evaluate("window.clickButton('保存更改')");
+  await until("window.snapshot.value.progressOverlayLocked===true");
+  await evaluate("document.querySelector('[data-wincu-progress-details]>summary').click()");
+  await until("document.querySelector('[data-wincu-progress-details]').open");
+  assert.equal(await evaluate("document.getElementById('wincu-page-progressOverlayMode').value"),'source');
+  assert.ok(await evaluate("document.getElementById('wincu-page-progressOverlayMode').textContent.includes('额外消耗 token')"));
+  await evaluate("window.setOverlayMode=value=>{const element=document.getElementById('wincu-page-progressOverlayMode');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(element,value);element.dispatchEvent(new Event('change',{bubbles:true}))};window.setOverlayMode('summary');window.clickButton('保存更改')");
+  await until("window.snapshot.value.progressOverlayMode==='summary'");
+  await evaluate("window.setOverlayMode('source');window.clickButton('保存更改')");
+  await until("window.snapshot.value.progressOverlayMode==='source'");
+  await evaluate("window.setOverlayInput=(key,value)=>{const element=document.getElementById('wincu-page-'+key);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(element,String(value));element.dispatchEvent(new Event('input',{bubbles:true}))};window.setOverlayInput('progressOverlayOpacity',65);window.setOverlayInput('progressOverlayWidth',570);window.setOverlayInput('progressOverlayHeight',410);window.setOverlayInput('progressLockShortcut','Ctrl+Alt+P')");
+  await evaluate("const element=document.getElementById('wincu-page-progressOverlayPosition');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(element,'custom');element.dispatchEvent(new Event('change',{bubbles:true}))");
+  await until("!document.getElementById('wincu-page-progressOverlayX').disabled");
+  await evaluate("window.setOverlayInput('progressOverlayX',-500);window.setOverlayInput('progressOverlayY',200);window.clickButton('保存更改')");
+  await until("window.snapshot.value.progressOverlayWidth===570&&window.snapshot.value.progressOverlayX===-500");
+  assert.deepEqual(await evaluate("['progressOverlayOpacity','progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressLockShortcut'].map(key=>window.snapshot.value[key])"),[65,570,410,'custom',-500,200,'Ctrl+Alt+P']);
+
   assert.equal(await evaluate("document.querySelector('[data-wincu-tools]').open"),false,'Tool checklist must be collapsed by default');
-  assert.equal(await evaluate("[...document.querySelectorAll('[data-wincu-tool]')].filter(x=>x.checked).length"),25,'All tools must be selected by default, including in an older lite profile');
+  assert.equal(await evaluate("[...document.querySelectorAll('[data-wincu-tool]')].filter(x=>x.checked).length"),26,'All tools must be selected by default, including in an older lite profile');
   assert.equal(await evaluate("document.getElementById('wincu-page-toolPreset-full').checked"),true);
   assert.equal(await evaluate("document.querySelector('[data-wincu-tools]').hidden"),true,'Custom list belongs inside the Custom preset');
   await evaluate("document.getElementById('wincu-page-toolPreset-lite').click()");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('11 / 25')");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('12 / 26')");
   await evaluate("window.clickButton('放弃更改')");
   await until("document.getElementById('wincu-page-toolPreset-full').checked");
   assert.equal(await evaluate("document.getElementById('wincu-page-browserFirst').checked"),true);
@@ -163,7 +213,7 @@ app.whenReady().then(async()=>{
   await until("document.body.textContent.includes('已保存')");
   assert.equal(await evaluate('window.writes.length'),1,'Save all changed fields in a single host transaction');
   assert.equal(await evaluate("window.snapshot.value.enabledTools.includes('drag')"),false);
-  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),24);
+  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),25);
   assert.equal(await evaluate('window.snapshot.value.indicatorPosition'),'bottom');
   assert.equal(await evaluate('window.snapshot.value.cursorIndicatorEnabled'),false,'Pointer switch must persist in the same atomic save');
   assert.equal(await evaluate("document.getElementById('wincu-page-remoteIndicatorVisible').checked"),true);
@@ -194,18 +244,18 @@ app.whenReady().then(async()=>{
   await evaluate("window.clickButton('全选')");
   await until("[...document.querySelectorAll('[data-wincu-tool]')].every(x=>x.checked)");
   await evaluate("window.clickButton('保存更改')");
-  await until("window.snapshot.value.enabledTools.length===25");
+  await until("window.snapshot.value.enabledTools.length===26");
   await evaluate("window.chooseTool('drag')");
   await until("!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='保存更改').disabled");
   await evaluate("window.clickButton('保存更改')");
-  await until("window.snapshot.value.enabledTools.length===24");
+  await until("window.snapshot.value.enabledTools.length===25");
   await evaluate("document.getElementById('wincu-page-toolPreset-full').click()");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('25 / 25')");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('26 / 26')");
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.toolPreset==='full'");
-  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),24,'Presets must keep the custom selection');
+  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),25,'Presets must keep the custom selection');
   await evaluate("document.getElementById('wincu-page-toolPreset-lite').click()");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('11 / 25')");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('12 / 26')");
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.toolPreset==='lite'");
   await evaluate("document.getElementById('wincu-page-toolPreset-lazy').click()");
@@ -214,7 +264,7 @@ app.whenReady().then(async()=>{
   assert.equal(await evaluate('window.snapshot.value.toolPreset'),'lite','Lazy stays a draft until saved');
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.toolPreset==='lazy'");
-  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),24,'Lazy preserves custom restrictions for a later Custom selection');
+  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),25,'Lazy preserves custom restrictions for a later Custom selection');
   await evaluate("window.renderPage('en')");
   await until("document.getElementById('wincu-page-toolPreset-lazy').checked&&document.body.textContent.includes('1 at startup')");
   await evaluate("window.renderPage('zh')");
@@ -222,12 +272,12 @@ app.whenReady().then(async()=>{
   await new Promise(resolve=>setTimeout(resolve,100));
   await savePicture('settings-lazy.png');
   await evaluate("document.getElementById('wincu-page-toolPreset-custom').click()");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('24 / 25')");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('25 / 26')");
   assert.equal(await evaluate("document.getElementById('wincu-page-tool-drag').checked"),false);
   await evaluate("window.clickButton('全选')");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('25 / 25')");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('26 / 26')");
   await evaluate("window.clickButton('保存更改')");
-  await until("window.snapshot.value.toolPreset==='custom'&&window.snapshot.value.enabledTools.length===25");
+  await until("window.snapshot.value.toolPreset==='custom'&&window.snapshot.value.enabledTools.length===26");
   await evaluate("window.clickButton('预览')");
   await until("window.snapshot.value.previewToken>0");
   assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='恢复桌面控制')"),false,'A new task resumes automatically; no settings resume button is needed');
@@ -268,7 +318,7 @@ app.whenReady().then(async()=>{
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.stopShortcut===''");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='恢复默认（Esc）').disabled"),true,'Default reset must remain visible and disabled when already using Esc');
-  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),25,'Restoring the stop shortcut must preserve selected tools');
+  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),26,'Restoring the stop shortcut must preserve selected tools');
   // The support note collapses to one project link. The choice saves at once
   // and leaves a pending draft alone.
   await evaluate("document.getElementById('wincu-page-indicatorEnabled').click()");
@@ -357,6 +407,13 @@ app.whenReady().then(async()=>{
   while(paintCount<=before){if(Date.now()>paintDeadline)throw Error('Settings page did not repaint');await new Promise(r=>setTimeout(r,20))}
   assert.ok(paintedImage&&!paintedImage.isEmpty());
   await savePicture('settings-page.png');
+  await evaluate("document.querySelector('[data-wincu-progress-settings]').scrollIntoView({block:'start'});window.scrollBy(0,-12)");
+  await savePicture('settings-progress.png');
+  assert.equal(await evaluate("document.querySelector('[data-wincu-progress-details]').open"),false);
+  await evaluate("document.querySelector('[data-wincu-progress-details]>summary').click()");
+  await evaluate("document.querySelector('[data-wincu-progress-settings]').scrollIntoView({block:'start'});window.scrollBy(0,-12)");
+  await new Promise(r=>setTimeout(r,100));
+  await savePicture('settings-progress-expanded.png');
   await evaluate("window.renderPage('en')");
   await until("document.body.textContent.includes('Press Esc to stop')");
   await evaluate("window.snapshot={...window.snapshot,writable:false};for(const fn of window.listeners)fn()");

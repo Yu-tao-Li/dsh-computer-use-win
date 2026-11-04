@@ -7,6 +7,10 @@ import { DEFAULT_SETTINGS, normalizeSettings } from './settings.mjs';
 
 export const STOPPED = 'COMPUTER_USE_STOPPED_BY_USER: The user stopped this operation series with Esc or their custom shortcut. Do not retry desktop input in this turn. A new user turn, including a request to continue, can use the desktop automatically; no settings change is required.';
 const helperScript = fileURLToPath(new URL('../scripts/windows-takeover.ps1', import.meta.url));
+// What "Open overlay to adjust" shows: the same layout as a real run.
+export const PREVIEW_PROGRESS = Object.freeze({ step: 2, status: 'acting', tool: 'scroll', action: '滚动页面', steps: [
+  { step: 1, actions: [{ label: '打开新标签页', state: 'done' }], reasoning: '这里按步骤显示 DSH 的思考文字，和对话里看到的一致。', reply: '' },
+  { step: 2, actions: [{ label: '滚动页面', state: 'running' }], reasoning: '正文较长时可以滚动查看；回到底部后继续跟随新输出。', reply: '' }] });
 
 // Windows refuses to replace a file that another process holds open without
 // delete sharing (a reader, an antivirus scan) for a moment, with EPERM, EACCES
@@ -45,6 +49,8 @@ export class TakeoverControl {
     stateFile = process.env.WCU_STATE_FILE, activityFile=process.env.WCU_ACTIVITY_FILE,testMode = false, config = {} } = {}) {
     this.powershell = powershell; this.onStop = onStop; this.configFile = configFile; this.stateFile = stateFile;
     this.testMode = testMode; this.config = normalizeSettings(config); this.active = 0; this.shown = 0; this.paused = false;
+    this.layoutFile=process.env.WCU_LAYOUT_FILE;
+    this.progressPreviewToken=this.config.progressPreviewToken;
     this.activityFile=activityFile;this.seriesHeld=false;this.seriesIndicator=false;this.seriesKey=null;this.stoppedSeriesKey=null;this.blockedSeries=new Map();
     this.eventName = `Local\\DSH-WCU-${randomUUID()}`; this.waiters = new Map(); this.nextId = 0;
     this.resumeToken = this.config.resumeToken; this.previewToken = this.config.previewToken; this.pauseMessage = STOPPED;
@@ -91,6 +97,13 @@ export class TakeoverControl {
       // A series of browser-lane calls is held for turn tracking but shows
       // nothing; the indicator starts with the series' first desktop call.
       const indicator=held&&activity.indicator!==false;
+      // After the turn ends the overlay keeps showing its final state for a
+      // short time; that holds no series, indicator or stop key.
+      const lingering=!held&&!!activity.progress&&Number.isFinite(activity.lingerUntil)&&activity.lingerUntil>Date.now();
+      const progress=JSON.stringify({enabled:this.config.progressOverlayEnabled&&(held||lingering),remoteIndicatorVisible:this.config.remoteIndicatorVisible,settings:this.config,progress:{...activity.progress,status:this.paused&&held?'stopped':activity.progress?.status??'waiting'}});
+      if(!this.disabledForTest&&this.sentProgress!==progress&&(this.child||(this.config.progressOverlayEnabled&&(held||lingering)))){
+        await this.command('progress',JSON.parse(progress));this.sentProgress=progress;
+      }
       if(held&&!this.blockedSeries.has(key)&&this.paused&&this.active===0)await this.resumeOperation();
       if(held!==this.seriesHeld||key!==this.seriesKey||indicator!==this.seriesIndicator){
         this.seriesKey=key;
@@ -117,6 +130,10 @@ export class TakeoverControl {
       this.previewToken = this.config.previewToken;
       if(this.paused&&this.active===0&&!this.seriesHeld)await this.resumeOperation(false);
       if (!this.paused && this.active === 0 && !this.disabledForTest) await this.command('preview', this.config);
+    }
+    if(this.config.progressPreviewToken!==this.progressPreviewToken){
+      this.progressPreviewToken=this.config.progressPreviewToken;
+      if(!this.disabledForTest&&this.progressPreviewToken>0)await this.command('progress',{enabled:true,preview:true,settings:this.config,remoteIndicatorVisible:this.config.remoteIndicatorVisible,progress:PREVIEW_PROGRESS});
     }
   }
   // A quiet lease (browser-lane calls) checks the stopped state and counts as an
@@ -168,6 +185,9 @@ export class TakeoverControl {
           let message; try { message = JSON.parse(line); } catch { continue; }
           if (message.kind === 'ready') { ready = true; clearTimeout(deadline); resolve(); }
           else if (message.kind === 'stopped') this.fail(new Error(STOPPED));
+          else if (message.kind === 'progress-layout') {
+            if(this.layoutFile)try{atomicJson(this.layoutFile,{id:randomUUID(),patch:message.patch,base:message.base});}catch(error){process.stderr.write('Overlay settings sync failed: '+error.message+'\n');}
+          }
           else {
             const pending = this.waiters.get(message.id); if (!pending) continue;
             clearTimeout(pending.timer); this.waiters.delete(message.id);

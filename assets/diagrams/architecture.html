@@ -53,7 +53,7 @@
         <article class="card own" id="adapter" data-solid>
           <h3 data-t="adapter"></h3>
           <span class="file mono">mcp/dsh-plugin.mjs</span>
-          <ul><li data-t="adapter1"></li><li data-t="adapter2"></li></ul>
+          <ul><li data-t="adapter1"></li><li data-t="adapter2"></li><li data-t="adapter3"></li></ul>
         </article>
         <article class="card own" id="client" data-solid>
           <h3 data-t="client"></h3>
@@ -75,7 +75,7 @@
     <article class="card own" id="helper" data-solid>
       <h3><span data-t="helper"></span><span class="tag" data-t="helperTag"></span></h3>
       <span class="file mono">scripts/windows-takeover.ps1</span>
-      <ul><li data-t="helper1"></li><li data-t="helper2"></li><li data-t="helper3"></li></ul>
+      <ul><li data-t="helper1"></li><li data-t="helper4"></li><li data-t="helper2"></li><li data-t="helper3"></li></ul>
     </article>
     <div class="lanes wide">
       <article class="card own" id="lane" data-solid>
@@ -98,6 +98,7 @@
         <h3 data-t="browser"></h3>
         <ul><li data-t="browser1"></li><li data-t="browser2"></li><li data-t="browser3"></li></ul>
         <p class="alt" data-t="browserOwn"></p>
+        <p class="alt" data-t="browserAttach"></p>
       </article>
       <article class="card" id="desktop" data-solid>
         <h3 data-t="desktop"></h3>
@@ -115,20 +116,21 @@ Diagram.render({
     you: '你', ask: '布置任务', settings: '调整设置', esc: '按 Esc 停止',
     dsh: 'DSH Desktop / Web',
     agent: 'agent', agent1: '理解你的任务', agent2: '需要时调用桌面工具',
-    adapter: '插件适配器', adapter1: '把你的设置交给服务', adapter2: '跟踪对话轮次，一次只让一段对话操作桌面',
+    adapter: '插件适配器', adapter1: '把你的设置交给服务', adapter2: '跟踪对话轮次，一次只让一段对话操作桌面', adapter3: '把这段对话的思考和步骤交给浮窗',
     client: '设置页与操作记录', client1: '设置 → 电脑操控', client2: '对话里的步骤和截图',
     bridge: '官方 MCP 桥', bridge1: '启动服务进程，转发工具调用',
     server: 'MCP 服务', serverTag: 'Node 进程',
-    presetAll: '全部 24', presetLite: '精简 10', presetLazy: '懒启动 1', presetCustom: '自定义',
-    server1: '检查参数，再把每次调用交给对应的通道', server2: '输入类操作标为“已发送”，再用 wait_for 确认效果', server3: '超时、按 Esc 或点 DSH 的停止按钮时取消请求', server4: '打开“网页优先用浏览器操控”时，提示 agent 网页先走浏览器通道',
+    presetAll: '全部 26', presetLite: '精简 12', presetLazy: '懒启动 1', presetCustom: '自定义',
+    server1: '检查参数，再把每次调用交给对应的通道', server2: '输入类操作标为“已发送”，再用 wait_for 确认效果', server3: '超时、按 Esc 或点 DSH 的停止按钮时取消请求', server4: '打开“优先用网页控件操作”时，提示 agent 网页先走浏览器通道',
     helper: '接管助手', helperTag: '独立进程',
-    helper1: '用到键鼠时显示边缘光晕、<br>提示条和鼠标旁的 DSH 标签', helper2: '监听 Esc 和你设的快捷键', helper3: '后端正忙时也能收到 Esc',
+    helper1: '用到键鼠时显示边缘光晕、<br>提示条和鼠标旁的 DSH 标签', helper4: '思考与操作浮窗：按步骤<br>显示 DSH 的思考和操作', helper2: '监听 Esc 和你设的快捷键', helper3: '后端正忙时也能收到 Esc',
     lane: '浏览器通道', laneTag: '在 MCP 服务里运行',
     lane1: '把网页读成大纲，每个元素带 ID', lane2: '在网页里点击、填写和选择，后台标签页也行', lane3: '新开标签页、打开网址、截取网页', lane4: '不动鼠标、不用剪贴板、不抢前台', lane5: '不显示接管提示，用 DSH 的停止按钮停止',
     backend: 'PowerShell 后端', backendTag: '常驻运行，一次执行一个请求',
     capUia: '读控件、按按钮、填内容', capInput: '鼠标和键盘', capInput1: '点击、按键、粘贴文字', capWindow: '窗口', capWindow1: '列出、切换、移动、关闭', capCapture: '截图', capCapture1: '整个屏幕或单个窗口', capOcr: '文字识别',
     browser: 'DSH 专用浏览器', browser1: '用你的默认浏览器，也可选 Edge 或 Chrome', browser2: '默认用临时空白配置，不带你的登录和 Cookie', browser3: '默认显示窗口但不抢前台，也可以只在后台运行',
-    browserOwn: '打开“记住登录”后保留一个配置：<br>在它窗口里登录过的网站一直保持登录',
+    browserOwn: '打开“保留网站登录状态”后保留一个配置：<br>在它窗口里登录过的网站一直保持登录',
+    browserAttach: '实验性：打开“操作已打开的浏览器”，并在浏览器里点“允许”后，也能操作你自己已经打开的 Chrome 或 Edge',
     desktop: '你的 Windows 桌面', app1: '记事本', app2: '浏览器', app3: '计算器', app4: '网易云音乐', app5: '其他程序',
     desktop1: '优先在后台操作控件；要用鼠标键盘时只借用前台，用完还给你', desktop2: '浏览器的工具栏，以及浏览器通道读不到的网页内容（如 iframe），<br>也由电脑操控在这里完成',
     legendOwn: '本插件的代码', legendExt: 'DSH、Windows 或浏览器提供',
@@ -142,20 +144,21 @@ Diagram.render({
     you: 'You', ask: 'Ask for a task', settings: 'Change settings', esc: 'Press Esc',
     dsh: 'DSH Desktop / Web',
     agent: 'Agent', agent1: 'Understands your task', agent2: 'Calls desktop tools<br>when needed',
-    adapter: 'Plugin adapter', adapter1: 'Passes your settings on to the server', adapter2: 'Tracks turns: one conversation uses the desktop at a time',
+    adapter: 'Plugin adapter', adapter1: 'Passes your settings on to the server', adapter2: 'Tracks turns: one conversation uses the desktop at a time', adapter3: 'Passes the conversation’s reasoning and steps to the overlay',
     client: 'Settings &amp; records', client1: 'The Computer Use settings page', client2: 'Steps and screenshots in conversations',
     bridge: 'Official MCP bridge', bridge1: 'starts the server, forwards tool calls',
     server: 'MCP server', serverTag: 'Node process',
-    presetAll: 'All 24', presetLite: 'Lite 10', presetLazy: 'Lazy 1', presetCustom: 'Custom',
-    server1: 'Checks arguments, then hands each call to its lane', server2: 'Marks input as “sent”, and wait_for confirms the effect', server3: 'Cancels a request on timeout, Esc or DSH’s stop button', server4: 'With Prefer Browser Use on, tells the agent to try the browser lane first for web pages',
+    presetAll: 'All 26', presetLite: 'Lite 12', presetLazy: 'Lazy 1', presetCustom: 'Custom',
+    server1: 'Checks arguments, then hands each call to its lane', server2: 'Marks input as “sent”, and wait_for confirms the effect', server3: 'Cancels a request on timeout, Esc or DSH’s stop button', server4: 'With Prefer web page controls on, tells the agent to try the browser lane first for web pages',
     helper: 'Takeover helper', helperTag: 'own process',
-    helper1: 'On mouse or keyboard input:<br>edge glow, status bar, DSH tag', helper2: 'Listens for Esc or<br>your own shortcut', helper3: 'Hears Esc even while<br>the backend is busy',
+    helper1: 'On mouse or keyboard input:<br>edge glow, status bar, DSH tag', helper4: 'Progress overlay: DSH’s<br>reasoning and actions by step', helper2: 'Listens for Esc or<br>your own shortcut', helper3: 'Hears Esc even while<br>the backend is busy',
     lane: 'Browser lane', laneTag: 'inside the MCP server',
     lane1: 'Reads a page as an outline; every element has an ID', lane2: 'Clicks, fills in and selects inside the page, background tabs too', lane3: 'Opens tabs and addresses, captures the page', lane4: 'No pointer, no clipboard, no window brought to the front', lane5: 'No takeover indicator; DSH’s stop button stops it',
     backend: 'PowerShell backend', backendTag: 'stays running, one request at a time',
     capUia: 'read, press, fill in', capInput: 'Mouse and keys', capInput1: 'click, press keys, paste', capWindow: 'Windows', capWindow1: 'list, switch, move, close', capCapture: 'Capture', capCapture1: 'screen or one window', capOcr: 'Text recognition',
     browser: 'The DSH browser', browser1: 'Your default browser, or Edge or Chrome', browser2: 'By default a fresh temporary profile: none of your sign-ins or cookies', browser3: 'A visible window that does not take the foreground, or background only',
-    browserOwn: 'With Keep sign-ins on, it keeps one profile:<br>sites you sign in to there stay signed in',
+    browserOwn: 'With Keep website sign-ins on, it keeps one profile:<br>sites you sign in to there stay signed in',
+    browserAttach: 'Experimental: with Use an already open browser on and Allow clicked in that browser, it also works in your own Chrome or Edge',
     desktop: 'Your Windows desktop', app1: 'Notepad', app2: 'Browser', app3: 'Calculator', app4: 'NetEase Cloud Music', app5: 'Other apps',
     desktop1: 'Uses controls in the background where it can; mouse and keyboard input only borrows the foreground', desktop2: 'Computer Use also handles the browser toolbar and page content the browser lane cannot read, such as iframes',
     legendOwn: 'This plugin’s code', legendExt: 'Provided by DSH, Windows or the browser',

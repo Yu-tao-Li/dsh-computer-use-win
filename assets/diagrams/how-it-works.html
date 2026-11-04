@@ -57,6 +57,12 @@
   .yours::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 9px; border-bottom: .5px solid rgba(255,255,255,.12); }
   .yours i { position: absolute; left: 8px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.2); }
   .yours .pointer { left: 62%; top: 50%; }
+  .ov { position: relative; display: grid; gap: 3px; padding: 7px 10px 8px; border-radius: 8px; background: rgba(25,29,38,.88); border: 1px solid rgba(117,161,218,.55); color: #f6f7fa; }
+  .ov-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+  .ov-lock { flex: none; width: 17px; height: 17px; }
+  .ov-sub { font-size: 10.5px; color: #b9c6d8; margin-top: -2px; }
+  .ov-step { font-size: 11px; font-weight: 700; color: #b9c6d8; }
+  .ov-text { font-size: 11px; line-height: 1.45; }
   .gloss { font-size: 11px; color: var(--faint); margin-top: -4px; }
   .gloss:empty { display: none; }
   .cap { font-size: 12px; color: var(--muted); }
@@ -65,7 +71,7 @@
   .cap + .screen { margin-top: 3px; }
   .loop { margin-top: 30px; }
   .loop-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 9px; }
-  .loop-head h3 { font-size: 13.5px; font-weight: 600; }
+  .loop-head h3 { font-size: 13.5px; font-weight: 600; color: var(--fg); }
   .loop-head p { font-size: 11.5px; color: var(--faint); }
   .nodes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 34px; }
   .node { border-radius: 10px; padding: 9px 12px 10px; border: 1px solid var(--own-line); background: var(--own); }
@@ -120,6 +126,9 @@
       </div>
       <p class="gloss" data-t="s3DeskGloss"></p>
       <p class="cap" data-t="s3Desk"></p>
+      <div class="ov" id="ov" data-solid><p class="ov-head"><span>DSH · 第 3 步 · 执行中</span><svg class="ov-lock" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9.5" fill="rgba(220,229,242,.16)"/><path d="M7.6 9.2V7.6a2.4 2.4 0 0 1 4.8 0v1.6" fill="none" stroke="#c4d0e0" stroke-width="1.2"/><rect x="6.6" y="9" width="6.8" height="5" rx="1" fill="#c4d0e0"/></svg></p><p class="ov-sub">滚动页面</p><p class="ov-step">第 2 步 · 打开新标签页</p><p class="ov-text">搜索结果已经打开，接下来滚动到页面底部，确认结果。</p></div>
+      <p class="gloss" data-t="s3OverlayGloss"></p>
+      <p class="cap" data-t="s3Overlay"></p>
     </article>
   </section>
   <section class="loop">
@@ -127,7 +136,7 @@
     <div class="nodes">
       <div class="node" id="n1" data-solid><b data-t="n1"></b><p data-t="n1d"></p><p class="tools"><code>list_windows</code><code>snapshot</code><code>screenshot</code><code>ocr</code></p></div>
       <div class="node" id="n2" data-solid><b data-t="n2"></b><p data-t="n2d"></p><p class="tools"><code>find</code><code>element_info</code></p></div>
-      <div class="node" id="n3" data-solid><b data-t="n3"></b><p data-t="n3d"></p><p class="tools"><code>invoke</code><code>set_value</code><code>click</code><code>type_text</code><code>keypress</code></p></div>
+      <div class="node" id="n3" data-solid><b data-t="n3"></b><p data-t="n3d"></p><p class="tools"><code>invoke</code><code>set_value</code><code>click</code><code>type_text</code><code>keypress</code><code>batch</code></p></div>
       <div class="node" id="n4" data-solid><b data-t="n4"></b><p data-t="n4d"></p><p class="tools"><code>wait_for</code></p></div>
     </div>
     <div class="loop-space"></div>
@@ -140,8 +149,8 @@ Diagram.render({
     s1Title: '安装一次',
     s1Open: '托盘图标右键 →“打开 DSH 终端”，运行：',
     s1Restart: '再右键托盘图标 →“退出”，然后重新打开 DSH Desktop。',
-    s1Settings: '“设置 → 电脑操控”里可以调浏览器操控、接管提示和工具。不改也能直接用：',
-    setTitle: '浏览器操控（Browser Use）', setFirst: '网页优先用浏览器操控', setVisible: '显示浏览器窗口',
+    s1Settings: '“设置 → 电脑操控”里可以调网页与浏览器、接管提示、思考与操作浮窗和工具。不改也能直接用：',
+    setTitle: '网页与浏览器', setFirst: '优先用网页控件操作', setVisible: '显示 DSH 浏览器窗口',
     s2Title: '在对话里布置任务',
     s2Ask: '在浏览器的新窗口中搜索<span class="nb">“晴天”</span>，确认结果页出现<span class="nb">“周杰伦”</span>。',
     rowType: '输入了文本', rowKey: '发送了按键', rowCheck: '检查了操作结果', done: '已完成',
@@ -151,6 +160,8 @@ Diagram.render({
     s3Web: '<b>网页</b>在蓝框的 DSH 浏览器里后台操作：标签页图标和小箭头标出它点哪里，不动你的鼠标；点 DSH 的停止按钮停止。',
     s3DeskGloss: '',
     s3Desk: '<b>桌面程序</b>用到鼠标键盘时，屏幕边缘发亮，鼠标旁有 DSH 标签；按 <kbd>Esc</kbd> 立即停止这一轮。',
+    s3OverlayGloss: '',
+    s3Overlay: '<b>思考与操作浮窗</b>在屏幕角落按步骤显示 DSH 的思考和操作，鼠标从它上面穿过；光标停在右上角的锁上，就能拖动和缩放。',
     loopTitle: 'agent 每一步都这样做',
     loopNote: '网页和桌面程序用同一套工具，对话里每行记录就是其中一步',
     n1: '观察', n1d: '看有哪些窗口、网页、控件和文字',
@@ -163,8 +174,8 @@ Diagram.render({
     s1Title: 'Install once',
     s1Open: 'Right-click the tray icon → Open DSH Terminal, then run:',
     s1Restart: 'Right-click the tray icon → Quit, then open DSH Desktop again.',
-    s1Settings: 'Settings → Computer Use covers Browser Use, indicators and tools. The defaults work as they are:',
-    setTitle: 'Browser Use', setFirst: 'Prefer Browser Use for web pages', setVisible: 'Show the browser window',
+    s1Settings: 'Settings → Computer Use covers the web and browser, takeover indicators, the progress overlay and tools. The defaults work as they are:',
+    setTitle: 'Web and browser', setFirst: 'Prefer web page controls', setVisible: 'Show the DSH browser window',
     s2Title: 'Ask in a conversation',
     s2Ask: 'Open a browser, search for <span class="nb">“Windows UI Automation”</span> and confirm that results appear.',
     rowType: 'Entered text', rowKey: 'Sent a key press', rowCheck: 'Checked the result', done: 'Completed',
@@ -174,6 +185,8 @@ Diagram.render({
     s3Web: '<b>Web pages</b>: the blue-framed DSH browser works in the background; its tab icon and a small arrow show where it clicks, and your pointer stays put. DSH’s stop button stops it.',
     s3DeskGloss: '“DSH is controlling the computer · Esc to stop”',
     s3Desk: '<b>Desktop apps</b>, once the mouse or keyboard is used: the screen edge glows and a DSH tag follows the pointer. <kbd>Esc</kbd> stops this turn at once.',
+    s3OverlayGloss: '“DSH · step 3 · acting”, then each step with its reasoning',
+    s3Overlay: '<b>The progress overlay</b> shows DSH’s reasoning and actions step by step in a corner of the screen, and the mouse passes through it. Rest the pointer on its padlock to move or resize it.',
     loopTitle: 'Every step the agent takes',
     loopNote: 'Pages and desktop apps share these tools; each row in the conversation is one step',
     n1: 'Look', n1d: 'See which windows, pages, controls and text are there',

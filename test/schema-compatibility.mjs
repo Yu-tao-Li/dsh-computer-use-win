@@ -11,6 +11,9 @@ try{
  assert.equal(values.browserFirst.get(),false);assert.equal(values.browserVisible.get(),false);
  assert.equal(values.browserApp.get(),'chrome');assert.equal(values.browserSignIn.get(),true);
  assert.equal(adapter.Config({}).browserApp.get(),'default');assert.equal(adapter.Config({}).browserSignIn.get(),false);
+ assert.equal(adapter.Config({}).progressOverlayMode.get(),'source');
+ assert.equal(adapter.Config({progressOverlayMode:'summary'}).progressOverlayMode.get(),'summary');
+ assert.ok(adapter.Config['~standard'].validate({progressOverlayMode:'unknown'}).value[adapter.REPAIRED_SETTINGS]);
  assert.equal(values.indicatorEnabled.get(),false);assert.equal(values.stopShortcut.get(),'F8');
  const reference=adapter.createLiveReference(['wait']);
  assert.equal(volatileEntries({reference}).length,1,'The host must recognize the fallback reference');

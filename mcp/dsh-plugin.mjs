@@ -19,6 +19,18 @@ const fields = {
   browserVisible: z.boolean().default(true).description('显示DSH浏览器窗口 / Show the DSH browser'),
   browserApp: z.union(BROWSER_APPS.map(value=>z.const(value))).default('default').description('使用的浏览器 / Browser'),
   browserSignIn: z.boolean().default(false).description('记住登录 / Keep sign-ins'),
+  browserAttachUser: z.boolean().default(false).description('连接我自己的浏览器 / Attach to my own browser'),
+  progressOverlayEnabled: z.boolean().default(true).description('思考与操作浮窗 / Progress overlay'),
+  progressOverlayMode: z.union([z.const('source'),z.const('summary')]).default('source').description('浮窗内容：原文或 AI 总结 / Overlay content: source or AI summary'),
+  progressOverlayOpacity: z.number().min(20).max(100).default(60).description('浮窗不透明度（%） / Overlay opacity (%)'),
+  progressOverlayWidth: z.number().min(240).max(1600).default(360).description('浮窗宽度 / Overlay width'),
+  progressOverlayHeight: z.number().min(160).max(1600).default(240).description('浮窗高度 / Overlay height'),
+  progressOverlayPosition: z.union(['top-right','top-left','bottom-right','bottom-left','custom'].map(value=>z.const(value))).default('top-right').description('浮窗位置 / Overlay position'),
+  progressOverlayX: z.number().min(-32768).max(32767).default(80).description('浮窗 X / Overlay X'),
+  progressOverlayY: z.number().min(-32768).max(32767).default(80).description('浮窗 Y / Overlay Y'),
+  progressOverlayLocked: z.boolean().default(true).description('锁定浮窗并穿透鼠标 / Lock overlay and pass through input'),
+  progressLockShortcut: z.string().pattern(STOP_SHORTCUT_PATTERN).default('').description('浮窗锁定快捷键 / Overlay lock shortcut'),
+  progressPreviewToken: z.number().min(0).default(0),
   mode: z.union([z.const('lite'),z.const('full')]).default('full').description('旧版工具模式 / Legacy tool mode'),
   toolPreset: z.union(['auto','full','lite','lazy','custom'].map(value=>z.const(value))).default('auto').description('工具加载方案 / Tool preset'),
   enabledTools: z.array(z.union(TOOL_NAMES.map(name=>z.const(name)))).max(TOOL_NAMES.length).default([...TOOL_NAMES]).description('启用的工具 / Enabled tools'),
@@ -57,6 +69,7 @@ Object.defineProperty(Config,'~standard',{value:{...validation,validate(input){
     if(repair.repaired.length){const retry=validation.validate(repair.value);if(!retry.issues){result=retry;repaired=repair.repaired;}}
   }
   if(!result.issues){
+    try { normalizeSettings(result.value); } catch(error) { return {issues:[{message:error.message}]}; }
     for(const key of Object.keys(fields)){
       if(typeof result.value[key]?.get!=='function')result.value[key]=createLiveReference(result.value[key]);
     }
@@ -73,9 +86,10 @@ export function bridgeConfig(config = {}, runtime = {}) {
   return {
     serverName: 'wincu', transport: 'stdio', command: process.execPath,
     args: [fileURLToPath(new URL('./server.mjs', import.meta.url))],
-    env: { ELECTRON_RUN_AS_NODE: '1', WCU_BROWSER_HEADLESS: settings.browserVisible?'0':'1', WCU_BROWSER_APP: settings.browserApp, WCU_BROWSER_SIGNIN: settings.browserSignIn?'1':'0', WCU_TOOL_MODE: settings.toolPreset==='lazy'?'lazy':settings.mode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(settings),
+    env: { ELECTRON_RUN_AS_NODE: '1', WCU_IMAGE_MODE: 'file', WCU_BROWSER_ATTACH_USER: settings.browserAttachUser?'1':'0', WCU_BROWSER_HEADLESS: settings.browserVisible?'0':'1', WCU_BROWSER_APP: settings.browserApp, WCU_BROWSER_SIGNIN: settings.browserSignIn?'1':'0', WCU_TOOL_MODE: settings.toolPreset==='lazy'?'lazy':settings.mode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(settings),
       ...(runtime.configFile ? { WCU_CONFIG_FILE: runtime.configFile, WCU_STATE_FILE: runtime.stateFile } : {}),
       ...(runtime.activityFile ? {WCU_ACTIVITY_FILE:runtime.activityFile}: {}),
+      ...(runtime.layoutFile ? {WCU_LAYOUT_FILE:runtime.layoutFile}: {}),
       ...(runtime.notices ? {WCU_ADAPTER_NOTICES:JSON.stringify(runtime.notices)}: {}) },
     toolCallTimeoutMs: config.toolCallTimeoutMs ?? 90000,
     failOnStartupError: config.failOnStartupError ?? false
@@ -84,7 +98,7 @@ export function bridgeConfig(config = {}, runtime = {}) {
 export async function apply(ctx, config) {
   const bridge = await import('@deepseek-ai/dsh-mcp-client');
   const root = mkdtempSync(path.join(os.tmpdir(), 'dsh-wcu-control-'));
-  const runtime = { configFile: path.join(root,'settings.json'), stateFile: path.join(root,'state.json'), activityFile:path.join(root,'activity.json') };
+  const runtime = { configFile: path.join(root,'settings.json'), stateFile: path.join(root,'state.json'), activityFile:path.join(root,'activity.json'), layoutFile:path.join(root,'overlay-layout.json') };
   // Reset settings go to the DSH log and, through the server, into the health
   // and tools results the agent reads. Which duplicate's tools DSH keeps is
   // up to the host, so a duplicate entry is reported in the log only.
@@ -95,9 +109,10 @@ export async function apply(ctx, config) {
   }
   liveAdapters.add(self); ctx.effect(() => () => { liveAdapters.delete(self); });
   if (liveAdapters.size > 1) ctx.logger.warn('dsh-computer-use-win: %d entries of this plugin run in one profile, and DSH keeps only one set of mcp__wincu tools. Remove the extra entry from dsh.profile.bundles in the profile package.json or from its cordis.patch.yml.', liveAdapters.size);
-  installActivity(ctx,runtime.activityFile);
   let desired = normalizeSettings(config), runningSelection, connection, stopped = false;
+  installActivity(ctx,runtime.activityFile,{getSettings:()=>desired});
   let updates = Promise.resolve();
+  let saveOverlayPatch, layoutId, layoutSaving = false;
   atomicJson(runtime.configFile, desired);
   ctx.effect(() => () => { stopped = true; });
   const applySettings = next => {
@@ -131,6 +146,16 @@ export async function apply(ctx, config) {
   // with the owner rather than a settings-service injection child.
   ctx.effect(() => {
     const timer = setInterval(()=>{
+      if(saveOverlayPatch&&!layoutSaving)try{
+        const layout=JSON.parse(readFileSync(runtime.layoutFile,'utf8'));
+        if(layout.id!==layoutId){
+          const allowed=['progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressOverlayLocked','progressOverlayEnabled'];
+          if(!layout.patch||Object.keys(layout.patch).some(key=>!allowed.includes(key)))throw Error('Invalid overlay layout patch');
+          normalizeSettings({...desired,...layout.patch});
+          if(layout.base&&Object.entries(layout.base).some(([key,value])=>!allowed.includes(key)||desired[key]!==value)){layoutId=layout.id;}
+          else {layoutSaving=true;Promise.resolve().then(()=>saveOverlayPatch(layout.patch)).then(()=>{layoutId=layout.id;}).catch(error=>ctx.logger.error(error)).finally(()=>{layoutSaving=false;});}
+        }
+      }catch(error){if(error.code!=='ENOENT')ctx.logger.error(error);}
       // Older validators keep plain values rather than volatile references.
       // The Loader still commits the validated raw options for those hosts.
       // The raw entry still holds any value the validator reset; reset it here too.
@@ -141,6 +166,14 @@ export async function apply(ctx, config) {
   });
   ctx.inject(['settings'], settingsContext => {
     if (typeof settingsContext.settings.register !== 'function') {
+      if(typeof settingsContext.settings.update==='function')settingsContext.inject(['configEditor'],owner=>{
+        saveOverlayPatch=patch=>{
+          const entry=owner.configEditor.entries().find(entry=>entry.fiber===ctx.fiber);
+          if(!entry)throw Error('The overlay owner is no longer in the DSH profile.');
+          return owner.settings.update(entry.options.id,patch);
+        };
+        return ()=>{saveOverlayPatch=undefined;};
+      });
       // DSH 0.2 uses volatile Config fields keyed by the profile entry id.
       if (settingsContext.settings.configure) settingsContext.effect(()=>settingsContext.settings.configure({auto:false},ctx.fiber));
       return;
@@ -148,6 +181,7 @@ export async function apply(ctx, config) {
     const scope = settingsContext.settings.register('windows-computer-use', SettingsConfig, {
       base: normalizeSettings(config), applies: 'live', validate: normalizeSettings
     });
+    saveOverlayPatch=patch=>scope.update(patch);
     desired = normalizeSettings(scope.get()); atomicJson(runtime.configFile, desired);
     settingsContext.effect(() => scope.watch(applySettings));
     if (connection) return applySettings(desired);

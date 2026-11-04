@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.4 — 2026-11-04
+
+- 浮窗锁定时右上角的锁形图标变成按钮：光标停在上面约 0.4 秒即临时解锁，可拖标题移动、拖边缘缩放、滚动回看，光标离开浮窗约 1.5 秒后自动锁回，点开锁图标立即锁回；不改锁定设置，移动和缩放照常保存。只认物理鼠标，DSH 自己的输入和它移动的光标不会触发。同时修正连续两次快速拖动或缩放时浮窗被第一次的设置回写拉回原处，以及调整中途任务结束时浮窗在光标下消失。/ The overlay's padlock is now a button: rest your own pointer on it to unlock the overlay for moving and resizing; it locks again when the pointer leaves. A quick second adjustment is no longer pulled back, and an overlay being adjusted no longer disappears.
+- 修复浮窗在真实 DSH 里收不到模型的思考和回复：DSH 0.2 的流式输出是 `agent/assistant-stream` 帧（start 帧给出轮次和步号，chunk 帧带文字），不会产生 `assistant/chunk` 会话事件，而原实现只监听后者，所以浮窗只有状态和“等待 DSH 输出…”，AI 总结也只看得到动作名。现在监听 `agent/assistant-stream`，被放弃的尝试在重试时清掉，旧事件继续兼容。总结的输入加上本轮第一段思考（模型对任务的理解），提示词要求说清在做什么事、不写步骤编号和工具名。/ The overlay now reads DSH's `agent/assistant-stream` frames; before, it never received reasoning or reply text in real DSH. Summaries also see how the model understood the task.
+- 浮窗按真实会话（“打开浏览器搜索晴天并下滑到底”）回放后重做内容：每一步一个“第 N 步 · 动作”小标题，保留整轮历史，不再每步清空成“等待 DSH 输出”；所有工具都有中文动作名，只取工具名和调用结构；任务结束后显示“已完成 · N 步 · 用时”并保留 20 秒，长回复从开头显示；只显示整行，锁定时去掉底部提示行、右上角改为锁形图标；去掉 Markdown 记号和段间空行，文字加阴影。/ The overlay keeps a per-step history with plain-language action names, stays 20 s after the turn with the outcome and the start of the reply, shows whole lines only and drops Markdown marks.
+- “打开浮窗并调整”的预览只在预览期间解锁，结束后恢复原来的锁定状态；以前预览会把“未锁定”写进设置，之后真实任务里的浮窗会挡住它下面的鼠标点击。/ The adjustment preview unlocks only while it lasts instead of saving the unlocked state.
+- AI 总结模式：新的一步不再打断和清空总结，开始约 1.5 秒出第一条，之后最多每 10 秒一次，结束时再总结一次结果；输入改为步骤历史（动作名 + 已显示文字，限 2400 字符）；暂不可用时显示操作步骤。/ Summary mode no longer cancels or clears on each step, adds a final result summary and summarizes the step history.
+
+- 修复透明浮窗连续放大后的边框/关闭按钮残影；正文改为紧凑的原生滚动阅读区，保留上滚阅读位置、在底部跟随输出，去掉“最近”标签。锁定切换保留四角定位。/ Fix resize trails and add a compact scrollable progress reader.
+
+- 浮窗内容可选“直接显示 DSH 输出”或“AI 总结当前操作”。默认原文模式零额外模型调用；总结模式使用当前对话模型，限频、限长、可取消，失败回退原文。/ Default to source output without extra model calls; opt into bounded, cancellable AI summaries.
+
+- #58 / #62：新增受保护的 `batch`，最多 20 步，整批预校验，保留已完成前缀，遇到错误、导航、弹窗、新窗口或取消停止；Chromium 最后统一观察。/ Add guarded action batches.
+- #61：默认关闭的用户浏览器连接，按所选浏览器动态读取端点，列举零握手，显式连接、状态反馈及无自动重试；退出时不关闭用户浏览器。/ Add explicit opt-in user-browser attachment.
+- #63：思考与操作浮窗默认打开且可关闭，支持不透明度、大小、位置、锁定快捷键及设置页预览；菜单和浮窗拖动、缩放、锁定、关闭经宿主设置服务双向同步。/ Add the configurable progress overlay with bidirectional DSH settings.
+
+- #64：DSH 适配器默认按 PNG 文件路径返回截图，完整工具结果不再包含 base64 或 MCP 图片块；覆盖桌面、浏览器、OCR 和 UIA 超时兜底，保留坐标映射。独立 MCP 客户端仍默认使用图片块。新增大图、多轮及文件字节一致性回归测试。/ DSH now receives screenshot file paths without base64 or inline image blocks in the tool result, covering desktop, browser, OCR and UIA-timeout captures while preserving coordinate metadata. Standalone MCP clients retain inline images. Adds large-image, repeated-call and byte-equality regressions.
+
 ## 0.5.3 — 2026-10-28
 
 - #54：编译的辅助 DLL 改为按字节加载，启动错误带阶段和 HRESULT；原生 DLL 缓存按 PowerShell/.NET 运行时区分，并发编译使用独立临时文件。Load compiled helpers from bytes, report startup failures, separate runtime-specific native caches and publish complete cache files atomically.

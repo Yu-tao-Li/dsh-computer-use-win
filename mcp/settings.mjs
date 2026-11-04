@@ -1,5 +1,5 @@
-export const TOOL_NAMES = Object.freeze(['health','snapshot','accessibility_tree','list_windows','find','element_info','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','wait','ocr','screenshot','wait_for','close_window','move_window','launch_app','tools']);
-export const LITE_TOOL_NAMES = Object.freeze(['list_windows','find','click','scroll','type_text','keypress','ocr','screenshot','wait_for','launch_app','tools']);
+export const TOOL_NAMES = Object.freeze(['health','snapshot','accessibility_tree','list_windows','find','element_info','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','wait','ocr','screenshot','wait_for','close_window','move_window','launch_app','batch','tools']);
+export const LITE_TOOL_NAMES = Object.freeze(['list_windows','find','click','scroll','type_text','keypress','ocr','screenshot','wait_for','launch_app','batch','tools']);
 export function normalizeEnabledTools(value) {
   if (!Array.isArray(value) || value.length > TOOL_NAMES.length || value.some(name => typeof name !== 'string' || !TOOL_NAMES.includes(name))) throw new Error('enabledTools must be an array of known tool names');
   const selected=new Set(value);
@@ -13,7 +13,8 @@ export function normalizeEnabledTools(value) {
 export const BROWSER_APPS = Object.freeze(['default', 'edge', 'chrome', 'firefox']);
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  browserFirst: true, browserVisible: true, browserApp: 'default', browserSignIn: false,
+  browserFirst: true, browserVisible: true, browserApp: 'default', browserSignIn: false, browserAttachUser: false, progressOverlayEnabled: true, progressOverlayMode: 'source',
+  progressOverlayOpacity: 60, progressOverlayWidth: 360, progressOverlayHeight: 240, progressOverlayPosition: 'top-right', progressOverlayX: 80, progressOverlayY: 80, progressOverlayLocked: true, progressLockShortcut: '', progressPreviewToken: 0,
   mode: 'full', toolPreset: 'auto', enabledTools: TOOL_NAMES, indicatorEnabled: true, cursorIndicatorEnabled: true, remoteIndicatorVisible: true, indicatorText: 'DSH 正在控制电脑',
   indicatorPosition: 'top', indicatorIdleMs: 800, stopShortcut: '', communityNote: 'full',
   resumeToken: 0, previewToken: 0
@@ -41,7 +42,10 @@ export function normalizeStopShortcut(value) {
 // returned so it can be reported. Values typed on the settings page (shortcut,
 // text, numbers) stay strict, so a mistyped one is still refused when saved.
 const SETTING_CHOICES = { mode: ['lite', 'full'], toolPreset: ['auto', 'full', 'lite', 'lazy', 'custom'], browserApp: BROWSER_APPS, indicatorPosition: ['top', 'bottom'], communityNote: ['full', 'link'] };
-const SETTING_SWITCHES = ['browserFirst', 'browserVisible', 'browserSignIn', 'indicatorEnabled', 'cursorIndicatorEnabled', 'remoteIndicatorVisible'];
+const SETTING_SWITCHES = ['browserFirst', 'browserVisible', 'browserSignIn', 'browserAttachUser', 'progressOverlayEnabled', 'indicatorEnabled', 'cursorIndicatorEnabled', 'remoteIndicatorVisible'];
+SETTING_SWITCHES.push('progressOverlayLocked');
+SETTING_CHOICES.progressOverlayPosition = ['top-right','top-left','bottom-right','bottom-left','custom'];
+SETTING_CHOICES.progressOverlayMode = ['source','summary'];
 export function repairStaleSettings(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return { value: input, repaired: [] };
   const value = { ...input }, repaired = [];
@@ -66,18 +70,26 @@ export function normalizeSettings(input = {}) {
   value.enabledTools=normalizeEnabledTools(value.enabledTools);
   if (!['auto','full','lite','lazy','custom'].includes(value.toolPreset)) throw new Error('toolPreset must be full, lite, lazy or custom');
   if (value.toolPreset==='auto') value.toolPreset=value.enabledTools.length===TOOL_NAMES.length?'full':'custom';
-  for (const key of ['browserFirst', 'browserVisible', 'browserSignIn', 'indicatorEnabled', 'cursorIndicatorEnabled','remoteIndicatorVisible']) {
+  for (const key of SETTING_SWITCHES) {
     if (typeof value[key] !== 'boolean') throw new Error(`${key} must be boolean`);
   }
   if (!BROWSER_APPS.includes(value.browserApp)) throw new Error('browserApp must be default, edge, chrome or firefox');
+  if (value.browserApp === 'firefox') value.browserAttachUser = false;
   if (typeof value.indicatorText !== 'string' || !value.indicatorText.trim() || value.indicatorText.length > 120 || /[\r\n\x00-\x1f]/.test(value.indicatorText)) {
     throw new Error('indicatorText must be one line of 1–120 characters');
   }
   if (!['top', 'bottom'].includes(value.indicatorPosition)) throw new Error('indicatorPosition must be top or bottom');
   if (!Number.isInteger(value.indicatorIdleMs) || value.indicatorIdleMs < 200 || value.indicatorIdleMs > 3000) throw new Error('indicatorIdleMs must be 200–3000');
   value.stopShortcut = normalizeStopShortcut(value.stopShortcut);
+  value.progressLockShortcut = normalizeStopShortcut(value.progressLockShortcut);
+  if (value.progressLockShortcut && value.progressLockShortcut === value.stopShortcut) throw new Error('progressLockShortcut must differ from the stop shortcut');
+  for (const [key,min,max] of [['progressOverlayOpacity',20,100],['progressOverlayWidth',240,1600],['progressOverlayHeight',160,1600],['progressOverlayX',-32768,32767],['progressOverlayY',-32768,32767]]) {
+    if (!Number.isInteger(value[key]) || value[key] < min || value[key] > max) throw new Error(`${key} must be an integer between ${min} and ${max}`);
+  }
+  if (!SETTING_CHOICES.progressOverlayPosition.includes(value.progressOverlayPosition)) throw new Error('Invalid progressOverlayPosition');
+  if (!SETTING_CHOICES.progressOverlayMode.includes(value.progressOverlayMode)) throw new Error('Invalid progressOverlayMode');
   if (!['full', 'link'].includes(value.communityNote)) throw new Error('communityNote must be full or link');
-  for (const key of ['resumeToken', 'previewToken']) {
+  for (const key of ['resumeToken', 'previewToken', 'progressPreviewToken']) {
     if (!Number.isSafeInteger(value[key]) || value[key] < 0) throw new Error(`${key} must be a nonnegative integer`);
   }
   return Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map(key => [key, value[key]]));
@@ -91,13 +103,13 @@ export function enabledToolsForSettings(input = {}) {
 // Both permission and startup state matter when deciding whether to reconnect.
 export function toolSelectionKey(input = {}) {
   const settings=normalizeSettings(input);
-  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn});
+  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser});
 }
 
 export function browserRoutingInstructions(settings = {}, allowed = enabledToolsForSettings(settings)) {
-  const { browserFirst, browserVisible, browserSignIn, browserApp } = normalizeSettings(settings);
+  const { browserFirst, browserVisible, browserSignIn, browserApp, browserAttachUser } = normalizeSettings(settings);
   if (browserApp === 'firefox') return 'Experimental Firefox-family browser lane: the Firefox it starts runs headless, with no window; a configured WCU_BROWSER_BIDI_URL may connect a separately started browser. There is one controlling session per endpoint and no cross-MCP sharing. Use list_windows for current tab IDs and set_value elementId "new-tab" to open a URL when those tools are enabled. The outline uses DOM heuristics, not an accessibility tree. Page IDs route through WebDriver BiDi. Read the resulting page to verify each action. Automatic visible sign-in and the blue-frame status indicator are unavailable; never ask the user to turn on automatic visible launch for this backend, and never enter passwords or codes. Use an authenticated endpoint only when authorized. Honor enabled-tool restrictions and user stop/cancellation. Do not replay uncertain actions; observe first. Headless pages have no desktop window, so do not fall back to an unrelated user window. Before sending, posting, buying, deleting or changing account settings, ask the user unless they asked for exactly that step.';
-  return (browserFirst
+  return (browserAttachUser ? 'User-browser attachment is enabled. list_windows only lists the selected browser, never connects. Before explicitly connecting through set_value elementId "<browser id>:connect" value "connect", ask the user to click Allow in their browser. Do not automatically retry a refusal or timeout. Only operate tabs the user mentioned or DSH opened. Before sending, posting, buying, deleting or changing account settings, ask the user unless they asked for exactly that step. ' : '') + (browserFirst
     ? 'Browser-first policy: for web-page tasks, use the browser lane whenever it can handle the requested step; Computer Use is the fallback. '
     : 'Choose the browser lane or desktop tools according to the user\'s request. ') +
     (allowed.includes('list_windows') ? 'Start with list_windows to identify the intended browser/tab. ' : 'Window discovery is disabled in this selection; do not invent browser/tab IDs. ') +

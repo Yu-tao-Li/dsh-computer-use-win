@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { TakeoverControl, STOPPED } from './takeover.mjs';
@@ -61,6 +63,7 @@ const wikiResources = [
     file: path.join(pluginRoot, "docs", "wiki", "safety.md")
   }
 ];
+
 
 const windowTargetProperties = {
   windowTitle: {
@@ -513,9 +516,20 @@ const tools = [
   }
 ];
 
+const batchActions = ['click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','wait'];
+tools.push({ name: 'windows_computer_use_batch', description: 'Run 1–20 already-planned actions on one explicit window or browserTab, in order, then observe once. Each action retains its normal validation, enabled-tool checks, stop and input guards. Stops on error, uncertain dispatch, navigation, a dialog or new window. Do not batch a decision that depends on unseen output. Never send scripts; steps are action names and their usual arguments.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['steps'], properties: {
+    ...windowTargetProperties, ...browserTabProperty,
+    timeoutMs: { type: 'integer', minimum: 100, maximum: 60000, default: 30000 },
+    steps: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', additionalProperties: false, required: ['action','arguments'], properties: {
+      action: { type: 'string', enum: batchActions }, arguments: { type: 'object', additionalProperties: true }
+    } } }
+  } } });
+
 // Keep execution/validation schemas intact; only the model-facing prose is
 // shortened. The discovery tool returns the original definition on demand.
 const conciseDescriptions = {
+  batch: 'Execute up to 20 planned actions on one explicit target; stop on error/navigation/dialog/new window, then observe once. Each step respects disabled tools and stop guards.',
   launch_app: 'Launch an executable, shortcut or installed app through the desktop Shell; survives tool/server exit. Verify the intended window afterward; apps may activate themselves. No arguments for command interpreters or script hosts.',
   health: 'Check Windows backend availability.',
   snapshot: 'Screenshot and UIA tree. Partial trees report truncation; use OCR for sparse UIA. browserTab: page outline and viewport.',
@@ -570,7 +584,7 @@ const toolMode = process.env.WCU_TOOL_MODE || 'full';
 if (!['lite', 'full', 'lazy'].includes(toolMode)) throw new Error('WCU_TOOL_MODE must be lite, full or lazy');
 const prefix = 'windows_computer_use_';
 const discoveryName = prefix + 'tools';
-const liteNames = ['list_windows', 'find', 'click', 'scroll', 'type_text', 'keypress', 'ocr', 'screenshot', 'wait_for', 'launch_app'];
+const liteNames = ['list_windows', 'find', 'click', 'scroll', 'type_text', 'keypress', 'ocr', 'screenshot', 'wait_for', 'launch_app', 'batch'];
 if (JSON.stringify([...TOOL_NAMES].sort()) !== JSON.stringify([...tools.map(tool=>tool.name.slice(prefix.length)),'tools'].sort())) throw new Error('Tool settings catalogue does not match the MCP tool definitions');
 const configuredSelection = process.env.WCU_ENABLED_TOOLS === undefined ? null : normalizeEnabledTools(JSON.parse(process.env.WCU_ENABLED_TOOLS));
 const selectionMode = toolMode === 'lazy' ? 'lazy' : configuredSelection === null ? toolMode : configuredSelection.length === TOOL_NAMES.length ? 'full' : 'custom';
@@ -656,6 +670,7 @@ function validateArguments(schema, value, location = "arguments") {
   const fail = message => { throw new Error(`INVALID_ARGUMENTS: ${location} ${message}`); };
   if (schema.type === "object") {
     if (!value || typeof value !== "object" || Array.isArray(value)) fail("must be an object");
+    if (schema.additionalProperties === true && !schema.properties) return structuredClone(value);
     for (const key of Object.keys(value)) if (!Object.hasOwn(schema.properties, key)) fail(`has unknown property '${key}'`);
     for (const key of schema.required || []) if (!Object.hasOwn(value, key)) fail(`requires '${key}'`);
     const normalized = {};
@@ -678,13 +693,33 @@ function validateArguments(schema, value, location = "arguments") {
   return value;
 }
 
-function stripImagePayload(result) {
-  if (!result || typeof result !== "object") return result;
-  const clone = structuredClone(result);
-  if (clone.screenshot?.base64) {
-    clone.screenshot.base64 = `<${clone.screenshot.base64.length} base64 chars omitted>`;
+// DSH hosts can retain/serialize raw MCP image blocks even when their text
+// preview says "content discarded". Its adapter requests file mode so no
+// binary payload reaches the tool result. Standalone MCP keeps inline images.
+async function screenshotOutput(screenshot, includeImage = true) {
+  if (!screenshot?.base64) return { metadata: screenshot, content: [] };
+  const { base64, ...metadata } = screenshot;
+  if (process.env.WCU_IMAGE_MODE === 'file') {
+    if (includeImage && !metadata.path) {
+      // Desktop capture already saves a PNG. Browser captures need a file too.
+      const directory = path.join(os.tmpdir(), 'dsh-wcu-browser-screenshots');
+      await mkdir(directory, { recursive: true });
+      // Same 30-minute retention as desktop screenshots. Only owned UUID PNGs
+      // in this directory qualify; unrelated files and links are left alone.
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (!entry.isFile() || !/^[a-f0-9-]{36}\.png$/.test(entry.name)) continue;
+        const file = path.join(directory, entry.name);
+        try { if (Date.now() - (await stat(file)).mtimeMs > 30 * 60 * 1000) await unlink(file); } catch {}
+      }
+      const bytes = Buffer.from(base64, 'base64');
+      metadata.path = path.join(directory, randomUUID() + '.png');
+      await writeFile(metadata.path, bytes, { flag: 'wx' });
+      metadata.bytes = bytes.length;
+    }
+    return { metadata: { ...metadata, delivery: 'file', readHint: 'Use an image-viewing tool to inspect path; to send it over IM, attach that file with the IM tool. Do not read the PNG as text or base64.' }, content: [] };
   }
-  return clone;
+  return { metadata: { ...metadata, base64: `<${base64.length} base64 chars omitted>` },
+    content: includeImage ? [{ type: 'image', data: base64, mimeType: screenshot.mimeType || 'image/png' }] : [] };
 }
 
 // ----------------------------------------------------------------------------
@@ -724,9 +759,10 @@ async function runBrowser(action, args, request) {
     const result = await browserLane.run(action, args, request);
     const content = [{ type: "text", text: "" }];
     if (result.text) content.push({ type: "text", text: result.text });
-    if (result.screenshot?.base64) {
-      content.push({ type: "image", data: result.screenshot.base64, mimeType: result.screenshot.mimeType });
-      result.meta.screenshot = { ...result.screenshot, base64: `<${result.screenshot.base64.length} base64 chars omitted>` };
+    if (result.screenshot) {
+      const image = await screenshotOutput(result.screenshot);
+      content.push(...image.content);
+      result.meta.screenshot = image.metadata;
     }
     content[0].text = safeJson(result.meta);
     return { content, ...(result.meta.ok === false ? { isError: true } : {}) };
@@ -939,13 +975,7 @@ function dispatchBackend(action, args = {}, timeoutMs = 30000, request) {
   });
 }
 
-async function callTool(name, args, request) {
-  if (!allowedTools.has(name) && TOOL_NAMES.includes(name.slice(prefix.length))) throw new Error('TOOL_DISABLED_IN_SETTINGS: This tool is disabled by the user in Settings > Computer Use (设置 > 电脑操控 in the Chinese interface).');
-  if (name === discoveryName) return manageTools(args);
-  const definition = tools.find(tool => tool.name === name);
-  if (!definition) throw new Error(`Unknown tool: ${name}`);
-  args = validateArguments(definition.inputSchema, args);
-  const actionName = name.replace("windows_computer_use_", "");
+function validateActionArguments(actionName, args) {
   const browser = isBrowserCall(args);
   // A browser tab alone names the page, which is what scroll needs.
   if (["click", "double_click", "move", "scroll", "element_info"].includes(actionName) && !args.elementId && (args.x === undefined || args.y === undefined) && !(browser && actionName === "scroll")) throw new Error("INVALID_ARGUMENTS: provide elementId or both x and y");
@@ -954,6 +984,19 @@ async function callTool(name, args, request) {
     if (args.condition !== "window" && !args.query?.trim()) throw new Error("INVALID_ARGUMENTS: text/element wait requires query");
   }
   if (actionName === "keypress" && args.keys.filter(key => !/^(ctrl|control|alt|option|shift)$/i.test(key)).length !== 1) throw new Error("INVALID_ARGUMENTS: keypress needs exactly one non-modifier key");
+}
+
+async function callTool(name, args, request) {
+  if (batchOwner && batchOwner !== request) throw new Error('COMPUTER_USE_BUSY: A batch is in progress; wait for its result.');
+  if (!allowedTools.has(name) && TOOL_NAMES.includes(name.slice(prefix.length))) throw new Error('TOOL_DISABLED_IN_SETTINGS: This tool is disabled by the user in Settings > Computer Use (设置 > 电脑操控 in the Chinese interface).');
+  if (name === discoveryName) return manageTools(args);
+  const definition = tools.find(tool => tool.name === name);
+  if (!definition) throw new Error(`Unknown tool: ${name}`);
+  args = validateArguments(definition.inputSchema, args);
+  if (name === 'windows_computer_use_batch') return runBatch(args, request);
+  const actionName = name.replace("windows_computer_use_", "");
+  const browser = isBrowserCall(args);
+  validateActionArguments(actionName, args);
   if (browser) return runBrowser(actionName === "accessibility_tree" ? "tree" : actionName, args, request);
   switch (name) {
     case "windows_computer_use_launch_app":
@@ -966,11 +1009,7 @@ async function callTool(name, args, request) {
     }
     case "windows_computer_use_snapshot": {
       const result = await observeBackend("snapshot", args, request);
-      const content = [{ type: "text", text: safeJson(stripImagePayload(result)) }];
-      if ((args?.includeScreenshot ?? true) && result.screenshot?.base64) {
-        content.push({ type: "image", data: result.screenshot.base64, mimeType: "image/png" });
-      }
-      return { content, ...(result.ok === false ? { isError: true } : {}) };
+      return imageResult(result, args.includeScreenshot ?? true);
     }
     case "windows_computer_use_accessibility_tree":
       return observationText("tree", args, request);
@@ -1022,9 +1061,10 @@ async function callTool(name, args, request) {
   }
 }
 
-function imageResult(result) {
-  const content = [{ type: "text", text: safeJson(stripImagePayload(result)) }];
-  if (result.screenshot?.base64) content.push({ type: "image", data: result.screenshot.base64, mimeType: "image/png" });
+async function imageResult(result, includeImage = true) {
+  const image = await screenshotOutput(result.screenshot, includeImage);
+  const metadata = result.screenshot ? { ...result, screenshot: image.metadata } : result;
+  const content = [{ type: "text", text: safeJson(metadata) }, ...image.content];
   return { content, ...(result.ok === false ? { isError: true } : {}) };
 }
 
@@ -1075,6 +1115,93 @@ async function observationText(action, args, request) {
   return imageResult(await observeBackend(action, args, request));
 }
 
+let batchOwner = null;
+const textData = result => { try { return JSON.parse(result.content?.find(part => part.type === 'text')?.text); } catch { return null; } };
+async function runBatch(args, request) {
+  if (batchOwner) throw new Error('COMPUTER_USE_BUSY: Another batch is running.');
+  const target = Object.fromEntries(['browserTab','windowTitle','processId','nativeWindowHandle','activate'].filter(key => args[key] !== undefined).map(key => [key,args[key]]));
+  if (!target.browserTab && !target.windowTitle && !target.processId && !target.nativeWindowHandle) throw new Error('INVALID_ARGUMENTS: batch needs one explicit window target or browserTab.');
+  if (target.browserTab && ['windowTitle','processId','nativeWindowHandle'].some(key => target[key] !== undefined)) throw new Error('INVALID_ARGUMENTS: do not mix desktop and page targets.');
+  // Validate the entire plan before its first read or action. A batch never
+  // grants permission to an action disabled in settings.
+  const plan = args.steps.map((step,index) => {
+    const name = prefix + step.action;
+    if (!allowedTools.has(name)) throw new Error(`TOOL_DISABLED_IN_SETTINGS: batch step ${index + 1} (${step.action}).`);
+    for (const key of ['browserTab','windowTitle','processId','nativeWindowHandle']) if (step.arguments[key] !== undefined && step.arguments[key] !== target[key]) throw new Error('INVALID_ARGUMENTS: all batch steps must keep the same target.');
+    if (/^(?:new-tab|b[0-9a-z]+:(?:new-tab|connect))$/.test(step.arguments.elementId ?? '')) throw new Error('INVALID_ARGUMENTS: open or connect a browser before batching.');
+    if (target.browserTab && step.arguments.elementId && !step.arguments.elementId.startsWith(target.browserTab + ':')) throw new Error('INVALID_ARGUMENTS: batch element belongs to another tab.');
+    if (!target.browserTab && isBrowserCall(step.arguments)) throw new Error('INVALID_ARGUMENTS: a desktop batch cannot contain page elements.');
+    const definition = tools.find(tool => tool.name === name);
+    // wait has no target properties, and never borrows the foreground.
+    const inherited = Object.fromEntries(Object.entries(target).filter(([key]) => Object.hasOwn(definition.inputSchema.properties,key)));
+    const combined = step.action === 'wait' ? { ...step.arguments } : { ...inherited, ...step.arguments };
+    if (target.browserTab && !Object.hasOwn(definition.inputSchema.properties,'browserTab')) delete combined.browserTab;
+    if (target.browserTab && step.action !== 'wait' && !isBrowserCall(combined)) throw new Error('INVALID_ARGUMENTS: this browser batch action needs a page element ID; page coordinates cannot become desktop input.');
+    const validated = validateArguments(definition.inputSchema, combined);
+    validateActionArguments(step.action, validated);
+    return { name, action: step.action, args: validated };
+  });
+  const steps = [], content = [], deadline = Date.now() + args.timeoutMs;
+  let stopReason = 'completed', message, before, nativeHandle, nativePid, lease = false;
+  batchOwner = request; request.batchSuppressObservation = true;
+  const state = async () => {
+    if (target.browserTab) return browserLane.batchState(target, request);
+    const listed = await runBackend('list_windows', { maxWindows: 200 }, 10000, request);
+    const windows = listed.windows ?? [];
+    const matches = windows.filter(window => nativeHandle ? String(window.nativeWindowHandle) === nativeHandle : target.nativeWindowHandle ? String(window.nativeWindowHandle) === String(target.nativeWindowHandle) : target.processId ? window.processId === target.processId : String(window.name ?? window.title ?? '').toLowerCase().includes(target.windowTitle.toLowerCase()));
+    if (matches.length !== 1) throw new Error('BATCH_TARGET_UNAVAILABLE: target is missing or ambiguous; specify its nativeWindowHandle.');
+    const found = matches[0]; nativeHandle ??= String(found.nativeWindowHandle); nativePid ??= found.processId;
+    if (found.processId !== nativePid) throw new Error('BATCH_TARGET_CHANGED: target process changed.');
+    return { title: found.name ?? found.title, windows: windows.map(window => String(window.nativeWindowHandle)).sort(), dialog: windows.some(window => window.className === '#32770' && window.processId === nativePid) };
+  };
+  try {
+    await takeover.begin({ quiet: true }); lease = true;
+    before = await state();
+    if (before.dialog) stopReason = 'dialog';
+    for (const [index,step] of plan.entries()) {
+      if (stopReason !== 'completed') break;
+      if (request.cancelled || takeover.paused) { stopReason = 'cancelled'; break; }
+      if (Date.now() >= deadline) { stopReason = 'deadline'; break; }
+      // Native actions stay pinned to the originally resolved HWND.
+      if (!target.browserTab && step.action !== 'wait') step.args.nativeWindowHandle = Number(nativeHandle);
+      let result;
+      try { result = await callTool(step.name, step.args, request); }
+      catch (error) { steps.push({ index: index + 1, action: step.action, ok: false, error: error.message }); stopReason = request.cancelled ? 'cancelled' : 'error'; break; }
+      const data = textData(result);
+      const summary = { index: index + 1, action: step.action, ok: result.isError !== true, verification: data?.verification ?? 'sent' };
+      for (const key of ['dialog','openedTabs','fileChooser','stillLoading','tabClosed','warning']) if (data?.[key] !== undefined) summary[key] = data[key];
+      if (result.isError) { summary.error = result.content?.[0]?.text; stopReason = 'error'; }
+      steps.push(summary);
+      if (result.isError) break;
+      if (request.cancelled || takeover.paused) { stopReason = 'cancelled'; break; }
+      if (data?.verification === 'unconfirmed' || data?.verified === false) { stopReason = 'unconfirmed'; break; }
+      if (data?.dialog || data?.fileChooser) { stopReason = 'dialog'; break; }
+      if (data?.openedTabs?.length) { stopReason = 'newWindow'; break; }
+      if (data?.tabClosed) { stopReason = 'targetClosed'; break; }
+      const after = await state();
+      if (after.dialog) stopReason = 'dialog';
+      else if (after.windows.some(id => !before.windows.includes(id))) stopReason = 'newWindow';
+      else if (after.url !== before.url || after.document !== before.document || after.load !== before.load || after.title !== before.title || data?.stillLoading) stopReason = 'navigation';
+      before = after;
+    }
+  } catch (error) { stopReason = request.cancelled ? 'cancelled' : 'error'; message = error.message; }
+  finally { request.batchSuppressObservation = false; }
+  try {
+    if (before && !request.cancelled && !takeover.paused) {
+      const observer = allowedTools.has(prefix + 'accessibility_tree') ? 'accessibility_tree' : allowedTools.has(prefix + 'screenshot') ? 'screenshot' : null;
+      if (observer) {
+        try {
+          const final = await callTool(prefix + observer, target.browserTab ? { browserTab: target.browserTab } : { ...target, nativeWindowHandle: Number(nativeHandle), activate: false }, request);
+          content.push({ type: 'text', text: 'Final observation:' }, ...final.content);
+        } catch (error) { content.push({ type: 'text', text: 'Final observation unavailable: ' + error.message }); }
+      }
+    }
+    const result = { content: [{ type: 'text', text: safeJson({ ok: stopReason === 'completed', action: 'batch', planned: plan.length, completed: steps.filter(step => step.ok).length, stopReason, steps, ...(message ? { message } : {}) }) }, ...content], ...(stopReason !== 'completed' ? { isError: true } : {}) };
+    request.batchResult = true;
+    return result;
+  } finally { try { if (lease) await takeover.end({ quiet: true }); } finally { batchOwner = null; } }
+}
+
 const inputActions = new Set(["click", "double_click", "move", "drag", "scroll", "type_text", "keypress", "focus", "invoke", "set_value", "activate_window", "close_window", "move_window"]);
 async function backendText(action, args, timeoutMs, request) {
   const result = await runBackend(action, args, timeoutMs, request);
@@ -1082,7 +1209,7 @@ async function backendText(action, args, timeoutMs, request) {
     result.verification = result.moved === false || result.posted === false || result.activated === false ? "unconfirmed" : "sent";
     result.verificationNote = result.verification === "sent" ? "The action was dispatched. Use wait_for or a fresh observation to verify the expected effect." : "Windows did not confirm dispatch. Inspect the warning and observe the target before retrying.";
   }
-  return { content: [{ type: "text", text: safeJson(stripImagePayload(result)) }] };
+  return imageResult(result, false);
 }
 
 async function handleRequest(message) {
@@ -1123,7 +1250,7 @@ async function handleRequest(message) {
     pendingToolCalls.set(id, request);
     try {
       const result = await callTool(params?.name, params?.arguments === undefined ? {} : params.arguments, request);
-      if (request.cancelled) return { jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: request.takeoverError || "COMPUTER_USE_CANCELLED_AFTER_CURRENT_ACTION" }] } };
+      if (request.cancelled && !request.batchResult) return { jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: request.takeoverError || "COMPUTER_USE_CANCELLED_AFTER_CURRENT_ACTION" }] } };
       return { jsonrpc: "2.0", id, result };
     } catch (error) {
       return {
