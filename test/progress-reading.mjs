@@ -75,9 +75,13 @@ try{
  assert.equal(fixed.strayHeaderPixels,0,'Continuous enlargement must leave no old borders or close buttons');
  for(let i=0;i<40;i++)await layout(i%2?440:820,i%2?320:620);
  assert.equal((await capture('resize-after-40-changes.png',true)).strayHeaderPixels,0);
+ // Windows caps a window at its maximum tracking size, about the size of the
+ // screen, so on a small screen (CI runners have 1024x768) the 1600 case comes
+ // back narrower and shorter than asked.
  for(const [width,height] of [[240,160],[1600,1600],[440,320]]){
    status=await layout(width,height);
-   assert.equal(status.progressBounds.width,width);
+   if(width<=1000)assert.equal(status.progressBounds.width,width);
+   else assert.ok(status.progressBounds.width>=1000&&status.progressBounds.width<=width,'Respect Windows maximum tracking width');
    assert.ok(status.progressBounds.height>=160&&status.progressBounds.height<=height,'Respect Windows maximum tracking height');
    assert.ok(status.progressReading.viewport.width>0&&status.progressReading.viewport.height>0);
    assert.ok(status.progressReading.viewport.y+status.progressReading.viewport.height<=status.progressBounds.height-24);
