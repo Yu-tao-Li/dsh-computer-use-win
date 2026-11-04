@@ -4,7 +4,7 @@ window.__ModuleLoader__.load({
   factory: (require) => {
     const React = require('react'), h = React.createElement;
     const NS = 'windowsComputerUse.settings';
-    const allToolNames='health snapshot accessibility_tree list_windows find element_info click double_click move drag scroll type_text keypress focus invoke set_value activate_window wait ocr screenshot wait_for close_window move_window launch_app tools'.split(' ');
+    const allToolNames='health snapshot accessibility_tree list_windows find element_info click double_click move drag scroll type_text keypress focus invoke set_value activate_window wait ocr screenshot wait_for close_window move_window launch_app batch tools'.split(' ');
     const toolGroups=[
       ['observe',[
         ['health','检查连接','Check connection','检查桌面工具是否可用','Check desktop tool availability'],
@@ -35,14 +35,16 @@ window.__ModuleLoader__.load({
         ['set_value','设置控件内容','Set a control value','直接填写可编辑控件','Fill an editable control directly']
       ]],
       ['other',[
+        ['batch','批量动作','Batch actions','依次执行已规划动作，异常时停止','Run planned actions in order and stop on changes'],
         ['wait','等待片刻','Wait briefly','等待指定时间后继续','Pause before continuing'],
         ['wait_for','等待目标出现','Wait for a target','等待窗口、控件或文字出现','Wait for a window, control or text'],
         ['tools','工具说明与管理','Tool reference and management','查看说明并管理已获准的工具','Describe and manage user-allowed tools']
       ]]
     ];
-    const liteToolNames='list_windows find click scroll type_text keypress ocr screenshot wait_for launch_app tools'.split(' ');
-    const defaults = {browserFirst:true,browserVisible:true,browserApp:'default',browserSignIn:false,toolPreset:'full',enabledTools:allToolNames,indicatorEnabled:true,cursorIndicatorEnabled:true,remoteIndicatorVisible:true,indicatorText:'DSH 正在控制电脑',indicatorPosition:'top',indicatorIdleMs:800,stopShortcut:''};
+    const liteToolNames='list_windows find click scroll type_text keypress ocr screenshot wait_for launch_app batch tools'.split(' ');
+    const defaults = {browserFirst:true,browserVisible:true,browserApp:'default',browserSignIn:false,browserAttachUser:false,progressOverlayEnabled:true,progressOverlayOpacity:60,progressOverlayWidth:360,progressOverlayHeight:240,progressOverlayPosition:'top-right',progressOverlayX:80,progressOverlayY:80,progressOverlayLocked:true,progressLockShortcut:'',toolPreset:'full',enabledTools:allToolNames,indicatorEnabled:true,cursorIndicatorEnabled:true,remoteIndicatorVisible:true,indicatorText:'DSH 正在控制电脑',indicatorPosition:'top',indicatorIdleMs:800,stopShortcut:''};
     const equal=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
+    defaults.progressOverlayMode='source';
     const dictionaries = {
       zh: {nav:'电脑操控',title:'Windows 桌面操作',intro:'查看接管提示，使用 Esc 停止桌面操作。',mode:'工具模式',lite:'精简模式',full:'全能模式',modeHint:'精简模式保留常用工具，其余按需加载。切换模式会在当前动作结束后重载工具。',indicator:'显示接管提示',indicatorHint:'显示屏幕边缘光晕和提示条；关闭后仍可按 Esc 停止。',text:'提示文字',position:'提示位置',top:'屏幕顶部',bottom:'屏幕底部',delay:'操作结束后隐藏延时（毫秒）',delayHint:'连续动作共用提示，避免每次点击都闪烁。范围 200–3000 毫秒。',corner:'用鼠标停止操作',cornerHint:'鼠标停在屏幕左上角约 500 毫秒可拒绝后续输入；普通鼠标移动不会停止。',stop:'停止与恢复',stopHint:'用户按 Esc 后保持暂停。普通鼠标和其他按键不触发停止，程序发送的 Esc 也不触发停止。恢复前请确认 agent 的任务仍符合你的意图。',resume:'恢复桌面控制',resumed:'已请求恢复桌面控制',preview:'预览接管提示',previewed:'已请求预览；如果之前按 Esc 暂停，请先恢复控制。',save:'保存',discard:'取消修改',saved:'已保存',failed:'保存失败',unavailable:'当前宿主未提供可写设置，请在本机 DSH 中打开此页面。',invalid:'请填写 1–120 字的单行提示文字，并将隐藏延时设为 200–3000 的整数。',persistFailed:'宿主未确认设置已保存，请刷新后重试。'},
       en: {nav:'Computer Use',title:'Windows computer use',intro:'See when the agent controls your desktop. Press Esc to stop.',mode:'Tool mode',lite:'Lite',full:'Full',modeHint:'Lite keeps common tools and loads others on demand. A mode change reloads tools after the current action finishes.',indicator:'Show takeover indicator',indicatorHint:'Show the screen-edge glow and banner. Esc remains available when the indicator is off.',text:'Banner text',position:'Banner position',top:'Top of screen',bottom:'Bottom of screen',delay:'Hide delay after an action (ms)',delayHint:'Keep the indicator between consecutive actions. Range: 200–3000 ms.',corner:'Keep the mouse-corner failsafe',cornerHint:'Parking the pointer in the top-left corner for about 500 ms can refuse further input. Ordinary mouse movement does not stop control.',stop:'Stop and resume',stopHint:'Physical Esc keeps desktop input paused. Other mouse/keyboard input and agent-generated Esc do not stop control. Check the task before resuming.',resume:'Resume desktop control',resumed:'Desktop control resume requested',preview:'Preview takeover indicator',previewed:'Preview requested; resume first if you previously stopped with Esc.',save:'Save',discard:'Discard changes',saved:'Saved',failed:'Save failed',unavailable:'Writable settings are unavailable. Open this page in your local DSH host.',invalid:'Use 1–120 characters on one line and an integer hide delay between 200 and 3000.',persistFailed:'The host did not confirm the saved settings. Refresh and retry.'}
@@ -232,10 +234,30 @@ window.__ModuleLoader__.load({
     Object.assign(dictionaries.en,{pluginDescription:'Let the agent use Windows apps, with control indicators, stop shortcuts and tool selection.',openSettings:'Click to configure →',notLoaded:'Computer Use settings could not be read. The host has not exposed this configuration. Refresh or restart DSH.',loadingSettings:'Loading Computer Use settings…',reloadSettings:'Refresh page',delayHint:'Hide the indicator after the complete operation series ends. Range: 200–3000 ms.'});
     Object.assign(dictionaries.zh,{stop:'停止操作',stopHint:'Esc 只停止当前这一轮操作。下次发起任务或说“继续”即可再次使用，无需到设置恢复。普通鼠标移动和其他按键不会停止。',previewed:'已请求预览',indicatorHint:'操作和短暂思考期间持续显示；最后一次桌面操作完成后，空闲 30 秒自动收起。'});
     Object.assign(dictionaries.en,{stop:'Stop control',stopHint:'Esc stops this operation series. A new task or a request to continue can use the desktop automatically, with no settings change. Ordinary pointer movement and other keys do not stop control.',previewed:'Preview requested',indicatorHint:'Stay visible through actions and short reasoning gaps; hide after 30 seconds without another desktop action.'});
+    Object.assign(dictionaries.zh,{
+      browserAttachUser:'连接我自己的浏览器（实验性）',browserAttachUserHint:'默认关闭。列窗口时只显示连接入口；明确请求后才连接所选浏览器，每次都需要你在浏览器里点允许。Firefox 系不支持。',myBrowser:'我的浏览器',
+      attachSetup:'连接前先设置',attachStep1:'在 chrome://inspect/#remote-debugging 或 edge://inspect/#remote-debugging 勾选“允许远程调试此浏览器实例”。',
+      attachStep2:'DSH 请求连接时，在浏览器里点“允许”。连接期间顶部会显示受自动测试软件控制的提示条。超时或拒绝不会自动重试；重试前请关闭旧提示。',
+      attachRisks:'连接范围与风险',attachRisk1:'DSH 可以用你的身份访问这个浏览器中所有已登录的网站。发送、购买、删除或修改账户设置前会被要求先询问你。',
+      attachRisk2:'网页上的文字可能诱导 agent；开启调试后，本机其他程序也可以请求控制，浏览器同样会询问。',
+      progressOverlay:'显示思考与操作浮窗',progressOverlayHint:'在桌面操作开始后，显示当前步骤、工具和模型已输出的思考、回复。半透明，不抢焦点，鼠标可穿透；这一轮结束后收起。模型没有提供思考文字时只显示状态。'
+    });
+    Object.assign(dictionaries.en,{
+      browserAttachUser:'Attach to my own browser (experimental)',browserAttachUserHint:'Off by default. Listing only offers a connect handle; an explicit request connects the selected browser and needs Allow every time. Unavailable for Firefox family.',myBrowser:'My browser',
+      attachSetup:'Set up before connecting',attachStep1:'Enable “Allow remote debugging for this browser instance” in chrome://inspect/#remote-debugging or edge://inspect/#remote-debugging.',
+      attachStep2:'Click Allow in the browser when DSH requests a connection. The automated-software banner stays visible while connected. Refusals and timeouts never retry automatically; dismiss old prompts before retrying.',
+      attachRisks:'Access and risks',attachRisk1:'DSH can act as you on every signed-in site in this browser. It is instructed to ask before sending, buying, deleting or changing account settings.',
+      attachRisk2:'Page text can mislead the agent. Other local programs can also request control while debugging is enabled; the browser asks them too.',
+      progressOverlay:'Show reasoning and progress overlay',progressOverlayHint:'After desktop work starts, show the current step, tool and reasoning/reply text the model emitted. Translucent, click-through and non-activating; hides when the turn ends. Models that emit no reasoning show status only.'
+    });
+    Object.assign(dictionaries.zh,{progressSettings:'思考与操作浮窗',openProgress:'打开浮窗并调整',progressOpacity:'不透明度（%）',progressWidth:'宽度（像素）',progressHeight:'高度（像素）',progressPosition:'位置',progressX:'X 坐标',progressY:'Y 坐标',progressLocked:'锁定并穿透鼠标',progressLockedHint:'锁定时鼠标穿透，不会挡住你或 DSH 的点击。要调整位置和大小，把光标移到浮窗右上角的锁形按钮上停一下就会临时解锁：拖标题移动、拖边缘缩放，光标离开浮窗后自动锁回。只认你自己的鼠标，DSH 操作时移动的光标不会触发。关闭此项则一直解锁，可滚动正文或点 × 关闭。',progressShortcut:'锁定快捷键',progressShortcutHint:'例如 Ctrl+Alt+P；再次按下切换锁定。不能与停止键相同。留空时可在设置页切换。',progressSync:'默认打开，可随时关闭。浮窗按步骤显示 DSH 正在做什么，任务结束后再保留 20 秒，方便看结果。此页和浮窗共用 DSH 配置；解锁后的拖动、缩放、锁定和关闭会同步保存。开关立即生效；点击按钮直接应用浮窗设置并打开 60 秒调整预览（预览期间临时解锁，结束后恢复原来的锁定状态），其他未保存更改保留。',progress_topRight:'右上角',progress_topLeft:'左上角',progress_bottomRight:'右下角',progress_bottomLeft:'左下角',progress_custom:'自定义坐标'});
+    Object.assign(dictionaries.en,{progressSettings:'Reasoning and progress overlay',openProgress:'Open overlay to adjust',progressOpacity:'Opacity (%)',progressWidth:'Width (pixels)',progressHeight:'Height (pixels)',progressPosition:'Position',progressX:'X coordinate',progressY:'Y coordinate',progressLocked:'Lock and pass through mouse',progressLockedHint:'Locked passes mouse input through, so it never blocks a click by you or by DSH. To move or resize it, rest the pointer on the padlock button in its top-right corner: it unlocks until the pointer has left the overlay, so you can drag the title or the edges. Only your own mouse counts, never the pointer DSH moves. Turn this off to keep it unlocked, with scrolling and × to close.',progressShortcut:'Lock shortcut',progressShortcutHint:'For example Ctrl+Alt+P; press again to toggle. Must differ from the stop key. Leave empty to use the settings switch.',progressSync:'On by default and can be turned off. The overlay shows what DSH is doing step by step and stays 20 seconds after a task ends so you can read the result. This page and the overlay share DSH settings; moving, resizing, locking and closing sync back. Switches apply immediately. Open applies overlay settings and shows a 60-second adjustment preview (unlocked only while it lasts; the lock state is restored afterwards); other unsaved changes stay in the form.',progress_topRight:'Top right',progress_topLeft:'Top left',progress_bottomRight:'Bottom right',progress_bottomLeft:'Bottom left',progress_custom:'Custom coordinates'});
+    Object.assign(dictionaries.zh,{progressMode:'浮窗内容',progressModeSource:'直接显示 DSH 输出（默认，不额外消耗 token）',progressModeSummary:'AI 总结当前操作（额外消耗 token）',progressModeHint:'原文模式按步骤显示 DSH 已有的思考和回复，不调用模型。总结模式用当前对话的模型把已完成的步骤和正在做的操作写成一两句易懂的话：开始约 2 秒后给出第一条，之后最多每 10 秒更新一次，任务结束时再总结一次结果；输入限长，每次最多输出 192 token。总结不可用时显示操作步骤。'});
+    Object.assign(dictionaries.en,{progressMode:'Overlay content',progressModeSource:'DSH output (default; no extra tokens)',progressModeSummary:'AI operation summary (uses extra tokens)',progressModeHint:'Source mode shows the reasoning and reply DSH already produced, step by step, without a model call. Summary mode uses this conversation’s model to describe finished steps and the current action in a sentence or two: the first about 2 seconds after work starts, then at most once every 10 seconds, plus one summary of the result when the task ends; input is bounded and each call outputs at most 192 tokens. Without a summary the step names are shown.'});
     // Chinese first: a feature's English name appears once, in brackets, where
     // the page first names it. Each hint sits behind an info icon.
     Object.assign(dictionaries.zh,{title:'电脑操控（Computer Use）',intro:'让 DSH 操作 Windows 桌面程序和网页。',moreInfo:'说明',pluginDescription:'让 AI 操作 Windows 桌面程序和网页，可设置浏览器操控、接管提示、停止快捷键和工具。',
-      browserTitle:'浏览器操控（Browser Use）',browserInfo:'DSH 专用浏览器单独启动，不会用到你自己的浏览器。默认每次使用临时的空白配置，不带你的登录、Cookie 和浏览记录；打开“记住登录”后改用长期保留的配置。退出 DSH 或空闲 10 分钟后自动关闭。',
+      browserTitle:'浏览器操控（Browser Use）',browserInfo:'DSH 专用浏览器单独启动；只有打开“连接我自己的浏览器”并明确连接时，才使用你的浏览器。默认每次使用临时的空白配置，不带你的登录、Cookie 和浏览记录；打开“记住登录”后改用长期保留的配置。退出 DSH 或空闲 10 分钟后自动关闭。',
       browserApp:'使用的浏览器',browserAppHint:'默认跟随 Windows 的默认浏览器；默认浏览器不是 Edge 或 Chrome 时，使用已安装的 Chrome 或 Edge。Firefox 系（Firefox、LibreWolf、Floorp、Waterfox、Vantage 等）在这里手动选，Windows 默认的那一个优先。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
       browserApp_default:'默认浏览器',browserApp_edge:'Edge',browserApp_chrome:'Chrome',browserApp_firefox:'Firefox 系（实验性）',firefoxNotice:'Firefox 系为实验功能：DSH 启动的 Firefox 在后台运行，没有窗口，所以“显示浏览器窗口”已关闭。想看到窗口，可以自己带 --remote-debugging-port 启动浏览器，再用 WCU_BROWSER_BIDI_URL（BiDi 地址）连接；一个浏览器同一时间只接受一个控制会话。记住登录会给 Firefox 单独保留一个配置，但没有窗口，暂时不能在里面手动登录。',browserAppShort:'默认',
       browserSignIn:'记住登录（cookies）',browserSignInHint:'默认关闭：DSH 浏览器每次用全新的临时配置，网站看不到任何登录。打开后改用长期保留的配置，你在它窗口里登录过的网站会一直保持登录，见下方说明。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
@@ -249,7 +271,7 @@ window.__ModuleLoader__.load({
       copy:'复制',copied:'已复制',
       browserFirst:'网页优先用浏览器操控',browserFirstHint:'能直接读写网页时在后台完成，不移动鼠标；浏览器自己的模态弹窗可能来到前台。桌面程序、浏览器工具栏和读不到的网页内容，仍由电脑操控完成。',
       browserVisible:'显示浏览器窗口',browserVisibleHint:'开启时打开一个可见的 DSH 浏览器窗口，窗口框是 DSH 蓝；DSH 正在操作的标签页，图标换成蓝色箭头，网页上的小箭头标出它点的位置，不遮挡网页内容，也不移动你的鼠标。普通网页操作在后台完成；浏览器自己的模态弹窗可能短暂来到前台。关闭后浏览器在后台运行，看不到窗口。更改在当前动作结束后生效，并关闭已打开的 DSH 浏览器。',
-      toolsTitle:'工具',toolsInfo:'全部：启动时加载 25 个工具。精简：只加载 11 个常用工具，减少上下文占用。懒启动：启动时只加载管理入口，开始桌面任务时再加载，会多一次工具调用。自定义：自己挑选，切换方案时保留清单。保存后在当前动作结束时生效。',
+      toolsTitle:'工具',toolsInfo:'全部：启动时加载 26 个工具。精简：只加载 12 个常用工具，减少上下文占用。懒启动：启动时只加载管理入口，开始桌面任务时再加载，会多一次工具调用。自定义：自己挑选，切换方案时保留清单。保存后在当前动作结束时生效。',
       indicatorTitle:'接管提示',indicatorInfo:'DSH 用鼠标和键盘操作桌面时，用屏幕边缘、提示条和鼠标标签提醒你。浏览器操控、读取界面和在后台完成的控件操作不显示这些提示。',
       indicator:'屏幕边缘与提示条',appearance:'更多选项',preview:'预览',delay:'操作后保留提示',
       escTitle:'按 Esc 停止',stopHint:'Esc 只停止当前这一轮操作；下次发起任务或说“继续”即可再次使用，无需到设置恢复。普通鼠标移动和其他按键不会停止。浏览器操控在后台进行，不占用 Esc，要停止请用 DSH 里的停止按钮。'});
@@ -268,7 +290,7 @@ window.__ModuleLoader__.load({
       copy:'Copy',copied:'Copied',
       browserFirst:'Prefer Browser Use for web pages',browserFirstHint:'Read and operate pages directly in the background without moving the pointer. Browser-native modal dialogs may activate their window. Desktop apps, the browser toolbar and page content it cannot read still go through Computer Use.',
       browserVisible:'Show the browser window',browserVisibleHint:'When on, a visible DSH browser window opens with a DSH-blue frame. The tab DSH works in shows a blue arrow as its icon, and a small arrow on the page marks where it clicks; nothing covers the page and your pointer stays put. Ordinary page actions run in the background; browser-native modal dialogs may briefly activate the window. When off, the browser runs in the background with no window. Changes apply after the current action and close open DSH browsers.',
-      toolsTitle:'Tools',toolsInfo:'All: load 25 tools at startup. Lite: 11 common tools, less context. Lazy: only the management entry at startup; tools load at the first desktop task, adding one tool call. Custom: your own selection, kept when you switch presets. Saved changes apply after the current action.',
+      toolsTitle:'Tools',toolsInfo:'All: load 26 tools at startup. Lite: 12 common tools, less context. Lazy: only the management entry at startup; tools load at the first desktop task, adding one tool call. Custom: your own selection, kept when you switch presets. Saved changes apply after the current action.',
       indicatorTitle:'Takeover indicator',indicatorInfo:'Screen edges, a banner and a pointer tag show when DSH uses your mouse and keyboard. Browser Use, reading the screen and control actions done in the background show none of them.',
       indicator:'Screen edges and banner',appearance:'More options',preview:'Preview',delay:'Keep visible after an action',
       escTitle:'Press Esc to stop',stopHint:'Esc stops this operation series. A new task or a request to continue resumes automatically, with no settings change. Ordinary pointer movement and other keys do not stop control. Browser Use runs in the background and does not use Esc; stop it with the stop button in DSH.'});
@@ -362,6 +384,15 @@ window.__ModuleLoader__.load({
       tools:(loaded,allowed)=>drawing(...toolGroups.flatMap(([,entries],row)=>entries.map(([name],col)=>box(loaded.has(name)?'a-acc':allowed.has(name)?'a-open':'a-ink',15.5+col*12,12.5+row*12,9,9,2.2)))),
       esc:()=>drawing(box('a-ink2',33,19,46,34,7),box('a-win',33,16,46,34,7),box('a-frame',33,16,46,34,7),h('text',{className:'a-cap',x:56,y:37.2,textAnchor:'middle'},'Esc'))
     };
+    Object.assign(dictionaries.zh,{
+      browserTitle:'网页与浏览器',browserFirst:'优先用网页控件操作',browserFirstHint:'网页任务优先读取并操作网页元素；关闭后使用桌面鼠标、键盘与截图。',
+      browserVisible:'显示 DSH 浏览器窗口',browserVisibleHint:'显示 DSH 专用浏览器的窗口；关闭后在后台运行。不控制你已有窗口的可见性。',
+      browserApp:'浏览器类型',browserAppHint:'选择 Chrome、Edge 或 Firefox。默认由 DSH 打开专用浏览器；开启“操作已打开的浏览器”后，连接所选类型的现有窗口。',
+      browserSignIn:'保留网站登录状态',browserSignInHint:'仅用于 DSH 专用浏览器：保留网站 cookies，下次打开可继续登录。与个人浏览器的数据分开保存。',
+      browserAttachUser:'操作已打开的浏览器（实验性）',browserAttachUserHint:'改用所选 Chrome 或 Edge 的现有窗口、标签页和登录状态，需要允许远程调试并明确连接。关闭时使用 DSH 专用浏览器。',
+      progressOpacity:'背景不透明度（%）'
+    });
+    Object.assign(dictionaries.en,{browserTitle:'Web and browser',browserFirst:'Prefer web page controls',browserVisible:'Show the DSH browser window',browserApp:'Browser type',browserSignIn:'Keep website sign-ins',browserAttachUser:'Use an already open browser (experimental)',progressOpacity:'Background opacity (%)'});
     function Card({scope,t,savePatch,as='li',idPrefix='wincu',view}) {
       if(view==='summary')return h('span',{'data-wincu-summary':true},t('pluginDescription'),' ',h('span',{style:{color:'var(--dsw-alias-label-link,#71a7ff)'}},t('openSettings')));
       return h(SettingsGate,{scope,t,savePatch,as,idPrefix});
@@ -387,7 +418,7 @@ window.__ModuleLoader__.load({
       // the window switch off, and choosing another browser turns it back.
       const visibleBeforeFirefox=React.useRef(null);
       const change = (field,value) => {const next={...draft,[field]:value};
-        if(field==='browserApp'&&value==='firefox'&&draft.browserApp!=='firefox'){visibleBeforeFirefox.current=draft.browserVisible;next.browserVisible=false;}
+        if(field==='browserApp'&&value==='firefox'&&draft.browserApp!=='firefox'){visibleBeforeFirefox.current=draft.browserVisible;next.browserVisible=false;next.browserAttachUser=false;}
         else if(field==='browserApp'&&draft.browserApp==='firefox'&&value!=='firefox'&&visibleBeforeFirefox.current!==null){next.browserVisible=visibleBeforeFirefox.current;visibleBeforeFirefox.current=null;}
         setDraft(next);setDirty(Object.keys(defaults).some(key=>!equal(next[key],saved[key])));setMessage('');};
       const selectTools=(names,enabled)=>{const selected=new Set(draft.enabledTools);for(const name of names)enabled?selected.add(name):selected.delete(name);change('enabledTools',allToolNames.filter(name=>selected.has(name)));};
@@ -414,6 +445,16 @@ window.__ModuleLoader__.load({
         catch(error){setMessage(t('failed')+': '+String(error.message||error));setTone('error');return false;}
         finally{setSaving(false);}
       };
+      // Persist overlay-only actions without committing unrelated draft fields.
+      const overlayKeys=Object.keys(defaults).filter(key=>key.startsWith('progress'));
+      const applyOverlayPatch=async patch=>{
+        const next={...draft,...patch};setDraft(next);
+        if(await run(patch,'saved')){
+          const base={...saved,...patch};setDirty(Object.keys(defaults).some(key=>!equal(next[key],base[key])));
+        }else setDirty(true);
+      };
+      const applyOverlaySwitch=(field,value)=>applyOverlayPatch({[field]:value});
+      const openProgress=()=>applyOverlayPatch({...Object.fromEntries(overlayKeys.map(key=>[key,draft[key]])),progressOverlayEnabled:true,progressPreviewToken:Date.now()});
       const save = async () => {
         if(!draft.indicatorText.trim()||draft.indicatorText.length>120||/[\r\n\x00-\x1f]/.test(draft.indicatorText)||!Number.isInteger(draft.indicatorIdleMs)||draft.indicatorIdleMs<200||draft.indicatorIdleMs>3000){setMessage(t('invalid'));setTone('error');return;}
         const patch=Object.fromEntries(Object.keys(defaults).filter(key=>!equal(draft[key],saved[key])).map(key=>[key,draft[key]]));
@@ -446,7 +487,7 @@ window.__ModuleLoader__.load({
       // Chinese characters), so a narrow column never leaves it alone on a line.
       const title=(text,hint,props)=>{const cut=/[\u2e80-\u9fff\uff00-\uffef]$/.test(text)?text.length-2:text.lastIndexOf(' ')+1;return h(props?.htmlFor?'label':'span',{className:'wcu-item-title',...props},text.slice(0,cut),h('span',{className:'wcu-nowrap'},text.slice(cut),hint&&info(hint)));};
       const picture=art=>h('div',{className:'wcu-art','aria-hidden':true},art);
-      const toggle=(field,label,locked)=>h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch','aria-label':t(label),checked:draft[field],disabled:disabled||locked,onChange:e=>change(field,e.target.checked)});
+      const toggle=(field,label,locked)=>h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch','aria-label':t(label),checked:draft[field],disabled:disabled||locked,onChange:e=>['progressOverlayEnabled','progressOverlayLocked'].includes(field)?applyOverlaySwitch(field,e.target.checked):change(field,e.target.checked)});
       const switchItem=(field,label,hint,art,locked)=>item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-'+field,'aria-hidden':true},art),title(t(label),hint,{htmlFor:idPrefix+'-'+field}),toggle(field,label,locked));
       const field=(label,control)=>h('div',{className:'wcu-field'},label,control);
       const allowedTools=['full','lazy'].includes(draft.toolPreset)?allToolNames:activeTools;
@@ -470,7 +511,11 @@ window.__ModuleLoader__.load({
               title(t('browserApp'),'browserAppHint',{htmlFor:idPrefix+'-browserApp'}),
               h('select',{className:'wcu-control',id:idPrefix+'-browserApp',value:draft.browserApp,disabled,onChange:e=>change('browserApp',e.target.value)},
                 ...['default','edge','chrome','firefox'].map(app=>h('option',{key:app,value:app},t('browserApp_'+app))))),
-            switchItem('browserSignIn','browserSignIn','browserSignInHint',arts.signIn(draft.browserSignIn))),
+            switchItem('browserSignIn','browserSignIn','browserSignInHint',arts.signIn(draft.browserSignIn)),
+            switchItem('browserAttachUser','browserAttachUser','browserAttachUserHint',arts.app(t('myBrowser')),draft.browserApp==='firefox')),
+          draft.browserAttachUser&&draft.browserApp!=='firefox'&&h('div',{className:'wcu-notice','data-wincu-attach-notice':true},
+            h('strong',null,t('attachSetup')),h('ol',null,h('li',null,t('attachStep1')),h('li',null,t('attachStep2'))),
+            h('strong',null,t('attachRisks')),h('ul',null,h('li',null,t('attachRisk1')),h('li',null,t('attachRisk2')))),
           // Kept sign-ins need nothing set up, but how to sign in, where the
           // sign-ins stay and the risks remain in view while the switch is on.
           draft.browserApp==='firefox'&&h('p',{className:'wcu-notice','data-wincu-firefox-notice':true},t('firefoxNotice')),
@@ -503,6 +548,17 @@ window.__ModuleLoader__.load({
               field(title(t('delay'),'delayHint',{htmlFor:idPrefix+'-delay'}),h('div',{className:'wcu-number'},h('input',{className:'wcu-control',id:idPrefix+'-delay',type:'number',min:200,max:3000,step:100,value:draft.indicatorIdleMs,disabled:indicatorDisabled,onChange:e=>change('indicatorIdleMs',Number(e.target.value))}),h('span',null,t('ms')))),
               field(title(t('text'),null,{htmlFor:idPrefix+'-text'}),h('input',{className:'wcu-control wcu-text',id:idPrefix+'-text',type:'text',maxLength:120,value:draft.indicatorText,disabled:indicatorDisabled,onChange:e=>change('indicatorText',e.target.value)})),
               field(title(t('remoteVisible'),'remoteVisibleHint',{htmlFor:idPrefix+'-remoteIndicatorVisible'}),toggle('remoteIndicatorVisible','remoteVisible'))))),
+        h('section',{className:'wcu-section','data-wincu-progress-settings':true,'aria-labelledby':idPrefix+'-progress-title'},
+          head(idPrefix+'-progress-title','progressSettings',null,button('openProgress',{'data-wincu-open-progress':true,className:'wcu-small',disabled,onClick:openProgress})),
+          h('div',{className:'wcu-grid'},switchItem('progressOverlayEnabled','progressOverlay','progressOverlayHint',arts.indicator(draft.progressOverlayEnabled,false)),switchItem('progressOverlayLocked','progressLocked','progressLockedHint',arts.indicator(draft.progressOverlayLocked,false))),
+          h('details',{className:'wcu-detail','data-wincu-progress-details':true},h('summary',null,t('appearance')),
+          h('p',{className:'wcu-hint'},t('progressSync')),
+          h('div',{className:'wcu-fields'},
+            field(title(t('progressMode'),'progressModeHint',{htmlFor:idPrefix+'-progressOverlayMode'}),h('select',{className:'wcu-control',id:idPrefix+'-progressOverlayMode',value:draft.progressOverlayMode,disabled,onChange:e=>change('progressOverlayMode',e.target.value)},h('option',{value:'source'},t('progressModeSource')),h('option',{value:'summary'},t('progressModeSummary')))),
+            ...[['progressOverlayOpacity','progressOpacity',20,100],['progressOverlayWidth','progressWidth',240,1600],['progressOverlayHeight','progressHeight',160,1600]].map(([key,label,min,max])=>field(title(t(label),null,{htmlFor:idPrefix+'-'+key}),h('input',{className:'wcu-control',id:idPrefix+'-'+key,type:'number',min,max,value:draft[key],disabled,onChange:e=>change(key,Number(e.target.value))}))),
+            field(title(t('progressPosition'),null,{htmlFor:idPrefix+'-progressOverlayPosition'}),h('select',{className:'wcu-control',id:idPrefix+'-progressOverlayPosition',value:draft.progressOverlayPosition,disabled,onChange:e=>change('progressOverlayPosition',e.target.value)},...['top-right','top-left','bottom-right','bottom-left','custom'].map((key,index)=>h('option',{key,value:key},t(['progress_topRight','progress_topLeft','progress_bottomRight','progress_bottomLeft','progress_custom'][index]))))),
+            ...[['progressOverlayX','progressX'],['progressOverlayY','progressY']].map(([key,label])=>field(title(t(label),null,{htmlFor:idPrefix+'-'+key}),h('input',{className:'wcu-control',id:idPrefix+'-'+key,type:'number',min:-32768,max:32767,value:draft[key],disabled:disabled||draft.progressOverlayPosition!=='custom',onChange:e=>change(key,Number(e.target.value))}))),
+            field(title(t('progressShortcut'),'progressShortcutHint',{htmlFor:idPrefix+'-progressLockShortcut'}),h('input',{className:'wcu-control wcu-text',id:idPrefix+'-progressLockShortcut',value:draft.progressLockShortcut,placeholder:'Ctrl+Alt+P',maxLength:50,disabled,onChange:e=>change('progressLockShortcut',e.target.value)}))))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-stop-title'},
           head(idPrefix+'-stop-title','stop',null,button('clearShortcut',{className:'wcu-small',disabled:disabled||!draft.stopShortcut,onClick:()=>{change('stopShortcut','');setRecordMessage('');}})),
           h('div',{className:'wcu-grid'},

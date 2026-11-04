@@ -193,8 +193,9 @@ const INDICATOR_LINGER_MS = 2500;
 export const NEW_TAB_ID = 'new-tab';
 const ELEMENT_ID = /^(?:web:)?(t[0-9a-z]+):(\d+|address)$/;
 const NEW_TAB = /^(?:(b[0-9a-z]+):)?new-tab$/;
+const USER_CONNECT = /^(b[0-9a-z]+):connect$/;
 export function isBrowserElementId(id) {
-  return typeof id === 'string' && (ELEMENT_ID.test(id) || NEW_TAB.test(id));
+  return typeof id === 'string' && (ELEMENT_ID.test(id) || NEW_TAB.test(id) || USER_CONNECT.test(id));
 }
 // A call belongs to the browser lane when it names a tab or a page element.
 export function isBrowserCall(args) {
@@ -242,7 +243,7 @@ function activePort(dir) {
 // negotiates compression and drops the connection on any message over 4 MiB
 // decompressed, which the accessibility tree of a long page exceeds.
 class Socket {
-  static open(url, timeoutMs) {
+  static open(url, timeoutMs, request) {
     const { protocol, hostname, port, pathname, search, host: hostHeader } = new URL(url);
     if (!['ws:', 'wss:'].includes(protocol)) return Promise.reject(new Error('DevTools requires a ws: or wss: URL'));
     const host = hostname === 'localhost' ? '127.0.0.1' : hostname.replace(/^\[|\]$/g, '');
@@ -251,6 +252,8 @@ class Socket {
       const secure = protocol === 'wss:';
       const options = { host, port: Number(port) || (secure ? 443 : 80) };
       const tcp = secure ? tls.connect({ ...options, ...(net.isIP(host) ? {} : { servername: host }) }) : net.connect(options);
+      const cancellation = request ? setInterval(() => { if (request.cancelled) tcp.destroy(new Error('COMPUTER_USE_CANCELLED')); }, 50) : null;
+      tcp.once('close', () => clearInterval(cancellation));
       const timer = setTimeout(() => { tcp.destroy(); reject(new Error(`timed out connecting to ${url}`)); }, timeoutMs);
       const onClose = () => { clearTimeout(timer); reject(new Error(`${url} closed before the WebSocket upgrade`)); };
       tcp.once('close', onClose);
@@ -274,7 +277,7 @@ class Socket {
           || !headers.get('connection')?.toLowerCase().split(/\s*,\s*/).includes('upgrade')) {
           tcp.destroy(); return reject(new Error(`${url} refused the WebSocket upgrade`));
         }
-        tcp.off('close', onClose);
+        tcp.off('close', onClose); clearInterval(cancellation);
         resolve(new Socket(tcp, head.subarray(end + 4)));
       };
       tcp.on('data', onData);
@@ -334,8 +337,8 @@ class Cdp {
     socket.onmessage = data => this.receive(data);
     socket.onclose = () => this.fail(new Error('BROWSER_DISCONNECTED: the browser closed its DevTools connection'));
   }
-  static async open(url, timeoutMs) {
-    return new Cdp(await Socket.open(url, timeoutMs));
+  static async open(url, timeoutMs, request) {
+    return new Cdp(await Socket.open(url, timeoutMs, request));
   }
   receive(data) {
     let message;
@@ -628,6 +631,8 @@ export class BrowserLane {
     this.disabled = env.WCU_BROWSER_LANE === 'off';
     this.app = env.WCU_BROWSER_APP === 'firefox' || Object.hasOwn(APPS, env.WCU_BROWSER_APP ?? '') ? env.WCU_BROWSER_APP : 'default';
     this.keepSignIns = env.WCU_BROWSER_SIGNIN === '1';
+    this.attachUser = env.WCU_BROWSER_ATTACH_USER === '1';
+    this.attachAttempts = new Map(); this.attachRequests = new Set();
     this.agentDir = env.WCU_BROWSER_PROFILE || path.join(localAppData, 'dsh-computer-use-win', 'agent-browser');
     this.browsers = new Map(); // ws url -> browser record
     this.tabs = new Map(); // tab key -> tab record
@@ -693,6 +698,43 @@ export class BrowserLane {
     return configured ? [{ url: configured, name: 'Configured browser', source: 'configured' }] : [];
   }
 
+  // Discovery reads only a local file. It must never make a consent handshake.
+  async userCandidate() {
+    if (!this.attachUser || this.disabled || this.app === 'firefox' || this.env.WCU_BROWSER_CDP_URL) return null;
+    await this.resolveApp();
+    const app = this.app === 'default' ? this.resolvedApp ?? (/^Brave/i.test(this.progId ?? '') ? 'brave' : /^Chromium/i.test(this.progId ?? '') ? 'chromium' : null) : this.app;
+    const directories = { chrome: 'Google/Chrome/User Data', edge: 'Microsoft/Edge/User Data', brave: 'BraveSoftware/Brave-Browser/User Data', chromium: 'Chromium/User Data' };
+    if (!directories[app]) return null;
+    const profile = path.join(this.env.LOCALAPPDATA || localAppData, directories[app]);
+    let port, route;
+    try { [port, route] = readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').trim().split(/\r?\n/); } catch { return null; }
+    if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535 || !/^\/devtools\/browser\/[a-z0-9-]+$/i.test(route ?? '')) return null;
+    return { key: 'b' + createHash('sha1').update('user:' + profile).digest('hex').slice(0, 16), url: `ws://127.0.0.1:${Number(port)}${route}`, name: `${app} (user)`, source: 'user' };
+  }
+
+  async connectUser(key, request = {}) {
+    const candidate = await this.userCandidate();
+    if (!candidate || candidate.key !== key) fail('BROWSER_ATTACH_UNAVAILABLE', 'The selected user browser is unavailable. Enable its remote debugging, then list_windows again.');
+    if (request.cancelled) fail('COMPUTER_USE_CANCELLED', 'cancelled before connecting');
+    const current = this.browsers.get(candidate.url);
+    if (current?.status === 'connecting') fail('BROWSER_ATTACH_IN_PROGRESS', 'A connection request is already waiting for permission; do not start another one.');
+    if (current?.status === 'connected' && !current.cdp.closed) return { meta: { ok: true, action: 'connect', channel: 'browser', browser: key, verification: 'observed' }, text: 'Already connected. Use list_windows to select the requested tab.' };
+    this.attachRequests.add(request);
+    const attempt = { url: candidate.url, status: 'waitingForPermission' };
+    this.attachAttempts.set(key, attempt);
+    try {
+      const timeout = Math.max(100, Math.min(60000, Number(this.env.WCU_BROWSER_ATTACH_TIMEOUT_MS) || 30000));
+      const browser = await this.connect({ ...candidate, request }, timeout);
+      if (request.cancelled) { browser.cdp.close(); fail('COMPUTER_USE_CANCELLED', 'cancelled while connecting'); }
+      attempt.status = 'connected';
+      return { meta: { ok: true, action: 'connect', channel: 'browser', browser: key, verification: 'observed' }, text: 'Connected. Use list_windows to select only the tabs the user requested.' };
+    } catch (error) {
+      attempt.status = request.cancelled ? 'cancelled' : /timed out|TIMEOUT/i.test(error.message) ? 'timedOut' : 'notAllowed';
+      attempt.error = error.message;
+      fail(request.cancelled ? 'COMPUTER_USE_CANCELLED' : 'BROWSER_ATTACH_' + attempt.status.toUpperCase(), `${error.message}. No automatic retry. Dismiss any old browser prompt before explicitly requesting ${key}:connect again.`);
+    } finally { this.attachRequests.delete(request); }
+  }
+
   agentProcessAlive() {
     return Boolean(this.agentChild && this.agentChild.exitCode === null && !this.agentChild.killed);
   }
@@ -727,11 +769,11 @@ export class BrowserLane {
     const existing = this.browsers.get(candidate.url);
     if (existing && !existing.cdp?.closed && existing.status !== 'failed') return existing.ready;
     const guid = /\/devtools\/browser\/([^/?#]+)/.exec(candidate.url)?.[1] ?? candidate.url;
-    const key = existing?.key ?? this.shortKey('b', guid, key => [...this.browsers.values()].some(browser => browser.key === key));
+    const key = candidate.key ?? existing?.key ?? this.shortKey('b', guid, key => [...this.browsers.values()].some(browser => browser.key === key));
     const record = { key, name: candidate.name, source: candidate.source, url: candidate.url, child: candidate.child, status: 'connecting' };
     this.browsers.set(candidate.url, record);
     record.ready = (async () => {
-      const cdp = await Cdp.open(await this.resolveUrl(candidate.url), timeoutMs);
+      const cdp = await Cdp.open(await this.resolveUrl(candidate.url), timeoutMs, candidate.request);
       record.cdp = cdp;
       cdp.listeners.add(message => this.onEvent(record, message));
       await cdp.send('Target.setDiscoverTargets', { discover: true });
@@ -742,6 +784,7 @@ export class BrowserLane {
       record.status = 'connected';
       return record;
     })().catch(error => {
+      record.cdp?.close();
       record.status = 'failed'; record.error = error.message; this.backoff.set(candidate.url, Date.now() + BACKOFF_MS);
       throw error;
     });
@@ -943,6 +986,7 @@ export class BrowserLane {
   }
 
   close() {
+    for (const request of this.attachRequests) request.cancelled = true;
     this.bidi?.close();
     clearInterval(this.idleTimer);
     for (const browser of this.browsers.values()) {
@@ -1065,7 +1109,9 @@ export class BrowserLane {
   }
 
   describeTab(tab) {
-    return { id: tab.key, title: tab.title, url: tab.url, browser: tab.browser.key };
+    let url = tab.url;
+    if (tab.browser.source === 'user' && !tab.opened) try { const parsed = new URL(url); parsed.search = ''; parsed.hash = ''; url = parsed.href; } catch {}
+    return { id: tab.key, title: tab.title, url, browser: tab.browser.key };
   }
 
   // Window listings gain the tabs each connected browser holds, plus how to
@@ -1076,14 +1122,20 @@ export class BrowserLane {
     const listed = [];
     for (const browser of browsers) {
       let tabs = [];
-      try { tabs = (await this.pages(browser)).map(tab => ({ id: tab.key, title: clip(tab.title || '', 120), url: clip(tab.url || '', 200) })); } catch { continue; }
+      try { tabs = (await this.pages(browser)).map(tab => { const shown = this.describeTab(tab); return { id: tab.key, title: clip(shown.title || '', 120), url: clip(shown.url || '', 200) }; }); } catch { continue; }
       listed.push({ id: browser.key, name: browser.name, source: browser.source, processId: browser.pid, ...(browser.source === 'agent' ? { visible: !browser.headless } : {}), tabs: tabs.slice(0, MAX_LISTED_TABS),
         ...(tabs.length > MAX_LISTED_TABS ? { moreTabs: tabs.length - MAX_LISTED_TABS } : {}), newTab: `${browser.key}:${NEW_TAB_ID}` });
       for (const window of result.windows ?? []) if (browser.pid && window.processId === browser.pid) window.browser = browser.key;
     }
+    const candidate = await this.userCandidate();
+    if (candidate && !listed.some(browser => browser.id === candidate.key)) {
+      const attempt = this.attachAttempts.get(candidate.key);
+      listed.push({ id: candidate.key, name: candidate.name, source: 'user', status: attempt?.url === candidate.url ? attempt.status : 'available', connect: `${candidate.key}:connect`, tabs: [], ...(attempt?.url === candidate.url && attempt.error ? { error: attempt.error } : {}) });
+    }
     const waiting = [...this.browsers.values()].filter(browser => browser.status === 'connecting').map(browser => browser.name);
     result.browserLane = {
       browsers: listed, ...(waiting.length ? { waitingForPermission: waiting } : {}),
+      ...(this.attachUser ? { attachUser: { enabled: true, available: !!candidate, instruction: 'Listing makes no connection. Ask the user to allow remote debugging before set_value elementId "<browser id>:connect" value "connect". Only explicit requests retry; do not bypass a refusal.' } } : {}),
       use: 'Pass browserTab (a tab id) to snapshot/accessibility_tree/find/type_text/keypress/scroll/screenshot/wait_for to work on that page in the background; its element ids (t1a2b:57) work in click/set_value/focus/invoke/scroll/element_info. set_value elementId "new-tab" value "<url>" opens a background tab ' +
         (this.keepSignIns ? 'in the DSH browser, whose profile is kept: sites the user signed in to there are still signed in' : 'in a separate agent browser without sign-ins') + (listed.some(browser => browser.source !== 'agent') ? '; "<browser id>:new-tab" opens it in that connected browser.' : '.')
     };
@@ -1106,6 +1158,14 @@ export class BrowserLane {
     if (!tab || tab.closed) fail('BROWSER_TAB_NOT_FOUND', `no open browser tab ${key}; call list_windows for current tab ids`);
     if (request?.cancelled) fail('COMPUTER_USE_CANCELLED', 'cancelled');
     return tab;
+  }
+
+  async batchState(args, request) {
+    const tab = await this.findTab(args.browserTab, request);
+    await this.session(tab);
+    const { targetInfo } = await tab.browser.cdp.send('Target.getTargetInfo', { targetId: tab.targetId });
+    return { url: targetInfo.url, document: tab.document, load: tab.loadSeq, dialog: !!tab.dialog, closed: !!tab.closed,
+      windows: (await this.pages(tab.browser)).map(item => item.key).sort() };
   }
 
   async session(tab) {
@@ -1494,6 +1554,11 @@ export class BrowserLane {
   // Entry point for every lane-routed tool call. A call the user stopped takes
   // the badge off at once; otherwise it lingers (rest).
   async run(action, args, request) {
+    const connect = USER_CONNECT.exec(args.elementId ?? '');
+    if (connect) {
+      if (action !== 'set_value' || args.value !== 'connect' || args.browserTab || ['windowTitle','processId','nativeWindowHandle','x','y'].some(key => args[key] !== undefined)) fail('INVALID_ARGUMENTS', 'Connect using set_value elementId "<browser id>:connect" value "connect", without other targets.');
+      return this.connectUser(connect[1], request);
+    }
     const bidi = await this.bidiBackend();
     const tabKey = ELEMENT_ID.exec(args.elementId ?? '')?.[1] ?? args.browserTab;
     const browserKey = NEW_TAB.exec(args.elementId ?? '')?.[1];
@@ -1735,6 +1800,7 @@ export class BrowserLane {
     if (tab.loading && tab.loadSeq !== since && !tab.closed && !tab.dialog) { detail.stillLoading = true; notes.push('The page is still loading; read it again or wait_for an element.'); }
     if (tab.closed) return { meta: { ok: true, action, channel: 'browser', target, ...detail, tabClosed: true, verification: 'sent' } };
     if (tab.dialog) return { meta: { ok: true, action, channel: 'browser', target, ...detail, dialog: tab.dialog, verification: 'sent', verificationNote: [DIALOG_NOTE, ...notes].join(' ') } };
+    if (request?.batchSuppressObservation) return { meta: { ok: true, action, channel: 'browser', target, ...detail, verification: 'sent' } };
     const outline = await this.outline(tab);
     const change = this.changes(tab, outline);
     return this.page({ ok: true, action, target, ...detail, verification: 'sent', verificationNote: ['Sent inside the page without the desktop pointer or keyboard. The page state after the action follows; check it for the expected effect.', ...notes].join(' '), pageChange: change.mode }, change.text, outline);
@@ -1836,9 +1902,11 @@ export class BrowserLane {
     if (bidi) return bidi.health();
     await this.resolveApp();
     const executable = this.agentExecutable();
+    const attachCandidate = await this.userCandidate();
     return { enabled: !this.disabled, visible: this.env.WCU_BROWSER_HEADLESS !== '1', app: this.app, ...(this.resolvedApp !== undefined ? { resolvedApp: this.resolvedApp } : {}), keepSignIns: this.keepSignIns,
       agentBrowser: executable?.path ?? null, agentProfile: this.agentDir, ...(this.keepSignIns && executable ? { keptProfile: this.keptDir(executable) } : {}),
-      endpoints: this.candidates().map(candidate => ({ name: candidate.name, source: candidate.source })),
+      endpoints: [...this.candidates(),...(attachCandidate?[attachCandidate]:[])].map(candidate => ({ name: candidate.name, source: candidate.source })),
+      ...(this.attachUser?{attachUser:{enabled:true,available:!!attachCandidate,...(attachCandidate?{connect:attachCandidate.key+':connect',status:this.attachAttempts.get(attachCandidate.key)?.status??'available'}:{})}}:{}),
       connected: [...this.browsers.values()].filter(browser => browser.status === 'connected').map(browser => ({ id: browser.key, name: browser.name, source: browser.source })) };
   }
 }

@@ -109,7 +109,12 @@ try{
  await pageCall(1,{browserTab:'t0123456789abcdef'});
  await quiet.begin({quiet:true});
  assert.equal(quiet.seriesHeld,true);assert.equal(quiet.active,1);
- assert.ok(!quiet.child,'A browser-only series must not start the indicator helper or its Esc hook');
+ if(quiet.config.progressOverlayEnabled){
+   const status=await quiet.command('status');assert.equal(status.armed,false,'The default progress overlay cannot arm Esc for browser-only work');
+   assert.equal(status.progressVisible,true,'The independently enabled progress overlay can show browser progress');
+   const escape=await quiet.command('test_key',{vk:0x1b,down:true});assert.equal(escape.consumed,false);assert.equal(escape.paused,false);
+   await quiet.command('test_key',{vk:0x1b,down:false});
+ }else assert.ok(!quiet.child,'With progress disabled, browser-only work must not start the helper');
  await quiet.end({quiet:true});
  await pageCall(1,{elementId:'t0123456789abcdef:12',text:'x'},'type_text');
  assert.equal((await browserState()).indicator,false,'A page element id is a browser-lane call too');
