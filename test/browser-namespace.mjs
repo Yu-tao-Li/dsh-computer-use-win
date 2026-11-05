@@ -43,3 +43,44 @@ for (const app of ['edge', 'chrome', 'default']) {
   } finally {await lane.close();}
 }
 console.log('PASS cold Chrome/Edge/default health resolves selection without launch');
+
+// #61: a page read prints the tab address in its text as well as in meta, so
+// the text must hide the query and fragment of a user's own tab too. The real
+// read paths over a fake CDP connection; no browser is started.
+const BARE = 'https://example.test/inbox', FULL = `${BARE}?token=fixture#fragment`;
+const cdp = {
+  closed: false,
+  send: async method => {
+    if (method === 'Target.attachToTarget') return { sessionId: 'session' };
+    if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'frame', loaderId: 'document' } } };
+    if (method === 'Accessibility.getFullAXTree') return { nodes: [] };
+    if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 };
+    if (method === 'Runtime.evaluate') return { result: { value: FULL } };
+    return {};
+  }
+};
+const lane = new BrowserLane({ env: { WCU_BROWSER_APP: 'chrome' } });
+try {
+  const browser = { key: 'bfixture', name: 'fixture (user)', source: 'user', cdp };
+  const own = lane.tabFor(browser, { targetId: 'OWN', title: 'fixture', url: FULL });
+  const opened = lane.tabFor(browser, { targetId: 'DSH', title: 'fixture', url: FULL });
+  opened.opened = true;
+  const shownUrl = text => text.split('\n')[0].split(' · ').at(-1);
+  for (const action of ['tree', 'snapshot']) {
+    const hidden = await lane.run(action, { browserTab: own.key }, {});
+    assert.equal(hidden.meta.tab.url, BARE);
+    assert.equal(shownUrl(hidden.text), BARE, `${action} text must hide the query and fragment of the user's tab`);
+    assert.ok(!/token=|#fragment/.test(JSON.stringify(hidden)), `${action} result must carry no query or fragment`);
+    const kept = await lane.run(action, { browserTab: opened.key }, {});
+    assert.equal(kept.meta.tab.url, FULL);
+    assert.equal(shownUrl(kept.text), FULL, `${action} text must keep the complete address of a tab DSH opened`);
+  }
+  // After an action that navigated, changes() returns the whole page under the same header.
+  own.last = opened.last = null;
+  assert.equal(shownUrl(lane.changes(own, { lines: [] }).text), BARE);
+  assert.equal(shownUrl(lane.changes(opened, { lines: [] }).text), FULL);
+  assert.equal(own.url, FULL, 'The lane still compares the real address to detect navigations');
+  own.url = 'chrome://settings/?search=fixture#fragment';
+  await assert.rejects(lane.run('tree', { browserTab: own.key }, {}), error => /BROWSER_INTERNAL_PAGE/.test(error.message) && !/search=|#fragment/.test(error.message));
+} finally {await lane.close();}
+console.log('PASS user tab address hidden in meta and page text; a tab DSH opened keeps its complete address');
