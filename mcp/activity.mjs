@@ -97,8 +97,10 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     if(lingering&&(owner||Date.now()>=lingering.until))lingering=undefined;
     const shown=owner??lingering?.owner;
     summaries.update(shown);
+    // Only the overlay reads this text. While it is off the text stays in
+    // memory, so turning it on mid-turn still shows the whole turn.
     atomicJson(file,{active:!!owner,sessionId:owner?.id??null,turn:owner?.turn??null,indicator:!!owner?.desktop,expiresAt:owner?Date.now()+5000:0,
-      ...(shown?{progress:shown.progress}:{}),...(!owner&&lingering?{lingerUntil:lingering.until}:{})});
+      ...(shown&&getSettings().progressOverlayEnabled!==false?{progress:shown.progress}:{}),...(!owner&&lingering?{lingerUntil:lingering.until}:{})});
     needsPublish=false;
   };
   publish();
@@ -244,7 +246,8 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     needsPublish=true;
   }
   ctx.effect(()=>{
-    const timer=setInterval(()=>{if((owner||needsPublish)&&!closed)try{publish();}catch(error){ctx.logger.error(error);}},1000);
+    // One more write when the linger time is over takes the finished text out of the file.
+    const timer=setInterval(()=>{if((owner||needsPublish||(lingering&&Date.now()>=lingering.until))&&!closed)try{publish();}catch(error){ctx.logger.error(error);}},1000);
     timer.unref();
     return ()=>{closed=true;clearInterval(timer);summaries.close();owner=undefined;lingering=undefined;early.clear();publish();};
   });

@@ -32,7 +32,7 @@ Firefox 系网页通道为实验功能：选择“Firefox 系（实验性）”�
 
 屏幕边缘光晕与提示条、鼠标光斑／DSH 标签独立开关。提示位置、远程与录屏可见、提示文字和结束后的隐藏延时（200–3000 毫秒）收在“更多选项”里；示意图跟着开关和提示位置变化；保存后点标题旁的“预览”查看屏幕上的实际效果。提示层不抢焦点、鼠标可穿透，不修改系统光标主题。
 
-“远程与录屏可见”默认开启，让 UU、屏幕共享及录屏可以捕获提示。关闭后请求 Windows 在支持的捕获路径中排除提示。组件通过原生活动显示器枚举、显示／会话事件及接管期间 500 毫秒复核刷新，处理虚拟屏幕新增、移除、重连和布局／DPI 变化。
+“远程与录屏可见”默认开启，让 UU、屏幕共享及录屏可以捕获提示和思考与操作浮窗，包括浮窗里模型的思考和回复。关闭后请求 Windows 在支持的捕获路径中排除这些内容。组件通过原生活动显示器枚举、显示／会话事件及接管期间 500 毫秒复核刷新，处理虚拟屏幕新增、移除、重连和布局／DPI 变化。
 
 DSH 从一轮操作第一次用到鼠标或键盘开始持续显示提示，包括之后的截图、读取和短暂思考。轮次完成、取消或异常退出后按延时收起；最后一次工具活动或模型输出后空闲 30 秒，也会收起提示并释放占用，下一次调用重新显示。仍在执行的动作不会被当作空闲。普通文件读写或 shell 命令不单独触发提示。其他对话正在接管桌面时返回忙碌状态，避免两个任务交错操作鼠标。宿主活动租约过期后会释放提示。独立 stdio 客户端没有 DSH 的轮次边界，保持单次调用显示。
 
@@ -68,7 +68,7 @@ Choose **All / Lite / Lazy / Custom** in one row; a line below describes the sel
 
 Lazy starts with one management entry while allowing all tools to be loaded on demand. Switching back to Custom restores its saved list; reset returns Lazy to management only.
 
-The screen edge glow/status pill and the pointer glow/DSH tag have independent controls. Their pictures follow the switches and the top/bottom placement. Customize text, placement and the 200–3000ms hide delay under More options, save and preview. The layers let clicks pass through, keep focus and leave Windows cursor themes intact. **Visible in remote sessions and recordings** is on by default, including virtual displays. Turning it off requests capture exclusion on supported Windows capture paths. Active monitor enumeration, display/session events and a 500ms topology check refresh the layers after display, layout or DPI changes. The indicators cover this plugin's complete desktop operation series, or a requested preview.
+The screen edge glow/status pill and the pointer glow/DSH tag have independent controls. Their pictures follow the switches and the top/bottom placement. Customize text, placement and the 200–3000ms hide delay under More options, save and preview. The layers let clicks pass through, keep focus and leave Windows cursor themes intact. **Visible in remote sessions and recordings** is on by default, including virtual displays, and also covers the progress overlay, so screen sharing and recordings see its text, including the model's reasoning and replies. Turning it off requests capture exclusion for the indicators and the overlay on supported Windows capture paths. Active monitor enumeration, display/session events and a 500ms topology check refresh the layers after display, layout or DPI changes. The indicators cover this plugin's complete desktop operation series, or a requested preview.
 
 Physical **Esc**, or a recorded key/combination, stops the current operation series and queued input. It cannot retry in the same turn. A new user task or request to continue can use the desktop automatically, without visiting settings. Record a shortcut and save; Restore default (Esc), next to the section title, clears the additional key. Esc cancels recording, and blur or 15 seconds of inactivity exits it. Ordinary mouse movement, other keys and injected keys do not trigger a physical stop. Hiding the indicator keeps the listener active. Browser Use, reads and background control actions do not take Esc; until a turn first uses the mouse or keyboard, stop it with the stop button in DSH.
 

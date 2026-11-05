@@ -132,3 +132,49 @@ try{
  assert.equal(status.armed,false,'A browser-only turn must hide the indicator left by the previous turn');
  console.log(JSON.stringify({browserSeriesQuiet:true,discoveryQuiet:true,readsAndBackgroundElementActionsQuiet:true,activateShowsIndicator:true,browserElementIdsQuiet:true,desktopCallShowsIndicator:true,nextTurnQuietAgain:true}));
 }finally{await quiet.close();for(const dispose of browserDisposers)dispose?.();}
+
+// Only the overlay reads the model's text. With the overlay off the text stays
+// in memory, and after the finished state's linger time it leaves the file.
+let textSettings={progressOverlayEnabled:false,progressOverlayMode:'source'};
+const textHandlers={},textDisposers=[],textFile=path.join(root,'text-activity.json');
+installActivity({on:(name,fn)=>{textHandlers[name]=fn;},effect:fn=>textDisposers.push(fn()),logger:{error:error=>{throw error;}}},textFile,{lingerMs:100,getSettings:()=>textSettings});
+const textSession={id:'text'},textAgent=turn=>({session:textSession,phase:{kind:'running',turn}});
+const modelText=(turn,reasoning,reply)=>{
+ const stream=frame=>textHandlers['agent/assistant-stream']({agent:textAgent(turn),frame}),attemptId='attempt-'+turn;
+ stream({type:'start',attemptId,turn,step:1});
+ stream({type:'chunk',attemptId,chunk:{type:'reasoning-delta',text:reasoning}});
+ stream({type:'chunk',attemptId,chunk:{type:'text-delta',text:reply}});
+};
+const textCall=turn=>textHandlers['tools/execute']({name:'mcp__wincu__windows_computer_use_wait',arguments:{},agent:textAgent(turn),signal:new AbortController().signal},async()=>true);
+const textEnd=turn=>textHandlers['session/event'](textSession,{type:'turn/end',data:{turn,reason:{kind:'completed'}}});
+const textRaw=()=>readFileSync(textFile,'utf8'),textState=()=>JSON.parse(textRaw());
+try{
+ modelText(1,'REASONING_BEFORE_CALL','REPLY_BEFORE_CALL');
+ await textCall(1);
+ assert.equal(textState().active,true);
+ assert.equal(textState().progress,undefined,'With the overlay off the file holds no progress');
+ modelText(1,'REASONING_DURING_TURN','REPLY_DURING_TURN');
+ await textCall(1);
+ assert.doesNotMatch(textRaw(),/REASONING_|REPLY_/,'With the overlay off no model text reaches the file');
+ textSettings={...textSettings,progressOverlayEnabled:true};
+ await textCall(1);
+ assert.match(textRaw(),/REASONING_BEFORE_CALL/,'Turned on mid-turn, the overlay gets the text kept in memory');
+ assert.match(textState().progress.reply,/REPLY_DURING_TURN/);
+ textSettings={...textSettings,progressOverlayEnabled:false};
+ await textCall(1);
+ assert.doesNotMatch(textRaw(),/REASONING_|REPLY_/,'Turned off mid-turn, the next write drops the text');
+ textEnd(1);
+ assert.equal(textState().active,false);
+ assert.doesNotMatch(textRaw(),/REASONING_|REPLY_/,'With the overlay off the finished state holds no text either');
+ textSettings={...textSettings,progressOverlayEnabled:true};
+ modelText(2,'REASONING_TURN_TWO','REPLY_TURN_TWO');
+ await textCall(2);
+ textEnd(2);
+ assert.equal(textState().progress.status,'done');assert.ok(Number.isFinite(textState().lingerUntil));
+ assert.match(textRaw(),/REPLY_TURN_TWO/,'The finished state stays readable while it lingers');
+ const deadline=Date.now()+3000;
+ while(textRaw().includes('_TURN_TWO')&&Date.now()<deadline)await new Promise(r=>setTimeout(r,50));
+ assert.equal(textState().progress,undefined,'After the linger time the file holds no progress');
+ assert.equal(textState().lingerUntil,undefined);
+ console.log(JSON.stringify({overlayOffKeepsTextOutOfFile:true,turnedOnShowsKeptText:true,turnedOffDropsText:true,lingerShowsFinishedState:true,lingerEndClearsText:true}));
+}finally{for(const dispose of textDisposers)dispose?.();}

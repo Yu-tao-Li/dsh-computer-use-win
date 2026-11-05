@@ -59,6 +59,9 @@ for(const mode of ['lite','full']) {
 }
 const ui=await readFile(new URL('../mcp/client.js',import.meta.url),'utf8');
 assert.deepEqual(ui.match(/const allToolNames='([^']+)'/)[1].split(' '),TOOL_NAMES,'UI and backend must use the same catalogue');
+const lazyCounts=ui.match(/(?<=lazyCount:)[^,]+/g);
+assert.equal(lazyCounts.length,2,'Lazy count text in both languages');
+for(const count of lazyCounts)assert.match(new Function('allToolNames',`return ${count}`)({length:999}),/999/,'The lazy count must follow the catalogue');
 assert.deepEqual(normalizeSettings({mode:'lite'}).enabledTools,TOOL_NAMES,'Legacy profiles default to all tools');
 assert.equal(normalizeSettings({}).toolPreset,'full');
 assert.equal(normalizeSettings({enabledTools:['wait']}).toolPreset,'custom','Migrate saved .11 selections');
