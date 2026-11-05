@@ -62,6 +62,17 @@ try {
     assert.equal((await find(tab,'MUST_NOT_RUN')).length, 0);
     stops.push(reason); await call('close_window', { browserTab: tab });
   }
+  // #69: the same changes caused by the last step complete the plan.
+  for (const [button,reason] of [['Navigate','navigation'],['Dialog','dialog'],['Popup','newWindow']]) {
+    const tab = await open();
+    const song = await ref(tab,'Song','Edit'), last = await ref(tab,button,'Button');
+    const result = await call('batch', { browserTab: tab, steps: [{ action: 'set_value', arguments: { elementId: song, value: 'fixture' } }, { action: 'click', arguments: { elementId: last } }] });
+    assert.equal(result.isError, undefined, JSON.stringify(data(result)));
+    assert.equal(data(result).ok, true); assert.equal(data(result).completed, 2);
+    assert.equal(data(result).stopReason, 'completed'); assert.equal(data(result).afterLastStep, reason);
+    if (reason === 'dialog') await call('keypress', { browserTab: tab, keys: ['Escape'] });
+    stops.push('last-' + reason); await call('close_window', { browserTab: tab });
+  }
   const artifact = path.join(root, 'results.json');
   await writeFile(artifact, JSON.stringify({ passed: true, reports, stops, scope: 'real headless Chromium and local deterministic form/music fixtures; no model inference', root }, null, 2));
   console.log(JSON.stringify({ passed: true, reports, stops, artifact, root }));

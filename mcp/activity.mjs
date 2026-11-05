@@ -86,6 +86,10 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
   // model deciding to use the browser). Kept in memory only, per running turn,
   // and shown only if that turn starts using the computer.
   const early=new Map();
+  // The start of each step's reply, in memory only. While a reply streams the
+  // file keeps its last characters so the overlay follows the end; when the
+  // turn finishes, a final reply longer than that is shown from its start.
+  const replyStarts=new WeakMap();
   const summaries=createProgressSummarizer(ctx,{...summaryOptions,getSettings,onChange:()=>{if(!closed)publish();}});
   const expireIdle=()=>{if(owner&&owner.pending===0&&Date.now()-owner.lastActive>=idleMs)owner=undefined;};
   const publish=()=>{
@@ -150,6 +154,8 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
         const kind=event.data.reason?.kind,progress=owner.progress;
         progress.status=kind==='aborted'?'stopped':kind==='error'?'failed':'done';
         progress.endedAt=Date.now();progress.tool='';progress.action='';
+        const last=progress.steps.at(-1),start=last&&replyStarts.get(last);
+        if(start&&start.length>CURRENT_TEXT){last.reply=start.text.slice(0,CURRENT_TEXT-1)+'…';if(progress.step===last.step)progress.reply=last.reply;}
         lingering=lingerMs>0?{owner,until:Date.now()+lingerMs}:undefined;owner=undefined;publish();
       }
       return;
@@ -202,7 +208,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
   function clearStepText(sessionId,turn,step){
     if(owner?.id===sessionId&&owner.turn===turn){
       const entry=owner.progress.steps.find(item=>item.step===step);
-      if(entry){entry.reasoning='';entry.reply='';}
+      if(entry){entry.reasoning='';entry.reply='';replyStarts.delete(entry);}
       if(owner.progress.step===step){owner.progress.reasoning='';owner.progress.reply='';}
       needsPublish=true;
     } else {const seed=early.get(sessionId);if(seed?.turn===turn&&seed.step===step){seed.reasoning='';seed.reply='';}}
@@ -229,6 +235,11 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     if(step!==undefined&&step!==progress.step){progress.step=step;progress.reasoning='';progress.reply='';}
     const entry=stepEntry(progress,progress.step||1);
     progress[field]=(progress[field]+text).slice(-CURRENT_TEXT);entry[field]=(entry[field]+text).slice(-CURRENT_TEXT);
+    if(field==='reply'){
+      const start=replyStarts.get(entry)??{text:'',length:0};
+      if(start.text.length<CURRENT_TEXT)start.text=(start.text+text).slice(0,CURRENT_TEXT);
+      start.length+=text.length;replyStarts.set(entry,start);
+    }
     progress.status=field==='reasoning'?'thinking':'replying';
     needsPublish=true;
   }

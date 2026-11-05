@@ -1,7 +1,7 @@
 // DSH owns MCP transport/cancellation. Display changes do not kill input.
 import z from '@deepseek-ai/schemastery';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_SETTINGS, normalizeSettings, enabledToolsForSettings, toolSelectionKey, STOP_SHORTCUT_PATTERN, TOOL_NAMES, BROWSER_APPS, repairStaleSettings } from './settings.mjs';
@@ -81,6 +81,45 @@ Object.defineProperty(Config,'~standard',{value:{...validation,validate(input){
 // manual entry beside the bundle) start two servers under one name, and DSH
 // keeps one set of mcp__wincu tools. Report it instead of leaving it silent.
 const liveAdapters=new Set();
+// A failure seen by a 250 ms poll would otherwise fill the DSH log (#72): each
+// distinct message is logged at most once a minute, then with a repeat count.
+export function limitedErrorLog(logger,windowMs=60000,now=Date.now){
+  const recent=new Map();
+  return error=>{
+    const key=String(error?.message??error),time=now(),seen=recent.get(key);
+    if(seen&&time-seen.at<windowMs){seen.skipped++;return;}
+    recent.delete(key);recent.set(key,{at:time,skipped:0});
+    while(recent.size>16)recent.delete(recent.keys().next().value);
+    logger.error(error);
+    if(seen?.skipped)logger.warn?.('dsh-computer-use-win: the error above occurred %d more times in the last %d s.',seen.skipped,Math.round((time-seen.at)/1000));
+  };
+}
+// Each adapter keeps its control files in a temp directory named after the
+// DSH process, so a later start can tell a directory left by a crash from one
+// in use (#71). Directories from versions before 0.5.5 carry no process id.
+const CONTROL_PREFIX='dsh-wcu-control-',CONTROL_MAX_AGE_MS=7*24*3600*1000;
+const processAlive=pid=>{try{process.kill(pid,0);return true;}catch(error){return error.code==='EPERM';}};
+export function removeControlDir(dir){
+  try{if(!lstatSync(dir).isDirectory())return false;rmSync(dir,{recursive:true,force:true,maxRetries:2,retryDelay:100});}
+  catch(error){if(error.code!=='ENOENT')return false;}
+  return !existsSync(dir);
+}
+export function sweepControlDirs({tmp=os.tmpdir(),keep,now=Date.now(),maxAgeMs=CONTROL_MAX_AGE_MS,alive=processAlive}={}){
+  const removed=[];let names;
+  try{names=readdirSync(tmp);}catch{return removed;}
+  for(const name of names){
+    if(!name.startsWith(CONTROL_PREFIX))continue;
+    const dir=path.join(tmp,name);if(dir===keep)continue;
+    const owner=/^dsh-wcu-control-(\d+)-[^-]+$/.exec(name);
+    let orphan=false;
+    try{
+      if(owner){const pid=Number(owner[1]);orphan=pid!==process.pid&&!alive(pid);}
+      else{let touched=lstatSync(dir).mtimeMs;for(const file of readdirSync(dir))touched=Math.max(touched,lstatSync(path.join(dir,file)).mtimeMs);orphan=now-touched>maxAgeMs;}
+    }catch{continue;}
+    if(orphan&&removeControlDir(dir))removed.push(name);
+  }
+  return removed;
+}
 export function bridgeConfig(config = {}, runtime = {}) {
   const settings = normalizeSettings(config);
   return {
@@ -97,8 +136,15 @@ export function bridgeConfig(config = {}, runtime = {}) {
 }
 export async function apply(ctx, config) {
   const bridge = await import('@deepseek-ai/dsh-mcp-client');
-  const root = mkdtempSync(path.join(os.tmpdir(), 'dsh-wcu-control-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), `${CONTROL_PREFIX}${process.pid}-`));
   const runtime = { configFile: path.join(root,'settings.json'), stateFile: path.join(root,'state.json'), activityFile:path.join(root,'activity.json'), layoutFile:path.join(root,'overlay-layout.json') };
+  // The MCP server polls these files until DSH has closed its connection, which
+  // runs alongside this adapter's disposal, and its next write would recreate a
+  // removed directory. Remove it once the server has had time to exit; the
+  // next start sweeps whatever a crash or a quit left behind.
+  ctx.effect(() => () => { for (const delay of [1500, 6000]) setTimeout(() => removeControlDir(root), delay).unref(); });
+  setTimeout(() => { try { sweepControlDirs({ keep: root }); } catch {} }, 3000).unref();
+  const logError = limitedErrorLog(ctx.logger);
   // Reset settings go to the DSH log and, through the server, into the health
   // and tools results the agent reads. Which duplicate's tools DSH keeps is
   // up to the host, so a duplicate entry is reported in the log only.
@@ -112,7 +158,7 @@ export async function apply(ctx, config) {
   let desired = normalizeSettings(config), runningSelection, connection, stopped = false;
   installActivity(ctx,runtime.activityFile,{getSettings:()=>desired});
   let updates = Promise.resolve();
-  let saveOverlayPatch, layoutId, layoutSaving = false;
+  let saveOverlayPatch, layoutId, layoutSaving = false, layoutRetry = { id: undefined, at: 0, delay: 0 };
   atomicJson(runtime.configFile, desired);
   ctx.effect(() => () => { stopped = true; });
   const applySettings = next => {
@@ -148,28 +194,43 @@ export async function apply(ctx, config) {
     const timer = setInterval(()=>{
       if(saveOverlayPatch&&!layoutSaving)try{
         const layout=JSON.parse(readFileSync(runtime.layoutFile,'utf8'));
-        if(layout.id!==layoutId){
+        // A failed save is retried with backoff (0.5 s, doubling up to 60 s) and
+        // a newer layout at once. A patch that cannot apply is dropped.
+        if(layout.id!==layoutId&&!(layout.id===layoutRetry.id&&Date.now()<layoutRetry.at)){
           const allowed=['progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressOverlayLocked','progressOverlayEnabled'];
-          if(!layout.patch||Object.keys(layout.patch).some(key=>!allowed.includes(key)))throw Error('Invalid overlay layout patch');
-          normalizeSettings({...desired,...layout.patch});
-          if(layout.base&&Object.entries(layout.base).some(([key,value])=>!allowed.includes(key)||desired[key]!==value)){layoutId=layout.id;}
-          else {layoutSaving=true;Promise.resolve().then(()=>saveOverlayPatch(layout.patch)).then(()=>{layoutId=layout.id;}).catch(error=>ctx.logger.error(error)).finally(()=>{layoutSaving=false;});}
+          let usable=false;
+          try{
+            if(!layout.patch||typeof layout.patch!=='object'||Object.keys(layout.patch).some(key=>!allowed.includes(key)))throw Error('Invalid overlay layout patch');
+            normalizeSettings({...desired,...layout.patch});
+            usable=!(layout.base&&Object.entries(layout.base).some(([key,value])=>!allowed.includes(key)||desired[key]!==value));
+          }finally{if(!usable)layoutId=layout.id;}
+          if(usable){
+            layoutSaving=true;
+            Promise.resolve().then(()=>saveOverlayPatch(layout.patch)).then(()=>{layoutId=layout.id;layoutRetry={id:undefined,at:0,delay:0};},error=>{
+              const delay=layoutRetry.id===layout.id?Math.min(layoutRetry.delay*2,60000):500;
+              layoutRetry={id:layout.id,at:Date.now()+delay,delay};logError(error);
+            }).finally(()=>{layoutSaving=false;});
+          }
         }
-      }catch(error){if(error.code!=='ENOENT')ctx.logger.error(error);}
+      }catch(error){if(error.code!=='ENOENT')logError(error);}
       // Older validators keep plain values rather than volatile references.
       // The Loader still commits the validated raw options for those hosts.
       // The raw entry still holds any value the validator reset; reset it here too.
-      try {const next=normalizeSettings({...config,...repairStaleSettings(ctx.fiber.entry?.options?.config).value});if(JSON.stringify(next)!==JSON.stringify(desired))applySettings(next).catch(error=>ctx.logger.error(error));}
-      catch(error){ctx.logger.error(error);}
+      try {const next=normalizeSettings({...config,...repairStaleSettings(ctx.fiber.entry?.options?.config).value});if(JSON.stringify(next)!==JSON.stringify(desired))applySettings(next).catch(logError);}
+      catch(error){logError(error);}
     },250);
     timer.unref(); return ()=>clearInterval(timer);
   });
   ctx.inject(['settings'], settingsContext => {
     if (typeof settingsContext.settings.register !== 'function') {
       if(typeof settingsContext.settings.update==='function')settingsContext.inject(['configEditor'],owner=>{
+        // DSH 0.2.2's Loader (cordis 4.1) keeps a wrapper of the plugin's fiber
+        // on its entry where 0.2.1 kept the fiber itself; the fiber knows its
+        // entry either way (#72).
         saveOverlayPatch=patch=>{
-          const entry=owner.configEditor.entries().find(entry=>entry.fiber===ctx.fiber);
-          if(!entry)throw Error('The overlay owner is no longer in the DSH profile.');
+          const entries=owner.configEditor.entries();
+          const entry=entries.find(entry=>entry===ctx.fiber.entry)??entries.find(entry=>entry.fiber===ctx.fiber||entry.fiber?.ctx?.fiber===ctx.fiber);
+          if(!entry)throw Error('DSH lists no editable profile entry for this plugin (is it listed twice, or inside another entry?), so overlay moves and resizes are not saved.');
           return owner.settings.update(entry.options.id,patch);
         };
         return ()=>{saveOverlayPatch=undefined;};

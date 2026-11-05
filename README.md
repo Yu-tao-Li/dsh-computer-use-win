@@ -259,7 +259,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 
 `launch_app` 通过 Windows 桌面（资源管理器）启动程序，所以程序在工具调用结束后照常运行。cmd、PowerShell 这类命令解释器和脚本宿主只能不带参数启动，命令请交给 DSH 自己的命令行工具。
 
-`batch` 一次执行 1–20 个已经规划好的动作，比如点击、输入、选择、按键和滚动，对象是同一个窗口或同一个浏览器标签页。每一步照常经过设置里的工具开关、Esc 停止和落点检查。出错、页面跳转、弹出对话框、出现新窗口或输入没能确认时就停下，返回每一步的结果，最后观察一次。
+`batch` 一次执行 1–20 个已经规划好的动作，比如点击、输入、选择、按键和滚动，对象是同一个窗口或同一个浏览器标签页。每一步照常经过设置里的工具开关、Esc 停止和落点检查。出错或输入没能确认时就停下。页面跳转、弹出对话框、出现新窗口或目标关闭时，如果后面还有步骤就停下；如果是最后一步引起的，就算整批完成，结果里的 `afterLastStep` 写明发生了什么，比如填完表点提交后跳到了下一页。返回每一步的结果，最后观察一次。
 
 #### 7.2 精简方案与管理入口
 
@@ -593,7 +593,7 @@ There are **25 action tools and 1 management entry**. The table uses short names
 
 `launch_app` starts programs through the Windows desktop (Explorer), so they keep running after the tool call ends. Command interpreters and script hosts such as cmd and PowerShell start only without arguments; run commands with DSH's own shell tool.
 
-`batch` runs 1–20 planned actions, such as clicks, typing, selection, key presses and scrolling, on one window or one browser tab. Each step goes through the usual checks: the tool switches in the settings, the Esc stop and the check that the click point is not covered. The batch stops on an error, a navigation, a dialog, a new window or input that could not be confirmed, returns the result of every step and observes once at the end.
+`batch` runs 1–20 planned actions, such as clicks, typing, selection, key presses and scrolling, on one window or one browser tab. Each step goes through the usual checks: the tool switches in the settings, the Esc stop and the check that the click point is not covered. The batch stops on an error or on input that could not be confirmed. A navigation, a dialog, a new window or a closed target stops it before the next step; when the last step causes one, the batch completes and `afterLastStep` names the change, as when a submit opens the next page. It returns the result of every step and observes once at the end.
 
 #### 7.2 Lite preset and the management entry
 
