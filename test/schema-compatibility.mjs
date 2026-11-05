@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import z from '@deepseek-ai/schemastery';
 import {TOOL_NAMES} from '../mcp/settings.mjs';
 import {volatileEntries,updateVolatile} from '@deepseek-ai/cosmokit';
+import {mkdtemp,mkdir,writeFile,utimes,symlink,readdir} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 const original=z.prototype.volatile;
 try{
  delete z.prototype.volatile;
@@ -37,3 +41,28 @@ try{
  for(const typed of [{stopShortcut:'Esc'},{indicatorIdleMs:99999},{toolPreset:'smart',stopShortcut:'Ctrl'}])assert.ok(validate(typed).issues,'Typed values stay strict: '+JSON.stringify(typed));
  console.log(JSON.stringify({passed:true,volatileMethodAbsent:true,exposedFields:Object.keys(adapter.SettingsConfig.dict).length,falseValuePreserved:true,staleChoicesRepaired:4,typedValuesStrict:3}));
 }finally{z.prototype.volatile=original;}
+{
+ const adapter=await import('../mcp/dsh-plugin.mjs');
+ // #72: a failure seen on every 250 ms poll reaches the log once a minute.
+ let clock=0;const lines=[];
+ const log=adapter.limitedErrorLog({error:error=>lines.push('error '+error.message),warn:(_format,...values)=>lines.push('warn '+values.join(' '))},60000,()=>clock);
+ for(let tick=0;tick<300;tick++){log(new Error('save failed'));if(tick===10)log(new Error('other failure'));clock+=250;}
+ assert.deepEqual(lines,['error save failed','error other failure','error save failed','warn 239 60']);
+ // #71: orphaned control directories are swept; live, recent and foreign ones stay.
+ const tmp=await mkdtemp(path.join(os.tmpdir(),'wcu-control-sweep-'));
+ const make=async(name,ageDays=0)=>{const dir=path.join(tmp,name);await mkdir(dir);await writeFile(path.join(dir,'settings.json'),'{}');
+   if(ageDays){const time=new Date(Date.now()-ageDays*864e5);await utimes(path.join(dir,'settings.json'),time,time);await utimes(dir,time,time);}return dir;};
+ await make(`dsh-wcu-control-${process.pid}-Live01`);await make('dsh-wcu-control-999999-Dead01');await make('dsh-wcu-control-424242-Alive1',30);
+ await make('dsh-wcu-control-Old123',8);await make('dsh-wcu-control-New123',1);await make('unrelated-dir',30);
+ const keep=await make('dsh-wcu-control-1-Keep01');
+ assert.deepEqual(adapter.sweepControlDirs({tmp,keep,alive:pid=>pid===424242}).sort(),['dsh-wcu-control-999999-Dead01','dsh-wcu-control-Old123']);
+ assert.deepEqual((await readdir(tmp)).sort(),['dsh-wcu-control-1-Keep01','dsh-wcu-control-424242-Alive1',`dsh-wcu-control-${process.pid}-Live01`,'dsh-wcu-control-New123','unrelated-dir'].sort());
+ // A link with a control-directory name is never followed into its target.
+ const target=await mkdtemp(path.join(os.tmpdir(),'wcu-control-target-'));await writeFile(path.join(target,'keep.txt'),'x');
+ const links=await mkdtemp(path.join(os.tmpdir(),'wcu-control-links-'));await symlink(target,path.join(links,'dsh-wcu-control-Link01'),'junction');
+ assert.equal(adapter.removeControlDir(path.join(links,'dsh-wcu-control-Link01')),false);
+ assert.deepEqual(adapter.sweepControlDirs({tmp:links,maxAgeMs:-1}),[]);
+ assert.ok(existsSync(path.join(target,'keep.txt')),'The link target survives');
+ assert.equal(adapter.removeControlDir(path.join(tmp,'missing')),true,'A missing directory counts as removed');
+ console.log(JSON.stringify({passed:true,errorLogLimited:true,controlDirSweep:true,linksNotFollowed:true}));
+}

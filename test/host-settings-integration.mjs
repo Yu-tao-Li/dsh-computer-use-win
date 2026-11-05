@@ -26,7 +26,7 @@ let raw={mode:'lite',indicatorEnabled:false},entry;
 const editor={documentPath:path.join(root,'profile-patch.json'),entries:()=>entry?[entry]:[],configuration:()=>entry?[{entry,inherited:{},override:raw}]:[],edit:async(target,change)=>{
   const next=change(raw,{}),parsed=adapter.Config(next);
   // Validate before persisting, as ConfigEditor does before profile reconciliation.
-  for(const key of Object.keys(parsed))if(typeof parsed[key]?.get==='function')updateVolatile(target.fiber.config[key],parsed[key]);
+  for(const key of Object.keys(parsed))if(typeof parsed[key]?.get==='function')updateVolatile((target.fiber.effectiveConfig??target.fiber.config)[key],parsed[key]);
   raw=next;target.options.config=raw;
   await writeFile(editor.documentPath,JSON.stringify(raw,null,2));
 }};
@@ -35,7 +35,14 @@ ctx.provide('systemPrompt',{tools(){return ()=>{}},section(){return ()=>{}},getS
 ctx.provide('profileContext',{home:root,dir:root,name:'isolated-wcu-test'});
 ctx.provide('configEditor',editor);ctx.provide('loader',{await:async()=>{}});
 const tools=new ToolRuntime(ctx),settings=new SettingsForms(ctx);
-const fiber=ctx.plugin(adapter,raw);entry={id:1,options:{id:'mcp-dsh-computer-use-win',name:'dsh-computer-use-win/mcp/dsh-plugin.mjs',config:raw},fiber:fiber.ctx.fiber};
+// DSH 0.2.2 runs tool calls through a separate executor plugin.
+try{await ctx.plugin(await load('@deepseek-ai/dsh-tool-executor-native'));}catch(error){if(!/MODULE_NOT_FOUND/.test(error.code??''))throw error;}
+// The Loader keeps what ctx.plugin() returns on its entry: cordis-plugin-loader
+// 1.1 (DSH 0.2.2) keeps that wrapper of the plugin's fiber, 1.0 kept the fiber (#72).
+let loaderVersion='1.0.0';try{loaderVersion=require('@deepseek-ai/cordis-plugin-loader/package.json').version;}catch{}
+const [loaderMajor,loaderMinor]=loaderVersion.split('.').map(Number),keepsWrapper=loaderMajor>1||loaderMajor===1&&loaderMinor>=1;
+const logged=[];try{ctx.logger.exporter({colors:0,export:message=>logged.push(String(message.content??(message.args??[]).map(String).join(' ')))});}catch{}
+const fiber=ctx.plugin(adapter,raw);entry={id:1,options:{id:'mcp-dsh-computer-use-win',name:'dsh-computer-use-win/mcp/dsh-plugin.mjs',config:raw},fiber:keepsWrapper?fiber:fiber.ctx.fiber};
 const until=async test=>{const deadline=Date.now()+30000;while(!await test()){if(Date.now()>deadline)throw Error('Host integration condition timed out; fixture='+root);await new Promise(r=>setTimeout(r,40))}};
 try {
   await fiber;
@@ -78,6 +85,20 @@ try {
   atomicJson(layoutFile,{id:'stale-fixture',base:{progressOverlayWidth:440},patch:{progressOverlayWidth:900}});
   await new Promise(resolve=>setTimeout(resolve,700));
   assert.equal(settings.describe().find(item=>item.ns===entry.options.id).value.progressOverlayWidth,520,'Stale native events cannot overwrite newer menu settings');
+  // #72: while DSH lists no editable entry for the plugin, a layout save is
+  // retried with backoff and logged once; it lands when the entry is back. A
+  // patch that cannot apply is dropped instead of retried.
+  const listed=entry;entry=undefined;
+  atomicJson(layoutFile,{id:'retry-fixture',patch:{progressOverlayWidth:610}});
+  await new Promise(resolve=>setTimeout(resolve,2600));
+  const failures=logged.filter(text=>/no editable profile entry/.test(text)).length;
+  assert.equal(failures,1,'A failing overlay save is logged once, not on every poll ('+failures+')');
+  entry=listed;
+  await until(()=>settings.describe().find(item=>item.ns===entry.options.id).value.progressOverlayWidth===610);
+  atomicJson(layoutFile,{id:'invalid-fixture',patch:{progressOverlayWidth:'wide'}});
+  await new Promise(resolve=>setTimeout(resolve,1200));
+  assert.equal(settings.describe().find(item=>item.ns===entry.options.id).value.progressOverlayWidth,610);
+  assert.ok(logged.filter(text=>/progressOverlayWidth/.test(text)).length<=1,'An invalid patch is reported once and dropped');
   await assert.rejects(settings.update(entry.options.id,{progressOverlayOpacity:0}));
   await assert.rejects(settings.update(entry.options.id,{progressLockShortcut:'Esc'}));
   await settings.update(entry.options.id,{progressPreviewToken:Date.now()});
@@ -91,7 +112,7 @@ try {
   await settings.update(entry.options.id,{remoteIndicatorVisible:true});
   await until(async()=>JSON.parse(await readFile(liveFile,'utf8')).remoteIndicatorVisible===true);
   await settings.update(entry.options.id,{stopShortcut:'Ctrl+Alt+K'});
-  assert.equal(entry.fiber.config.stopShortcut.get(),'Ctrl+Alt+K','Host must commit the shortcut volatile reference');
+  assert.equal((entry.fiber.effectiveConfig??entry.fiber.config).stopShortcut.get(),'Ctrl+Alt+K','Host must commit the shortcut volatile reference');
   await until(async()=>JSON.parse(await readFile(liveFile,'utf8')).stopShortcut==='Ctrl+Alt+K');
   assert.equal(JSON.parse(await readFile(editor.documentPath,'utf8')).stopShortcut,'Ctrl+Alt+K');
   for(const stopShortcut of ['Esc','Ctrl','F25','Ctrl+Ctrl+K'])await assert.rejects(settings.update(entry.options.id,{stopShortcut}));
@@ -148,8 +169,14 @@ try {
   await settings.update(entry.options.id,{toolPreset:'lazy'});
   await until(()=>tools.schemas().length===1&&tools.schemas()[0].name.endsWith('windows_computer_use_tools'));
   assert.equal(JSON.parse(await readFile(editor.documentPath,'utf8')).toolPreset,'lazy');
+  // DSH 0.2.2 runs a batch of calls through its executor; 0.2.1 took one call.
+  const runTool=async(name,args)=>{
+    const signal=new AbortController().signal,callId='lazy-'+Date.now();
+    if(typeof tools.setExecutor==='function')return (await tools.execute({calls:[{id:callId,name,arguments:JSON.stringify(args)}],signal})).results[0].result;
+    return tools.execute({callId,name,arguments:args,signal});
+  };
   const manage=async args=>{
-    const result=await tools.execute({callId:'lazy-'+Date.now(),name:'mcp__wincu__windows_computer_use_tools',arguments:args,signal:new AbortController().signal});
+    const result=await runTool('mcp__wincu__windows_computer_use_tools',args);
     assert.ok(!result.isError,JSON.stringify(result));return result;
   };
   await manage({operation:'enable',names:['wait','health']});
@@ -188,3 +215,6 @@ try {
     remoteVisibilityPersistence:true,remoteVisibilityLiveConfig:true,previewAndResumeSignals:true,cursorIndicatorPersistence:true,cursorIndicatorLiveConfig:true,shortcutPersistence:true,shortcutValidation:true,shortcutClear:true,lockedConfigWriteRetried:true,existingUserProfilesModified:false,physicalInputSent:false,profileFixture:root};
   await writeFile(path.join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 } finally {await ctx.fiber.dispose();process.env.TEMP=previousTemp;process.env.TMP=previousTmp;}
+// #71: each adapter removes its control directory once its server has exited.
+await until(async()=>!(await readdir(root)).some(name=>name.startsWith('dsh-wcu-control-')));
+console.log(JSON.stringify({passed:true,loaderKeepsWrapper:keepsWrapper,overlaySaveRetried:true,controlDirsRemoved:true}));

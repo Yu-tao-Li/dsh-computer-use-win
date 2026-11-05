@@ -517,7 +517,7 @@ const tools = [
 ];
 
 const batchActions = ['click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','wait'];
-tools.push({ name: 'windows_computer_use_batch', description: 'Run 1–20 already-planned actions on one explicit window or browserTab, in order, then observe once. Each action retains its normal validation, enabled-tool checks, stop and input guards. Stops on error, uncertain dispatch, navigation, a dialog or new window. Do not batch a decision that depends on unseen output. Never send scripts; steps are action names and their usual arguments.',
+tools.push({ name: 'windows_computer_use_batch', description: 'Run 1–20 already-planned actions on one explicit window or browserTab, in order, then observe once. Each action retains its normal validation, enabled-tool checks, stop and input guards. Stops before the next action on error, uncertain dispatch, navigation, a dialog or new window; such a change after the last action completes the plan and is reported as afterLastStep. Do not batch a decision that depends on unseen output. Never send scripts; steps are action names and their usual arguments.',
   inputSchema: { type: 'object', additionalProperties: false, required: ['steps'], properties: {
     ...windowTargetProperties, ...browserTabProperty,
     timeoutMs: { type: 'integer', minimum: 100, maximum: 60000, default: 30000 },
@@ -1116,6 +1116,9 @@ async function observationText(action, args, request) {
 }
 
 let batchOwner = null;
+// Editors mark unsaved changes in the title ("*name - Notepad", "● name - Code"),
+// so typing that adds or clears such a mark is not navigation.
+const withoutUnsavedMark = title => String(title ?? '').replace(/^\s*[*●•]+\s*|\s*[*●•]+\s*$/g, '').replace(/\s[*●•](?=\s)/g, '');
 const textData = result => { try { return JSON.parse(result.content?.find(part => part.type === 'text')?.text); } catch { return null; } };
 async function runBatch(args, request) {
   if (batchOwner) throw new Error('COMPUTER_USE_BUSY: Another batch is running.');
@@ -1142,17 +1145,20 @@ async function runBatch(args, request) {
     return { name, action: step.action, args: validated };
   });
   const steps = [], content = [], deadline = Date.now() + args.timeoutMs;
-  let stopReason = 'completed', message, before, nativeHandle, nativePid, lease = false;
+  let stopReason = 'completed', afterLastStep, message, before, nativeHandle, nativePid, lease = false;
   batchOwner = request; request.batchSuppressObservation = true;
   const state = async () => {
     if (target.browserTab) return browserLane.batchState(target, request);
     const listed = await runBackend('list_windows', { maxWindows: 200 }, 10000, request);
     const windows = listed.windows ?? [];
     const matches = windows.filter(window => nativeHandle ? String(window.nativeWindowHandle) === nativeHandle : target.nativeWindowHandle ? String(window.nativeWindowHandle) === String(target.nativeWindowHandle) : target.processId ? window.processId === target.processId : String(window.name ?? window.title ?? '').toLowerCase().includes(target.windowTitle.toLowerCase()));
+    // Once resolved the target is pinned to its HWND, so no match means it closed.
+    if (nativeHandle && matches.length === 0) return { closed: true };
     if (matches.length !== 1) throw new Error('BATCH_TARGET_UNAVAILABLE: target is missing or ambiguous; specify its nativeWindowHandle.');
     const found = matches[0]; nativeHandle ??= String(found.nativeWindowHandle); nativePid ??= found.processId;
     if (found.processId !== nativePid) throw new Error('BATCH_TARGET_CHANGED: target process changed.');
-    return { title: found.name ?? found.title, windows: windows.map(window => String(window.nativeWindowHandle)).sort(), dialog: windows.some(window => window.className === '#32770' && window.processId === nativePid) };
+    // The target may itself be a dialog; only another dialog of its process blocks it.
+    return { title: withoutUnsavedMark(found.name ?? found.title), windows: windows.map(window => String(window.nativeWindowHandle)).sort(), dialog: windows.some(window => window.className === '#32770' && window.processId === nativePid && String(window.nativeWindowHandle) !== nativeHandle) };
   };
   try {
     await takeover.begin({ quiet: true }); lease = true;
@@ -1175,19 +1181,29 @@ async function runBatch(args, request) {
       if (result.isError) break;
       if (request.cancelled || takeover.paused) { stopReason = 'cancelled'; break; }
       if (data?.verification === 'unconfirmed' || data?.verified === false) { stopReason = 'unconfirmed'; break; }
-      if (data?.dialog || data?.fileChooser) { stopReason = 'dialog'; break; }
-      if (data?.openedTabs?.length) { stopReason = 'newWindow'; break; }
-      if (data?.tabClosed) { stopReason = 'targetClosed'; break; }
-      const after = await state();
-      if (after.dialog) stopReason = 'dialog';
-      else if (after.windows.some(id => !before.windows.includes(id))) stopReason = 'newWindow';
-      else if (after.url !== before.url || after.document !== before.document || after.load !== before.load || after.title !== before.title || data?.stillLoading) stopReason = 'navigation';
-      before = after;
+      // What the action changed. Before another action this stops the plan; a
+      // change caused by the last action (a submit that navigates, a confirm
+      // dialog, a closed window) completes the plan and is reported with it.
+      let change;
+      if (data?.dialog || data?.fileChooser) change = 'dialog';
+      else if (data?.openedTabs?.length) change = 'newWindow';
+      else if (data?.tabClosed) change = 'targetClosed';
+      else {
+        const after = await state();
+        if (after.closed) change = 'targetClosed';
+        else if (after.dialog) change = 'dialog';
+        else if (after.windows.some(id => !before.windows.includes(id))) change = 'newWindow';
+        else if (after.url !== before.url || after.document !== before.document || after.load !== before.load || after.title !== before.title || data?.stillLoading) change = 'navigation';
+        if (!after.closed) before = after;
+      }
+      if (change) { if (index === plan.length - 1) afterLastStep = change; else stopReason = change; break; }
     }
   } catch (error) { stopReason = request.cancelled ? 'cancelled' : 'error'; message = error.message; }
   finally { request.batchSuppressObservation = false; }
   try {
-    if (before && !request.cancelled && !takeover.paused) {
+    const closed = stopReason === 'targetClosed' || afterLastStep === 'targetClosed';
+    if (closed) content.push({ type: 'text', text: 'Final observation skipped: the target closed.' });
+    else if (before && !request.cancelled && !takeover.paused) {
       const observer = allowedTools.has(prefix + 'accessibility_tree') ? 'accessibility_tree' : allowedTools.has(prefix + 'screenshot') ? 'screenshot' : null;
       if (observer) {
         try {
@@ -1196,7 +1212,7 @@ async function runBatch(args, request) {
         } catch (error) { content.push({ type: 'text', text: 'Final observation unavailable: ' + error.message }); }
       }
     }
-    const result = { content: [{ type: 'text', text: safeJson({ ok: stopReason === 'completed', action: 'batch', planned: plan.length, completed: steps.filter(step => step.ok).length, stopReason, steps, ...(message ? { message } : {}) }) }, ...content], ...(stopReason !== 'completed' ? { isError: true } : {}) };
+    const result = { content: [{ type: 'text', text: safeJson({ ok: stopReason === 'completed', action: 'batch', planned: plan.length, completed: steps.filter(step => step.ok).length, stopReason, ...(afterLastStep ? { afterLastStep } : {}), steps, ...(message ? { message } : {}) }) }, ...content], ...(stopReason !== 'completed' ? { isError: true } : {}) };
     request.batchResult = true;
     return result;
   } finally { try { if (lease) await takeover.end({ quiet: true }); } finally { batchOwner = null; } }

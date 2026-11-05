@@ -9,16 +9,19 @@ await cp(new URL('../mcp', import.meta.url), path.join(root, 'mcp'), { recursive
 await mkdir(path.join(root, 'scripts'));
 await writeFile(path.join(root, 'scripts/windows-uia.ps1'), `param([switch]$Persistent)
 Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop
-$title='Fixture';$extra=@();$dialog=$false
+$title='Fixture';$extra=@();$dialog=$false;$closed=$false
+$targetClass=if($env:WCU_FIXTURE_CLASS){$env:WCU_FIXTURE_CLASS}else{'Fixture'}
 while($null -ne ($line=[Console]::In.ReadLine())){
  $r=$line|ConvertFrom-Json
  $result=@{id=$r.id;ok=$true;action=$r.action}
- if($r.action -eq 'list_windows'){$result.windows=@(@{nativeWindowHandle=101;processId=77;name=$title;className='Fixture'})+$extra}
+ if($r.action -eq 'list_windows'){$result.windows=@($(if(-not $closed){@{nativeWindowHandle=101;processId=77;name=$title;className=$targetClass}}))+$extra}
  elseif($r.action -eq 'tree'){$result.nodeCount=30;$result.tree=@{name=$title}}
  else {
   [IO.File]::AppendAllText($env:WCU_BATCH_MARKER,$r.action+':'+$r.args.value+[Environment]::NewLine)
   if($r.action -eq 'set_value'){
    if($r.args.value -eq 'navigation'){$title='Navigated'}
+   if($r.args.value -eq 'unsaved'){$title='*Fixture'}
+   if($r.args.value -eq 'close'){$closed=$true}
    if($r.args.value -eq 'newWindow'){$extra=@(@{nativeWindowHandle=202;processId=77;name='New';className='Fixture'})}
    if($r.args.value -eq 'dialog'){$extra=@(@{nativeWindowHandle=202;processId=77;name='Dialog';className='#32770'})}
    if($r.args.value -eq 'error'){$result.ok=$false;$result.error='fixture error'}
@@ -45,12 +48,41 @@ await clientCase('complete', async (client, marker) => {
   assert.equal(result.content.filter(block => block.text === 'Final observation:').length, 1);
   assert.equal((await readFile(marker, 'utf8')).trim().split('\n').length, 3);
 });
-for (const scenario of ['navigation','newWindow','dialog','error','unconfirmed']) await clientCase(scenario, async (client, marker) => {
+const reason = scenario => scenario === 'close' ? 'targetClosed' : scenario;
+for (const scenario of ['navigation','newWindow','dialog','close','error','unconfirmed']) await clientCase(scenario, async (client, marker) => {
   const result = await batch(client, [step('one'), step(scenario), step('MUST_NOT_RUN')]);
-  assert.equal(result.isError, true); assert.equal(data(result).stopReason, scenario);
+  assert.equal(result.isError, true); assert.equal(data(result).stopReason, reason(scenario));
   assert.ok(!(await readFile(marker, 'utf8')).includes('MUST_NOT_RUN'));
   assert.equal(data(result).steps.length, 2);
+  assert.equal(data(result).afterLastStep, undefined);
 });
+// #69: a change caused by the last action (a submit that navigates, a confirm
+// dialog, a new or closed window) completes the plan; it is reported, not an error.
+for (const scenario of ['navigation','newWindow','dialog','close']) await clientCase('last-' + scenario, async (client, marker) => {
+  const result = await batch(client, [step('one'), step(scenario)]);
+  assert.equal(result.isError, undefined, JSON.stringify(data(result)));
+  assert.equal(data(result).ok, true); assert.equal(data(result).completed, 2);
+  assert.equal(data(result).stopReason, 'completed'); assert.equal(data(result).afterLastStep, reason(scenario));
+  assert.equal(result.content.filter(block => block.text === 'Final observation:').length, scenario === 'close' ? 0 : 1);
+  if (scenario === 'close') assert.ok(result.content.some(block => /Final observation skipped: the target closed/.test(block.text ?? '')));
+});
+for (const scenario of ['error','unconfirmed']) await clientCase('last-' + scenario, async (client, marker) => {
+  const result = await batch(client, [step('one'), step(scenario)]);
+  assert.equal(result.isError, true); assert.equal(data(result).stopReason, scenario); assert.equal(data(result).afterLastStep, undefined);
+});
+await clientCase('unsaved-mark', async (client, marker) => {
+  const result = await batch(client, [step('unsaved'), step('two')]);
+  assert.equal(result.isError, undefined, 'An unsaved-changes mark in the title is not navigation');
+  assert.equal(data(result).completed, 2); assert.equal(data(result).afterLastStep, undefined);
+});
+await clientCase('target-dialog', async (client, marker) => {
+  const result = await batch(client, [step('one'), step('two')]);
+  assert.equal(result.isError, undefined, 'A dialog that is the target itself does not block the plan');
+  assert.equal(data(result).completed, 2);
+  const blocked = await batch(client, [step('dialog'), step('MUST_NOT_RUN')]);
+  assert.equal(blocked.isError, true); assert.equal(data(blocked).stopReason, 'dialog', 'Another dialog of the process still stops the plan');
+  assert.ok(!(await readFile(marker, 'utf8')).includes('MUST_NOT_RUN'));
+}, { WCU_FIXTURE_CLASS: '#32770' });
 await clientCase('validate-first', async (client, marker) => {
   for (const plan of [[step('one'), { action: 'click', arguments: { x: 1.5, y: 2 } }], Array(21).fill(step('one')), [step('one'), { action: 'launch_app', arguments: { target: 'x' } }], [step('one'), { action: 'set_value', arguments: { elementId: 'x', value: 'two', nativeWindowHandle: 202 } }]]) {
     assert.equal((await batch(client, plan)).isError, true);

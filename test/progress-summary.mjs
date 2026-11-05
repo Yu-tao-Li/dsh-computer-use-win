@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {mkdtemp,readFile} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createRequire} from 'node:module';
@@ -103,6 +104,35 @@ try{
   assert.equal(ended.active,false);assert.equal(ended.progress.status,'done');assert.ok(ended.lingerUntil>Date.now(),'The finished state lingers');
   assert.equal(requested,before+1,'The end of the turn asks for one final summary');
 }finally{for(const dispose of disposers)dispose?.();}
+
+// #70: while a reply streams the file keeps its last 1200 characters; when the
+// turn finishes, a longer final reply is shown from its start with "…" at the end.
+{
+  const file=path.join(root,'reply-start.json'),on={},stops=[];
+  installActivity({on:(name,fn)=>on[name]=fn,effect:fn=>stops.push(fn()),logger:{error:error=>{throw error;}}},file,{getSettings:()=>({...DEFAULT_SETTINGS})});
+  const who={id:'reply-start'},running=turn=>({session:who,phase:{kind:'running',turn}});
+  const stream=frame=>on['agent/assistant-stream']({agent:{session:who},frame});
+  const reply=Array.from({length:300},(_,index)=>`ReplyLine${String(index).padStart(4,'0')}.`).join('');
+  const send=(attemptId,text)=>{for(let at=0;at<text.length;at+=97)stream({type:'chunk',attemptId,chunk:{type:'text-delta',text:text.slice(at,at+97)}});};
+  const finish=turn=>{on['session/event'](who,{type:'turn/end',data:{turn,reason:{kind:'completed'}}});return JSON.parse(readFileSync(file,'utf8')).progress;};
+  try{
+    await on['tools/execute']({name:'mcp__wincu__windows_computer_use_wait',arguments:{},agent:running(1),signal:new AbortController().signal},async()=>true);
+    stream({type:'start',attemptId:'r1',turn:1,step:2});send('r1',reply);
+    await new Promise(resolve=>setTimeout(resolve,1100));
+    const streaming=JSON.parse(readFileSync(file,'utf8')).progress.steps.at(-1).reply;
+    assert.equal(streaming.length,1200);assert.ok(streaming.endsWith('ReplyLine0299.'),'A streaming reply follows its end');
+    const done=finish(1),last=done.steps.at(-1);
+    assert.ok(last.reply.startsWith('ReplyLine0000.'),'A finished long reply starts at its beginning');
+    assert.ok(last.reply.endsWith('…'));assert.equal(last.reply.length,1200);assert.equal(done.reply,last.reply);
+    // A retried attempt's start is dropped with its text, and a short reply is unchanged.
+    await on['tools/execute']({name:'mcp__wincu__windows_computer_use_wait',arguments:{},agent:running(2),signal:new AbortController().signal},async()=>true);
+    stream({type:'start',attemptId:'r2',turn:2,step:3});send('r2','ABANDONED_START '+reply);
+    stream({type:'end',attemptId:'r2',outcome:{kind:'abandoned'}});
+    stream({type:'start',attemptId:'r3',turn:2,step:3});send('r3','Short final reply.');
+    const short=finish(2).steps.at(-1).reply;
+    assert.equal(short,'Short final reply.','A short reply is shown whole, without an abandoned start');
+  }finally{for(const stop of stops)stop?.();}
+}
 
 // Exercise the shipped DSH LLM service when supplied, with a local adapter.
 // This verifies canonical message/stream/routing contracts without a paid API.

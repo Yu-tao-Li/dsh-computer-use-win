@@ -302,3 +302,10 @@ README 的 45.3→64.9、步骤减少 53% 是八模型、相对 GUI+batch 的完
 改后同一段回放：步骤之间不再出现“等待 DSH 输出…”，结束后 20 秒内看得到“已完成：我打开了一个新的浏览器标签页，在必应上搜索「晴天」，并一直下滑到页面最底部。”。总结模式在 41 秒里发出 5 次请求（4 次过程、1 次结果），每条一直显示到下一条出来；替身失败时显示操作步骤，结束后显示回复开头。替身只验证时序和显示，总结文字的质量要在真实 DSH 里看。
 
 真机核对（同日，本机 DSH Desktop 2.0.18 / 宿主 0.2.1-rc.2，AI 总结模式）：浮窗出现在主屏右上角（360×240 物理像素，150%，鼠标穿透），7 步 17.7 秒；3.2 秒出第一条总结，结束后 0.8 秒出结果总结，保留 20 秒后收起，时序都对。但记录到的进度数据里每一步都没有思考文字，结束时也没有回复，总结只能复述动作名（“已找到浏览器或窗口，正在继续处理第 2 步。”）。原因：DSH 0.2 的流式输出走 `agent/assistant-stream` 帧（`{agent, frame}`，frame 为 start/chunk/end，轮次和步号只在 start 帧里），会话事件里没有 `assistant/chunk`；此前的实现和测试都按 `assistant/chunk` 写，测试用的是自造事件。这也解释了用户上午实测时觉得浮窗“体验不好”：原文模式下几乎只看得到状态行。改为监听 `agent/assistant-stream`（按 attemptId 对应轮次和步号；outcome 为 abandoned 的尝试在同一步重试时清掉文字），旧事件保留兼容；回放脚本改发真实帧格式。总结输入增加本轮第一段思考（最多 300 字），提示词改为说清在做什么事、已完成什么、正在做什么，不写工具名、坐标、元素编号和步骤编号。
+
+## 2026-11-06：DSH 0.2.2 的条目形状、batch 的最后一步、控制目录（0.5.5）
+
+- #72：DSH 0.2.2-rc.1（cordis 4.1.0、cordis-plugin-loader 1.1.0）的 Loader 把 `ctx.registry.plugin()` 的返回值存进 `entry.fiber`，那是 `Object.create(fiber)` 包出来的对象；0.2.1-rc.2（loader 1.0.6）存的是 `.ctx.fiber`，也就是插件自己的 fiber。宿主的 dsh-settings 0.2.2 也改成了 `entry.fiber.ctx.fiber`。插件原来用 `entry.fiber === ctx.fiber` 找自己的条目，在 0.2.2 上必定找不到，所以每次拖动浮窗后都每 250 毫秒报一次错。用隔离 profile 和真实宿主模块实测：0.5.4 在 0.2.2 上 10 秒记 39 条错误，布局没有存下；修复后两个宿主都在 140–170 毫秒内写进 `cordis.patch.yml`。现在先用 `ctx.fiber.entry`，再按 fiber 或 `entry.fiber.ctx.fiber` 比较；保存失败从 0.5 秒起翻倍退避到 60 秒，同一错误一分钟一条（`limitedErrorLog`）。
+- 0.2.2 的 `tools.execute` 改成批量接口（`{calls:[{id,name,arguments}]}`，返回 `results[].result`），而且要先加载执行器插件 `@deepseek-ai/dsh-tool-executor-native`；fiber 的实时配置在 `effectiveConfig`。`test/host-settings-integration.mjs` 两种都兼容，用 `node test/host-settings-integration.mjs <DSH 的 node_modules>` 分别对两个版本跑；0.2.1 的模块需要用 DSH Desktop 自带的 Electron（`ELECTRON_RUN_AS_NODE=1`）运行。
+- #69：batch 在最后一步之后照样检查变化，以前会把“填表后点提交”的跳转记成失败，而 DSH 的 MCP 桥遇到 `isError` 直接抛错，工具调用记为失败。现在最后一步引起的变化写进 `afterLastStep`，中途的变化仍然停下。
+- #71：cordis 4 停止插件时并行执行所有 dispose（`_unload` 里的 `Promise.all`），适配器的清理和 MCP 连接的关闭同时进行；服务进程每 250 毫秒读一次控制目录，读不到会调用 `fail()`，写 `state.json` 时又会把目录建回来。所以在 dispose 之后 1.5 秒和 6 秒各删一次，下次启动再清理遗留目录。
