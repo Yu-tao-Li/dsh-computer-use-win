@@ -7,6 +7,7 @@ import path from 'node:path';
 import { DEFAULT_SETTINGS, normalizeSettings, enabledToolsForSettings, toolSelectionKey, STOP_SHORTCUT_PATTERN, TOOL_NAMES, BROWSER_APPS, repairStaleSettings } from './settings.mjs';
 import { atomicJson } from './takeover.mjs';
 import { installActivity } from './activity.mjs';
+import { systemLocale } from './overlay-strings.mjs';
 
 export const name = 'windows-computer-use';
 export const inject = ['tools'];
@@ -120,6 +121,17 @@ export function sweepControlDirs({tmp=os.tmpdir(),keep,now=Date.now(),maxAgeMs=C
   }
   return removed;
 }
+// The overlay speaks the DSH interface language (#74): the language chosen in
+// DSH, which every DSH line keeps as `preference` in its `locale` settings
+// entry (DSH Desktop reads it the same way for its own menus), else the system
+// locale, which is also what DSH follows while nothing is chosen.
+export function readDshLocale(settings) {
+  try {
+    const preference = settings?.describe?.().find(entry => String(entry.ns) === 'locale')?.value?.preference;
+    if (typeof preference === 'string' && preference.trim()) return preference.trim();
+  } catch {}
+  return systemLocale();
+}
 export function bridgeConfig(config = {}, runtime = {}) {
   const settings = normalizeSettings(config);
   return {
@@ -156,7 +168,15 @@ export async function apply(ctx, config) {
   liveAdapters.add(self); ctx.effect(() => () => { liveAdapters.delete(self); });
   if (liveAdapters.size > 1) ctx.logger.warn('dsh-computer-use-win: %d entries of this plugin run in one profile, and DSH keeps only one set of mcp__wincu tools. Remove the extra entry from dsh.profile.bundles in the profile package.json or from its cordis.patch.yml.', liveAdapters.size);
   let desired = normalizeSettings(config), runningSelection, connection, stopped = false;
-  installActivity(ctx,runtime.activityFile,{getSettings:()=>desired});
+  // Read only when the overlay asks, at most every 5 s and again after DSH's
+  // change notice: the locale entry may start after this plugin, and an idle
+  // plugin never calls describe(), which announces every entry the first time.
+  let settingsService, uiLocale = systemLocale(), localeReadAt = 0;
+  const getLocale = () => {
+    if (Date.now() - localeReadAt > 5000) { uiLocale = readDshLocale(settingsService); localeReadAt = Date.now(); }
+    return uiLocale;
+  };
+  installActivity(ctx,runtime.activityFile,{getSettings:()=>desired,getLocale});
   let updates = Promise.resolve();
   let saveOverlayPatch, layoutId, layoutSaving = false, layoutRetry = { id: undefined, at: 0, delay: 0 };
   atomicJson(runtime.configFile, desired);
@@ -222,6 +242,9 @@ export async function apply(ctx, config) {
     timer.unref(); return ()=>clearInterval(timer);
   });
   ctx.inject(['settings'], settingsContext => {
+    settingsService = settingsContext.settings; localeReadAt = 0;
+    settingsContext.effect(() => () => { settingsService = undefined; localeReadAt = 0; });
+    settingsContext.on?.('settings/document-updated', ns => { if (String(ns) === 'locale') localeReadAt = 0; });
     if (typeof settingsContext.settings.register !== 'function') {
       if(typeof settingsContext.settings.update==='function')settingsContext.inject(['configEditor'],owner=>{
         // DSH 0.2.2's Loader (cordis 4.1) keeps a wrapper of the plugin's fiber

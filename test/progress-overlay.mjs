@@ -11,7 +11,9 @@ const activityFile = path.join(root, 'activity.json'), configFile = path.join(ro
 const handlers = {}, disposers = [];
 const ctx = { on: (name, fn) => { handlers[name] = fn; }, effect: fn => disposers.push(fn()), logger: { error: error => { throw error; } } };
 let contentSettings={...DEFAULT_SETTINGS};
-installActivity(ctx, activityFile,{lingerMs:1500,getSettings:()=>contentSettings,summaryOptions:{initialDelayMs:0,request:async()=> 'Fixture summary: reading the page.'}});
+// The overlay follows the language the host reports; these checks read Chinese.
+let uiLocale='zh-CN';
+installActivity(ctx, activityFile,{lingerMs:1500,getSettings:()=>contentSettings,getLocale:()=>uiLocale,summaryOptions:{initialDelayMs:0,request:async()=> 'Fixture summary: reading the page.'}});
 const session = { id: 'fixture-a' }, agent = { session, phase: { kind: 'running', turn: 7 } };
 atomicJson(configFile, { ...DEFAULT_SETTINGS, progressOverlayEnabled: true, indicatorEnabled: false, cursorIndicatorEnabled: false });
 const control = new TakeoverControl({ activityFile, configFile, testMode: true });
@@ -40,6 +42,14 @@ try {
   assert.ok(status.progressContent.includes('AI 总结'));
   const summaryArtifact=path.join(root,'progress-summary-preview.png');
   await control.command('test_render_progress',{path:summaryArtifact,content:status.progressContent});
+  // #74: switching DSH to English redraws the overlay in English on the next update.
+  assert.equal(JSON.parse(await readFile(activityFile,'utf8')).locale,'zh');
+  uiLocale='en-US';
+  status=await wait(value=>value.progressContent.includes('AI summary'));
+  assert.ok(status.progressContent.startsWith('DSH · Step 3 · ')&&!/[一-鿿]/.test(status.progressContent),status.progressContent.slice(0,120));
+  await control.command('test_render_progress',{path:path.join(root,'progress-summary-preview-en.png'),content:status.progressContent});
+  uiLocale='zh-CN';
+  status=await wait(value=>value.progressContent.includes('AI 总结'));
   contentSettings={...DEFAULT_SETTINGS};
   await wait(value=>value.progressContent.includes('Fixture reply.')&&!value.progressContent.includes('AI 总结'));
   // DSH streams text as agent/assistant-stream frames: an abandoned attempt is

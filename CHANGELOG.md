@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.6 — 2026-11-10
+
+- 修复装上插件后，DSH 0.1.5 里所有会话的“加载更早”和右侧序列条失效，控制台报 “received more than one start Match”（[#76](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/76)）。对话里的电脑操控汇总改为只由 `turn/start` 开始一轮，同一轮的工具调用、结果和结束都算更新，和 DSH 自带的轮次定义一致；DSH 0.1.7 以后本来就容许，汇总照常显示。0.1.x 设置页“插件”里的卡片改用 `key` 注册，不再报 “keyed slot requires options.key”。/ On DSH 0.1.5 every conversation's “load earlier” and series bar stopped working: the computer-use series now starts a turn only on `turn/start`, as DSH's own turn definitions do, and the 0.1.x plugin settings card registers with `key`.
+- OCR 读小字（[#75](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/75)）：先按原尺寸读一遍，词的中位高度低于 30 像素时，把图放大到约 36 像素高再读（最多 3 倍，结果里的 `ocrScale`），坐标仍是屏幕坐标；在 9–20 像素的界面文字上，逐字错误率大约减半。`ocr` 默认按原尺寸截图（`maxWidth` 默认改为 0，不再先缩到 1920 宽）；新增 `language` 参数选识别语言，结果里的 `language` 写明实际用的语言（以前总是空的）；中文、日文的行不再逐字加空格；`text` 里的换行不再是字面的 `\n`；工具说明写明 OCR 是尽力而为，能读到 UIA 文字时优先用 UIA。/ OCR reads small text enlarged (a second pass, at most 3x), captures at full size by default, takes a `language`, names the recognizer, joins Chinese and Japanese words without spaces and returns real line breaks.
+- 浮窗、屏幕提示条和 AI 总结跟随 DSH 的界面语言（[#74](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/74)）：读 DSH 自己的语言设置（`locale` 设置项），没选语言时跟系统；现有中文和英文，其他语言显示英文。文字集中在 `mcp/overlay-strings.mjs`，每种语言一份词典，C# 助手只画收到的文字；提示文字保持默认时也跟着语言变。/ The overlay, the indicator bar and the AI summary follow the DSH interface language; every word lives in one dictionary per language in `mcp/overlay-strings.mjs`.
+- 感谢 / Thanks to [@Medicorphant](https://github.com/Medicorphant) for the root cause and fix in #76, [@xuxuzxw](https://github.com/xuxuzxw) for the measurements in #75, and [@caendeith](https://github.com/caendeith) for the complete string inventory in #74.
+
 ## 0.5.5 — 2026-11-06
 
 - 修复 DSH 0.2.2（npm 上 `@deepseek-ai/dsh` 的 next/latest）里拖动、缩放、锁定或关闭进度浮窗后设置存不下来，DSH 日志每 250 毫秒记一条“The overlay owner is no longer in the DSH profile.”，直到重启（[#72](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/72)）。0.2.2 的 Loader 在配置条目上保存的是插件 fiber 的包装对象，插件按 fiber 找自己的条目必定落空；现在先用 fiber 自带的条目，新旧两种形状都认。保存失败时从 0.5 秒起翻倍退避、最长 60 秒，新的布局立即重试；同一错误一分钟最多记一条；无法应用的布局补丁直接丢弃。已在真实的 0.2.1-rc.2 和 0.2.2-rc.1 宿主上验证。/ Fix overlay moves and resizes not being saved on DSH 0.2.2, whose Loader keeps a wrapper of the plugin's fiber on its entry, while an error was logged every 250 ms until restart. Saves now find the entry through the fiber and retry with backoff, and the same error is logged at most once a minute.

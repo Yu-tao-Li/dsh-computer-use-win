@@ -39,8 +39,8 @@ namespace Fixture.Automation {
 }
 '@
 function Has-WindowTarget { param($InputObject) return $false }
-function Capture-Screenshot { param($WindowElement, $MaxWidth) return $script:Shot }
-function Invoke-Ocr { param($PngPath) return $script:Ocr }
+function Capture-Screenshot { param($WindowElement, $MaxWidth) $script:CaptureWidth = $MaxWidth; return $script:Shot }
+function Invoke-Ocr { param($PngPath, $Language) $script:OcrLanguage = $Language; return $script:Ocr }
 function Get-ControlTypeName { param($ControlType) return $ControlType }
 function Convert-Rect { param($Rect) return @{x=1;y=2;width=3;height=4} }
 function Assert-Equal { param($Actual, $Expected, [string]$Message)
@@ -123,3 +123,17 @@ Assert-Equal ($null -eq $result.matched[0].control) $true 'Unavailable control s
 Assert-Box $result.matched[0].boundingBox 120 240 104 40
 [Fixture.Automation.AutomationElement]::ThrowOnHit = $false
 Write-Output 'PASS empty/absent/no-match output, match cap and UIA failure fallback'
+
+# #75: the capture is read at full size unless maxWidth says otherwise, the
+# requested language reaches the recognizer, and the result names both.
+$script:Ocr = @{text='Fixture OCR'; lines=@($lines[0]); language='zh-Hans-CN'; readScale=2.5}
+$script:Shot = @{path='fixture.png'; bounds=@{x=100;y=200}; imageScale=1}
+$result = Invoke-Action -Action 'ocr' -InputObject ([pscustomobject]@{scope='desktop'})
+Assert-Equal $script:CaptureWidth 0 'OCR captures at full size by default'
+Assert-Equal $script:OcrLanguage '' 'No language means the Windows user languages'
+Assert-Equal $result.language 'zh-Hans-CN' 'Result names the recognizer language'
+Assert-Equal $result.ocrScale 2.5 'Result reports the read scale'
+$result = Invoke-Action -Action 'ocr' -InputObject ([pscustomobject]@{scope='desktop'; maxWidth=1280; language='ja'})
+Assert-Equal $script:CaptureWidth 1280 'An explicit maxWidth still shrinks the capture'
+Assert-Equal $script:OcrLanguage 'ja' 'Requested language is passed to the recognizer'
+Write-Output 'PASS full-size capture by default, requested language and reported language/scale'

@@ -17,7 +17,7 @@ const text = result => (result.content || []).map(part => part.text || '').join(
 async function server(name, { script, temp } = {}) {
   const dir = path.join(root, name);
   await mkdir(path.join(dir, 'mcp'), { recursive: true }); await mkdir(path.join(dir, 'scripts'));
-  for (const file of ['server.mjs', 'settings.mjs', 'takeover.mjs', 'browser.mjs']) await copyFile(path.join(source, 'mcp', file), path.join(dir, 'mcp', file));
+  for (const file of ['server.mjs', 'settings.mjs', 'takeover.mjs', 'overlay-strings.mjs', 'browser.mjs']) await copyFile(path.join(source, 'mcp', file), path.join(dir, 'mcp', file));
   await copyFile(path.join(source, 'package.json'), path.join(dir, 'package.json'));
   if (script) await writeFile(path.join(dir, 'scripts/windows-uia.ps1'), script);
   else await copyFile(path.join(source, 'scripts/windows-uia.ps1'), path.join(dir, 'scripts/windows-uia.ps1'));

@@ -136,7 +136,10 @@ app.whenReady().then(async()=>{
   await until("window.snapshot.value.browserSignIn===true&&window.snapshot.value.browserApp==='edge'");
   await evaluate("window.renderPage('en')");
   await until("(document.querySelector('[data-wincu-signin-notice]')?.textContent||'').includes('Risks')");
+  // #74: an unchanged banner text shows in the interface language.
+  assert.equal(await evaluate("window.snapshot.value.indicatorText==='DSH 正在控制电脑'&&document.getElementById('wincu-page-text').value"),'DSH is controlling your computer');
   await evaluate("window.renderPage('zh')");
+  assert.equal(await evaluate("document.getElementById('wincu-page-text').value"),'DSH 正在控制电脑');
   await evaluate("document.getElementById('wincu-page-browserSignIn').click()");
   await until("!document.querySelector('[data-wincu-signin-notice]')");
   await chooseApp('default');
@@ -190,6 +193,9 @@ app.whenReady().then(async()=>{
   assert.deepEqual({mine:nav.mine,other:nav.other,gear:nav.gear,width:nav.width},{mine:true,other:false,gear:'none',width:'16px'});
   assert.match(nav.mask,/^url\("data:image\/svg\+xml,/);
   assert.equal(await evaluate("window.entries.some(x=>x.entry.name==='settings.plugin.item')"),true);
+  // DSH 0.1.x declares settings.plugin.item as a keyed slot and shows the card
+  // registered under the namespace it edits; an id is rejected there (#76).
+  assert.deepEqual(await evaluate("(()=>{const e=window.entries.find(x=>x.entry.name==='settings.plugin.item').entry;return {key:e.key===window.namespace,id:'id' in e};})()"),{key:true,id:false});
   await evaluate("document.getElementById('wincu-page-indicatorEnabled').click()");
   await until("!document.getElementById('wincu-page-indicatorEnabled').checked");
   assert.equal(await evaluate("document.getElementById('wincu-page-cursorIndicatorEnabled').disabled"),false,'Pointer control must remain independent of the screen indicator');
@@ -377,6 +383,15 @@ app.whenReady().then(async()=>{
    return {same:JSON.stringify(node)===JSON.stringify(reopened),count:node.data.calls.length,ended:node.data.ended};
   })()`);
   assert.deepEqual(activity,{same:true,count:3,ended:true});
+  // One start per turn, from turn/start only, as DSH's own turn-tail Definition
+  // does: DSH 0.1.5 throws on a second start and history paging stops (#76).
+  // test/host-conversation-replay.mjs replays this through real DSH assemblers.
+  const roles=await evaluate(`(()=>{
+   const def=window.definitions.find(d=>d.kind==='wincu-series');
+   const other={seq:8,type:'tool/call',data:{turn:1,callId:'x',name:'read_file',arguments:{}}};
+   return [...window.events,other].map(event=>{const match=def.match(event);return match.id+':'+match.role;});
+  })()`);
+  assert.deepEqual(roles,['1:start','1:update','1:update','1:update','1:update','1:update','1:update','1:update','1:update']);
   await until("!!document.querySelector('[data-wincu-series]')");
   assert.equal(await evaluate("document.body.textContent.includes('在浏览器中搜索了「测试」')&&!!document.querySelector('[data-wincu-series] svg')"),true);
   await evaluate("document.querySelector('[data-wincu-series]').open=true");
