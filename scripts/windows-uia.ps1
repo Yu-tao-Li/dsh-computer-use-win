@@ -1229,12 +1229,16 @@ function Post-BackgroundText {
 
 $script:WcuOcrCs = @'
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using System.Threading.Tasks;
+using Windows.Foundation;
+using Windows.Globalization;
+using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
 using Windows.Storage;
-using Windows.Graphics.Imaging;
-using Windows.Foundation;
+using Windows.Storage.Streams;
 
 public static class WindowsComputerUseOcr {
   private static T WaitOp<T>(IAsyncOperation<T> op) {
@@ -1249,34 +1253,155 @@ public static class WindowsComputerUseOcr {
     return tcs.Task.GetAwaiter().GetResult();
   }
 
-  // Returns tab-separated lines:
-  //   LANG\t<language tag>
-  //   TEXT\t<full text, newlines as \n>
-  //   LINE\t<line text>\t<word>@x,y,w,h;<word>@x,y,w,h;...
-  public static string Recognize(string pngPath) {
-    try {
-      StorageFile file = WaitOp(StorageFile.GetFileFromPathAsync(pngPath));
-      var stream = WaitOp(file.OpenAsync(FileAccessMode.Read));
-      var decoder = WaitOp(BitmapDecoder.CreateAsync(stream));
-      var bitmap = WaitOp(decoder.GetSoftwareBitmapAsync());
-      OcrEngine engine = OcrEngine.TryCreateFromUserProfileLanguages();
-      if (engine == null) throw new Exception("No OCR engine available (no OCR language installed for this system).");
-      OcrResult result = WaitOp(engine.RecognizeAsync(bitmap));
-      var sb = new StringBuilder();
-      sb.Append("TEXT\t").AppendLine(result.Text.Replace("\r", "").Replace("\n", "\\n"));
-      foreach (OcrLine line in result.Lines) {
-        var ws = new StringBuilder();
-        foreach (OcrWord word in line.Words) {
-          var r = word.BoundingRect;
-          ws.Append(word.Text.Replace("\t", " ")).Append('@')
-            .Append((int)Math.Round(r.Left)).Append(',')
-            .Append((int)Math.Round(r.Top)).Append(',')
-            .Append((int)Math.Round(r.Width)).Append(',')
-            .Append((int)Math.Round(r.Height)).Append(';');
-        }
-        sb.Append("LINE\t").Append(line.Text.Replace("\r", "").Replace("\n", "\\n")).Append('\t').AppendLine(ws.ToString());
+  // No tag: the Windows user languages, as before. A tag picks the installed
+  // recognizer it names or that extends it ("zh-Hans" reads with zh-Hans-CN).
+  public static OcrEngine CreateEngine(string tag) {
+    if (String.IsNullOrWhiteSpace(tag)) {
+      OcrEngine profile = OcrEngine.TryCreateFromUserProfileLanguages();
+      if (profile == null) throw new Exception("No OCR language is installed for this user. " + InstalledLanguages());
+      return profile;
+    }
+    string wanted = tag.Trim();
+    foreach (Language language in OcrEngine.AvailableRecognizerLanguages)
+      if (String.Equals(language.LanguageTag, wanted, StringComparison.OrdinalIgnoreCase)) return OcrEngine.TryCreateFromLanguage(language);
+    foreach (Language language in OcrEngine.AvailableRecognizerLanguages)
+      if (language.LanguageTag.StartsWith(wanted + "-", StringComparison.OrdinalIgnoreCase)) return OcrEngine.TryCreateFromLanguage(language);
+    throw new Exception("OCR language '" + wanted + "' is not installed. " + InstalledLanguages());
+  }
+
+  public static string InstalledLanguages() {
+    var tags = new List<string>();
+    foreach (Language language in OcrEngine.AvailableRecognizerLanguages) tags.Add(language.LanguageTag);
+    return "Installed OCR languages: " + (tags.Count == 0 ? "none" : String.Join(", ", tags.ToArray())) + ". Windows adds one with a language's optical character recognition feature (Settings > Time & language > Language & region).";
+  }
+
+  // Windows OCR misreads small text (#75). As in Text-Grab, a first pass
+  // measures the words; when the median word is under 30 px tall the image is
+  // read again enlarged toward 36 px, at most 3x and within the engine's
+  // maximum image size and a 36-megapixel budget. On rendered 9-20 px UI text
+  // this halved the character error rate; enlarging 4x did worse than 3x.
+  public const double TargetWordHeight = 36, MaxUpscale = 3, PixelBudget = 36e6;
+  public static double Fit(int width, int height, double maxDimension) {
+    return Math.Min(maxDimension / Math.Max(width, height), Math.Sqrt(PixelBudget / ((double)width * height)));
+  }
+  public static double ReadScale(double[] wordHeights, int width, int height, double maxDimension) {
+    double scale = MaxUpscale;
+    if (wordHeights.Length > 0) {
+      var sorted = (double[])wordHeights.Clone();
+      Array.Sort(sorted);
+      double median = sorted[sorted.Length / 2];
+      if (median > 0) scale = Math.Min(MaxUpscale, TargetWordHeight / median);
+    }
+    return Math.Min(scale, Fit(width, height, maxDimension));
+  }
+
+  // Chinese and Japanese lines come back with a space between characters.
+  // Their words are joined the way PowerToys Text Extractor does it
+  // (OcrTextFormatter): a space only next to a word holding Latin letters or
+  // digits, never after opening or before closing punctuation.
+  public static bool UsesSpaces(string languageTag) {
+    return !(languageTag.StartsWith("zh", StringComparison.OrdinalIgnoreCase) || languageTag.StartsWith("ja", StringComparison.OrdinalIgnoreCase));
+  }
+  private static bool Punctuation(UnicodeCategory c) {
+    return c == UnicodeCategory.ConnectorPunctuation || c == UnicodeCategory.DashPunctuation || c == UnicodeCategory.OpenPunctuation || c == UnicodeCategory.ClosePunctuation
+      || c == UnicodeCategory.InitialQuotePunctuation || c == UnicodeCategory.FinalQuotePunctuation || c == UnicodeCategory.OtherPunctuation;
+  }
+  private static bool TightPunctuation(int point) {
+    switch (point) {
+      case 0x3001: case 0x3002: case 0x30FB: case 0xFF01: case 0xFF05: case 0xFF0C: case 0xFF0E:
+      case 0xFF1A: case 0xFF1B: case 0xFF1F: case 0xFF61: case 0xFF64: case 0xFF65: return true;
+    }
+    return false;
+  }
+  public static string JoinWords(IList<string> words) {
+    var sb = new StringBuilder();
+    bool started = false, leftSpaces = false;
+    int leftLast = 0;
+    UnicodeCategory leftCategory = UnicodeCategory.OtherNotAssigned;
+    foreach (string word in words) {
+      if (String.IsNullOrEmpty(word)) continue;
+      int first = -1, last = 0;
+      UnicodeCategory firstCategory = UnicodeCategory.OtherNotAssigned, lastCategory = UnicodeCategory.OtherNotAssigned;
+      bool spaces = false, punctuationOnly = true;
+      for (int i = 0; i < word.Length; i += Char.IsSurrogatePair(word, i) ? 2 : 1) {
+        int point = Char.IsSurrogatePair(word, i) ? Char.ConvertToUtf32(word, i) : word[i];
+        UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(word, i);
+        if (first < 0) { first = point; firstCategory = category; }
+        last = point; lastCategory = category;
+        spaces |= category == UnicodeCategory.UppercaseLetter || category == UnicodeCategory.LowercaseLetter || category == UnicodeCategory.TitlecaseLetter || category == UnicodeCategory.DecimalDigitNumber;
+        punctuationOnly &= Punctuation(category);
       }
-      return sb.ToString();
+      bool space = started && (leftSpaces || spaces)
+        && leftCategory != UnicodeCategory.OpenPunctuation && leftCategory != UnicodeCategory.InitialQuotePunctuation
+        && firstCategory != UnicodeCategory.ClosePunctuation && firstCategory != UnicodeCategory.FinalQuotePunctuation
+        && !(punctuationOnly && first < 0x10000 && ",.:;!?%‥…".IndexOf((char)first) >= 0)
+        && !TightPunctuation(leftLast) && !TightPunctuation(first)
+        && firstCategory != UnicodeCategory.NonSpacingMark && firstCategory != UnicodeCategory.SpacingCombiningMark && firstCategory != UnicodeCategory.EnclosingMark;
+      if (space) sb.Append(' ');
+      sb.Append(word);
+      started = true; leftSpaces = spaces; leftLast = last; leftCategory = lastCategory;
+    }
+    return sb.ToString();
+  }
+
+  private static SoftwareBitmap Decode(BitmapDecoder decoder, int width, int height, double scale) {
+    if (scale == 1) return WaitOp(decoder.GetSoftwareBitmapAsync());
+    var transform = new BitmapTransform();
+    transform.ScaledWidth = (uint)Math.Max(1, Math.Round(width * scale));
+    transform.ScaledHeight = (uint)Math.Max(1, Math.Round(height * scale));
+    transform.InterpolationMode = scale > 1 ? BitmapInterpolationMode.Cubic : BitmapInterpolationMode.Fant;
+    return WaitOp(decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, transform, ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage));
+  }
+
+  private static string Clean(string text) {
+    return (text ?? "").Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ').Replace('\u001E', ' ').Replace('\u001F', ' ');
+  }
+
+  // Returns tab-separated lines; word boxes are in the PNG's own pixels:
+  //   LANG\t<recognizer language tag>
+  //   SCALE\t<factor the image was read at>
+  //   LINE\t<line text>\t<word>\x1E<x>,<y>,<w>,<h>\x1F<word>\x1E...
+  public static string Recognize(string pngPath, string languageTag) {
+    try {
+      OcrEngine engine = CreateEngine(languageTag);
+      StorageFile file = WaitOp(StorageFile.GetFileFromPathAsync(pngPath));
+      using (IRandomAccessStream stream = WaitOp(file.OpenAsync(FileAccessMode.Read))) {
+        BitmapDecoder decoder = WaitOp(BitmapDecoder.CreateAsync(stream));
+        int width = (int)decoder.PixelWidth, height = (int)decoder.PixelHeight;
+        double maxDimension = OcrEngine.MaxImageDimension;
+        double scale = Math.Min(1, Fit(width, height, maxDimension));
+        OcrResult result = WaitOp(engine.RecognizeAsync(Decode(decoder, width, height, scale)));
+        var heights = new List<double>();
+        foreach (OcrLine line in result.Lines)
+          foreach (OcrWord word in line.Words)
+            if (word.BoundingRect.Height > 0) heights.Add(word.BoundingRect.Height / scale);
+        double larger = ReadScale(heights.ToArray(), width, height, maxDimension);
+        if (larger > scale * 1.2) {
+          scale = larger;
+          result = WaitOp(engine.RecognizeAsync(Decode(decoder, width, height, scale)));
+        }
+        string tag = engine.RecognizerLanguage.LanguageTag;
+        bool spaced = UsesSpaces(tag);
+        var sb = new StringBuilder();
+        sb.Append("LANG\t").AppendLine(tag);
+        sb.Append("SCALE\t").AppendLine(scale.ToString("0.###", CultureInfo.InvariantCulture));
+        foreach (OcrLine line in result.Lines) {
+          var texts = new List<string>();
+          var ws = new StringBuilder();
+          foreach (OcrWord word in line.Words) {
+            var r = word.BoundingRect;
+            string text = Clean(word.Text);
+            texts.Add(text);
+            ws.Append(text).Append('\u001E')
+              .Append((int)Math.Round(r.Left / scale)).Append(',')
+              .Append((int)Math.Round(r.Top / scale)).Append(',')
+              .Append((int)Math.Round(r.Width / scale)).Append(',')
+              .Append((int)Math.Round(r.Height / scale)).Append('\u001F');
+          }
+          sb.Append("LINE\t").Append(spaced ? Clean(line.Text) : JoinWords(texts)).Append('\t').AppendLine(ws.ToString());
+        }
+        return sb.ToString();
+      }
     } catch (Exception ex) {
       throw new Exception("OCR failed: " + ex.Message, ex);
     }
@@ -1294,7 +1419,7 @@ function Get-OcrHelper {
     # Only the winmds the C# code touches (plus the framework facades csc
     # needs for WinRT binding). Keeping the set small also keeps the command
     # line short.
-    $need = @("Windows.Media.winmd", "Windows.Storage.winmd", "Windows.Graphics.winmd", "Windows.Foundation.winmd")
+    $need = @("Windows.Media.winmd", "Windows.Storage.winmd", "Windows.Graphics.winmd", "Windows.Foundation.winmd", "Windows.Globalization.winmd")
     $winmdRefs = @()
     foreach ($n in $need) {
       $p = Join-Path $wd $n
@@ -1326,21 +1451,24 @@ function Get-OcrHelper {
 
 function Invoke-Ocr {
   # OCR a PNG file; word boxes come back in the image's pixel coordinates.
-  param([string]$PngPath)
+  # Language: an installed recognizer tag or its prefix; empty = Windows user languages.
+  param([string]$PngPath, [string]$Language = '')
   Get-OcrHelper
-  $raw = [WindowsComputerUseOcr]::Recognize($PngPath)
+  $raw = [WindowsComputerUseOcr]::Recognize($PngPath, $Language)
   $linesOut = @()
-  $fullText = ""
   $lang = ""
+  $readScale = 1.0
   foreach ($line in ($raw -split "`r?`n")) {
     if ($line -match '^LANG\t(.*)$') { $lang = $Matches[1]; continue }
-    if ($line -match '^TEXT\t(.*)$') { $fullText = $Matches[1]; continue }
+    if ($line -match '^SCALE\t(.*)$') { $readScale = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture); continue }
     if ($line -match '^LINE\t(.*)\t(.*)$') {
       $lineText = $Matches[1]
       $words = @()
-      foreach ($w in ($Matches[2] -split ';')) {
+      # Words are separated by U+001F and text from its box by U+001E, so OCR
+      # text may hold any printable character.
+      foreach ($w in $Matches[2].Split([char]0x1F)) {
         if ($w -eq '') { continue }
-        $at = $w.LastIndexOf('@')
+        $at = $w.LastIndexOf([char]0x1E)
         if ($at -lt 0) { continue }
         $wtext = $w.Substring(0, $at)
         $coords = $w.Substring($at + 1) -split ','
@@ -1350,7 +1478,7 @@ function Invoke-Ocr {
       $linesOut += [ordered]@{ text = $lineText; words = $words }
     }
   }
-  return [ordered]@{ text = $fullText.Replace("\\n", "`n"); lines = $linesOut; language = $lang }
+  return [ordered]@{ text = (@($linesOut | ForEach-Object { $_.text }) -join "`n"); lines = $linesOut; language = $lang; readScale = $readScale }
 }
 
 function Get-OcrWordBounds {
@@ -3307,7 +3435,10 @@ function Invoke-Action {
       # upgraded to the underlying UIA control (FromPoint), so the model can
       # then invoke/click the real control instead of the glyph.
       $scope = Get-Prop $inputObject "scope" "active_window"
-      $maxWidth = [int](Get-Prop $inputObject "maxWidth" 1920)
+      # Native pixels by default: shrinking a wide window first makes its text
+      # smaller than OCR reads well, and the helper enlarges small text itself.
+      $maxWidth = [int](Get-Prop $inputObject "maxWidth" 0)
+      $language = [string](Get-Prop $inputObject "language" "")
       $query = [string](Get-Prop $inputObject "query" "")
       $winEl = $null
       $activationRefused = $false
@@ -3333,7 +3464,7 @@ function Invoke-Action {
       $origY = [int]$shot.bounds.y
       $scale = 1.0
       if ($null -ne $shot.imageScale) { $scale = [double]$shot.imageScale }
-      $ocr = Invoke-Ocr -PngPath $shot.path
+      $ocr = Invoke-Ocr -PngPath $shot.path -Language $language
       $lines = @()
       foreach ($line in $ocr.lines) {
         $words = @()
@@ -3388,6 +3519,10 @@ function Invoke-Action {
       }
       $result['coordinateSpace'] = 'screen'
       $result['imageScale'] = $scale
+      # The recognizer that read the text, and how much the capture was
+      # enlarged for it (1 = read at capture size).
+      $result['language'] = $ocr.language
+      $result['ocrScale'] = $ocr.readScale
       $result['captureMethod'] = $shot.method
       $result['occludedPossible'] = $shot.occludedPossible
       if ([bool](Get-Prop $inputObject 'includeScreenshot' $false)) { $result['screenshot'] = $shot }

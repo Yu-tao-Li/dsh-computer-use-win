@@ -32,7 +32,9 @@ vm.runInNewContext(await readFile(new URL('../mcp/client.js',import.meta.url),'u
 });
 const {SlotCore}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-client-ui-slots')));
 const core=new SlotCore();
-core.register({name:'root',children:Object.fromEntries(['settings.section','plugins.item','settings.plugin.item','tool.call.toolview','conversation.chat.node'].map(name=>[name,{kind:name.includes('toolview')||name==='conversation.chat.node'?'keyed':'list',scope:'root'}]))},()=>null);
+// Slot kinds as the hosts declare them; settings.plugin.item is keyed on DSH 0.1.x (#76).
+const keyedSlots=['settings.plugin.item','tool.call.toolview','conversation.chat.node'];
+core.register({name:'root',children:Object.fromEntries(['settings.section','plugins.item','settings.plugin.item','tool.call.toolview','conversation.chat.node'].map(name=>[name,{kind:keyedSlots.includes(name)?'keyed':'list',scope:'root'}]))},()=>null);
 const ctx=new Context(),slots=[];
 ctx.provide('locale',{register:()=>()=>{},bind:()=>key=>key});
 ctx.provide('slots',{inject:(_name,register)=>{const result=register();if(result&&typeof result.next==='function')for(const _item of result){};return result;},register:(entry,component)=>{slots.push(entry.name);return core.register(entry,component);}});

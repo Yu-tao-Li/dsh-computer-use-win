@@ -4,13 +4,17 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from '
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_SETTINGS, normalizeSettings } from './settings.mjs';
+import { helperStrings, indicatorText, overlayLocale, overlayStrings, systemLocale } from './overlay-strings.mjs';
 
 export const STOPPED = 'COMPUTER_USE_STOPPED_BY_USER: The user stopped this operation series with Esc or their custom shortcut. Do not retry desktop input in this turn. A new user turn, including a request to continue, can use the desktop automatically; no settings change is required.';
 const helperScript = fileURLToPath(new URL('../scripts/windows-takeover.ps1', import.meta.url));
 // What "Open overlay to adjust" shows: the same layout as a real run.
-export const PREVIEW_PROGRESS = Object.freeze({ step: 2, status: 'acting', tool: 'scroll', action: '滚动页面', steps: [
-  { step: 1, actions: [{ label: '打开新标签页', state: 'done' }], reasoning: '这里按步骤显示 DSH 的思考文字，和对话里看到的一致。', reply: '' },
-  { step: 2, actions: [{ label: '滚动页面', state: 'running' }], reasoning: '正文较长时可以滚动查看；回到底部后继续跟随新输出。', reply: '' }] });
+export function previewProgress(locale) {
+  const words = overlayStrings(locale), scroll = words.labels.scroll[0];
+  return { step: 2, status: 'acting', tool: 'scroll', action: scroll, steps: [
+    { step: 1, actions: [{ label: words.newTab, state: 'done' }], reasoning: words.previewFirst, reply: '' },
+    { step: 2, actions: [{ label: scroll, state: 'running' }], reasoning: words.previewSecond, reply: '' }] };
+}
 
 // Windows refuses to replace a file that another process holds open without
 // delete sharing (a reader, an antivirus scan) for a moment, with EPERM, EACCES
@@ -46,8 +50,11 @@ export function atomicJson(file, value) {
 
 export class TakeoverControl {
   constructor({ powershell = 'powershell.exe', onStop = () => {}, configFile = process.env.WCU_CONFIG_FILE,
-    stateFile = process.env.WCU_STATE_FILE, activityFile=process.env.WCU_ACTIVITY_FILE,testMode = false, config = {} } = {}) {
+    stateFile = process.env.WCU_STATE_FILE, activityFile=process.env.WCU_ACTIVITY_FILE,testMode = false, config = {}, locale } = {}) {
     this.powershell = powershell; this.onStop = onStop; this.configFile = configFile; this.stateFile = stateFile;
+    // The overlay's language: the DSH interface language the host writes into
+    // the activity file, unless a caller fixes one; standalone, the system's.
+    this.fixedLocale = locale; this.locale = overlayLocale(locale ?? systemLocale());
     this.testMode = testMode; this.config = normalizeSettings(config); this.active = 0; this.shown = 0; this.paused = false;
     this.layoutFile=process.env.WCU_LAYOUT_FILE;
     this.progressPreviewToken=this.config.progressPreviewToken;
@@ -92,6 +99,7 @@ export class TakeoverControl {
     if (this.configFile) this.config = normalizeSettings(JSON.parse(readFileSync(this.configFile, 'utf8')));
     if(this.activityFile){
       const activity=JSON.parse(readFileSync(this.activityFile,'utf8'));
+      if(this.fixedLocale===undefined&&typeof activity.locale==='string')this.locale=overlayLocale(activity.locale);
       const held=activity.active===true&&Number.isFinite(activity.expiresAt)&&activity.expiresAt>Date.now();
       const key=held?JSON.stringify([activity.sessionId,activity.turn]):this.seriesKey;
       // A series of browser-lane calls is held for turn tracking but shows
@@ -100,7 +108,7 @@ export class TakeoverControl {
       // After the turn ends the overlay keeps showing its final state for a
       // short time; that holds no series, indicator or stop key.
       const lingering=!held&&!!activity.progress&&Number.isFinite(activity.lingerUntil)&&activity.lingerUntil>Date.now();
-      const progress=JSON.stringify({enabled:this.config.progressOverlayEnabled&&(held||lingering),remoteIndicatorVisible:this.config.remoteIndicatorVisible,settings:this.config,progress:{...activity.progress,status:this.paused&&held?'stopped':activity.progress?.status??'waiting'}});
+      const progress=JSON.stringify({enabled:this.config.progressOverlayEnabled&&(held||lingering),remoteIndicatorVisible:this.config.remoteIndicatorVisible,locale:this.locale,settings:this.config,progress:{...activity.progress,status:this.paused&&held?'stopped':activity.progress?.status??'waiting'}});
       if(!this.disabledForTest&&this.sentProgress!==progress&&(this.child||(this.config.progressOverlayEnabled&&(held||lingering)))){
         await this.command('progress',JSON.parse(progress));this.sentProgress=progress;
       }
@@ -115,7 +123,7 @@ export class TakeoverControl {
         this.persist();
       }
     }
-    const presentation=JSON.stringify([this.config.indicatorEnabled,this.config.cursorIndicatorEnabled,this.config.remoteIndicatorVisible,this.config.indicatorText,this.config.indicatorPosition,this.config.indicatorIdleMs,this.config.stopShortcut]);
+    const presentation=JSON.stringify([this.config.indicatorEnabled,this.config.cursorIndicatorEnabled,this.config.remoteIndicatorVisible,this.config.indicatorText,this.config.indicatorPosition,this.config.indicatorIdleMs,this.config.stopShortcut,this.locale]);
     if (this.child && this.sentPresentation!==presentation) {
       await this.command(((this.seriesHeld&&this.seriesIndicator)||this.shown>0)&&!this.paused&&!this.blockedSeries.has(this.seriesKey)?'begin':'configure', this.config);
       this.sentPresentation=presentation;
@@ -133,7 +141,7 @@ export class TakeoverControl {
     }
     if(this.config.progressPreviewToken!==this.progressPreviewToken){
       this.progressPreviewToken=this.config.progressPreviewToken;
-      if(!this.disabledForTest&&this.progressPreviewToken>0)await this.command('progress',{enabled:true,preview:true,settings:this.config,remoteIndicatorVisible:this.config.remoteIndicatorVisible,progress:PREVIEW_PROGRESS});
+      if(!this.disabledForTest&&this.progressPreviewToken>0)await this.command('progress',{enabled:true,preview:true,settings:this.config,remoteIndicatorVisible:this.config.remoteIndicatorVisible,progress:previewProgress(this.locale)});
     }
   }
   // A quiet lease (browser-lane calls) checks the stopped state and counts as an
@@ -208,9 +216,18 @@ export class TakeoverControl {
     }).finally(() => { this.starting = null; });
     return this.starting;
   }
+  // Every command that draws text carries the words in the overlay's language,
+  // and an unchanged default banner text follows that language (#74).
+  withWords(command, params) {
+    if (!['begin', 'configure', 'preview', 'progress'].includes(command)) return params;
+    const sent = { ...params, strings: helperStrings(this.locale) };
+    if (command !== 'progress') sent.indicatorText = indicatorText(params.indicatorText, this.locale);
+    return sent;
+  }
   async command(command, params = {}) {
     if(this.closed&&command!=='close')throw Error('COMPUTER_USE_STOPPING');
     await this.start();
+    params = this.withWords(command, params);
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.waiters.delete(id); reject(new Error(`Takeover ${command} timed out`)); }, 5000);

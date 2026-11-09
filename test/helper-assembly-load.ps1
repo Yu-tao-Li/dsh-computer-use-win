@@ -128,8 +128,8 @@ if ($result.ocr -and $isDesktop) {
     $font.Dispose()
   } finally { $graphics.Dispose() }
   $bitmap.Save($png, [System.Drawing.Imaging.ImageFormat]::Png); $bitmap.Dispose()
-  $raw = [WindowsComputerUseOcr]::Recognize($png)
-  $text = ($raw -split "`r?`n" | Where-Object { $_ -like "TEXT`t*" } | Select-Object -First 1)
-  $result.ocrText = if ($text) { $text.Substring(5) } else { '' }
+  $raw = [WindowsComputerUseOcr]::Recognize($png, '')
+  # The helper writes one LINE row per recognized line: LINE<tab>text<tab>words.
+  $result.ocrText = (@($raw -split "`r?`n" | Where-Object { $_ -like "LINE`t*" } | ForEach-Object { ($_ -split "`t")[1] }) -join ' ')
 }
 $result | ConvertTo-Json -Compress

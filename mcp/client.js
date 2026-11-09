@@ -54,6 +54,13 @@ window.__ModuleLoader__.load({
       en:{intro:'Choose the agent’s tools and how desktop control is shown and stopped.',toolsTitle:'Tool mode',toolsHint:'Lite covers everyday tasks. More tools can be loaded when needed.',lite:'Lite',full:'Full',liteSummary:'Common tools with less context',fullSummary:'All desktop tools at startup',liteCount:'11 initial tools',fullCount:'25 initial tools',modeAfter:'Mode changes take effect after the current action finishes.',indicatorTitle:'Takeover indicator',indicator:'Show screen edges and a banner',indicatorHint:'See when the agent is operating your computer.',position:'Banner position',top:'Top',bottom:'Bottom',preview:'Preview indicator',previewHint:'Save changes before previewing the actual screen indicator.',previewOff:'Indicator is off',previewOn:'Screen preview during control',previewNote:'The indicator keeps focus and lets clicks pass through.',appearance:'More indicator options',text:'Banner text',delay:'Keep visible after an action',delayHint:'Stay visible between consecutive actions. 200–3000 milliseconds.',stop:'Stop and resume',escTitle:'Press Esc to stop',stopHint:'Control stays paused until you resume. Ordinary mouse movement and other keys do not stop it.',resume:'Resume desktop control',extraStop:'Additional stop option',corner:'Top-left mouse-corner failsafe',cornerHint:'Refuse further input after the pointer stays in the top-left corner for about 500 ms. Turn off to use Esc alone.',save:'Save changes',discard:'Discard changes',dirty:'Unsaved changes',clean:'Save after making changes',ms:'ms'}
     };
     for(const lang of ['zh','en'])Object.assign(dictionaries[lang],extraCopy[lang]);
+    // The banner's built-in text in every overlay language (indicatorDefault in
+    // mcp/overlay-strings.mjs). An unchanged default shows, and is drawn, in the
+    // interface language (#74).
+    const defaultIndicatorTexts=['DSH 正在控制电脑','DSH is controlling your computer'];
+    Object.assign(dictionaries.zh,{indicatorDefault:defaultIndicatorTexts[0]});
+    Object.assign(dictionaries.en,{indicatorDefault:defaultIndicatorTexts[1]});
+    const isDefaultIndicatorText=text=>!String(text??'').trim()||defaultIndicatorTexts.includes(String(text).trim());
     Object.assign(dictionaries.zh,{intro:'选择 agent 使用的工具，设置接管提示与停止方式。',extraStop:'其他停止方式',corner:'用鼠标停止操作',cornerHint:'将鼠标移到桌面最左上角，停留约半秒，工具就会停止点击和输入。移开鼠标后可继续；Esc 始终可用。',githubLink:'GitHub · dsh-computer-use-win ↗',starRequest:'您的 Star 就是我更新的动力，球球了，这对我很重要！',issueBefore:'如果有问题，欢迎去',issueLink:'提 Issue',issueAfter:'，您来许愿，我来实现！我的响应也会很迅速的！'});
     Object.assign(dictionaries.en,{extraStop:'Other ways to stop',corner:'Stop using the mouse',cornerHint:'Move the pointer to the top-left corner of the desktop and leave it there for about half a second to stop clicks and typing. Move it away to continue. Esc is always available.',githubLink:'GitHub · dsh-computer-use-win ↗',starRequest:'Your Star keeps me motivated to update this project. Please, it means a lot to me!',issueBefore:'Found a problem or have a wish? ',issueLink:'Open an issue',issueAfter:' — you make the wish, I’ll work on it! I’ll be quick to respond.'});
     Object.assign(dictionaries.zh,{starPrefix:'您的 ',starLink:'Star',starAfter:' 就是我更新的动力，球球了，这对我很重要！',issueBefore:'如有问题，欢迎去',issueAfter:'，您来许愿，我来实现！'});
@@ -546,7 +553,7 @@ window.__ModuleLoader__.load({
             h('div',{className:'wcu-fields'},
               field(title(t('position'),null,{id:idPrefix+'-position-label'}),h('div',{className:'wcu-segment',role:'radiogroup','aria-labelledby':idPrefix+'-position-label'},radio('indicatorPosition','top',t('top')),radio('indicatorPosition','bottom',t('bottom')))),
               field(title(t('delay'),'delayHint',{htmlFor:idPrefix+'-delay'}),h('div',{className:'wcu-number'},h('input',{className:'wcu-control',id:idPrefix+'-delay',type:'number',min:200,max:3000,step:100,value:draft.indicatorIdleMs,disabled:indicatorDisabled,onChange:e=>change('indicatorIdleMs',Number(e.target.value))}),h('span',null,t('ms')))),
-              field(title(t('text'),null,{htmlFor:idPrefix+'-text'}),h('input',{className:'wcu-control wcu-text',id:idPrefix+'-text',type:'text',maxLength:120,value:draft.indicatorText,disabled:indicatorDisabled,onChange:e=>change('indicatorText',e.target.value)})),
+              field(title(t('text'),null,{htmlFor:idPrefix+'-text'}),h('input',{className:'wcu-control wcu-text',id:idPrefix+'-text',type:'text',maxLength:120,value:isDefaultIndicatorText(draft.indicatorText)&&draft.indicatorText.trim()?t('indicatorDefault'):draft.indicatorText,disabled:indicatorDisabled,onChange:e=>change('indicatorText',e.target.value)})),
               field(title(t('remoteVisible'),'remoteVisibleHint',{htmlFor:idPrefix+'-remoteIndicatorVisible'}),toggle('remoteIndicatorVisible','remoteVisible'))))),
         h('section',{className:'wcu-section','data-wincu-progress-settings':true,'aria-labelledby':idPrefix+'-progress-title'},
           head(idPrefix+'-progress-title','progressSettings',null,button('openProgress',{'data-wincu-open-progress':true,className:'wcu-small',disabled,onClick:openProgress})),
@@ -624,9 +631,13 @@ window.__ModuleLoader__.load({
       if(event.type==='turn/end')return {...state,ended:true,reason:data.reason?.kind||'completed'};
       return state;
     }
+    // One Context per turn, started only by turn/start, as DSH's own turn-tail
+    // Definition does. DSH 0.1.5 throws on a second start Match for a Context,
+    // and the throw left every conversation's history paging stuck (#76).
+    const seriesEvents=['turn/start','turn/end','tool/call','tool/result'];
     const seriesDefinition={
       kind:'wincu-series',target:'chat',
-      match:event=>['turn/start','turn/end','tool/call','tool/result'].includes(event.type)&&Number.isInteger(event.data?.turn)?{id:String(event.data.turn),role:'start'}:null,
+      match:event=>seriesEvents.includes(event.type)&&Number.isInteger(event.data?.turn)?{id:String(event.data.turn),role:event.type==='turn/start'?'start':'update'}:null,
       start:(_context,match)=>reduceSeries({calls:[],seq:match.event.seq,ended:false},match.event),
       update:(context,match)=>reduceSeries(context.state,match.event),
       buildViewNode:context=>!context.state?.ended||!context.state.calls.length?null:{key:context.key,kind:'wincu-series',id:context.id,target:'chat',anchorSeq:context.state.calls[0].seq,location:context.start?.location??{kind:'unresolved'},visibility:'visible',data:context.state}
@@ -696,7 +707,9 @@ window.__ModuleLoader__.load({
       };
       ctx.slots.inject('settings.section',()=>ctx.slots.register({name:'settings.section',id:'computer-use',order:16,label:()=>t('nav'),locale:NS,inject:()=>({scope,savePatch,as:'section',idPrefix:'wincu-page'})},Card));
       ctx.slots.inject('plugins.item',()=>ctx.slots.register({name:'plugins.item',id:'windows-computer-use',order:30,label:()=>t('nav'),locale:NS,inject:()=>({scope,savePatch,as:'section',idPrefix:'wincu-plugin'})},Card));
-      ctx.slots.inject('settings.plugin.item',()=>ctx.slots.register({name:'settings.plugin.item',id:'windows-computer-use',order:30,locale:NS,inject:()=>({scope,savePatch})},Card));
+      // A keyed slot on DSH 0.1.x: the Plugins tab shows the card registered
+      // under the settings namespace it edits (#76). Later hosts never declare it.
+      ctx.slots.inject('settings.plugin.item',()=>ctx.slots.register({name:'settings.plugin.item',key:namespace,order:30,locale:NS,inject:()=>({scope,savePatch})},Card));
       };
       ctx.inject(['configForms'],owner=>mount(owner.configForms.get('mcp-dsh-computer-use-win'),owner,'mcp-dsh-computer-use-win'));
       ctx.inject(['settingsScope','connection','remote'],owner=>mount(owner.settingsScope.bind({namespace:'windows-computer-use'}),owner,'windows-computer-use'));

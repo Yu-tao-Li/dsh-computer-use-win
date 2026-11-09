@@ -100,7 +100,7 @@ DSH Web 和单独的 MCP 客户端会用你电脑上的 Node.js 运行插件，�
 
 #### 2.3 思考与操作浮窗
 
-DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示它在想什么、做了什么。每一步一个小标题，写明这一步的操作，后面是这一步的思考文字，和对话里看到的一致。任务结束后，标题变成“已完成 · 步数 · 用时”，浮窗从回复开头显示结果，再保留 20 秒。这样你不用把 DSH 窗口拉到前面查看进度，也就不会打断它的操作。
+DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示它在想什么、做了什么。每一步一个小标题，写明这一步的操作，后面是这一步的思考文字，和对话里看到的一致。任务结束后，标题变成“已完成 · 步数 · 用时”，浮窗从回复开头显示结果，再保留 20 秒。这样你不用把 DSH 窗口拉到前面查看进度，也就不会打断它的操作。浮窗、提示条和 AI 总结的文字跟着 DSH 的界面语言走：DSH 里选了哪种语言就用哪种，没选时跟系统；中文以外的语言暂时显示英文。
 
 ![思考与操作浮窗的两个画面，取自一次真实的“打开浏览器搜索晴天并下滑到底”任务，由插件的浮窗程序按记录重新画出：左边是执行中，标题“DSH · 第 3 步 · 执行中”，副标题“连续执行 7 个操作：滚动页面、等待”，下面是模型这一步的思考（这个模型用英文思考）；右边是结束后，标题“DSH · 已完成 · 10 步 · 41 秒”，下面从回复开头显示“已完成：我打开了一个新的浏览器标签页，在必应上搜索「晴天」，并一直下滑到页面最底部。”；两个浮窗的右上角都是锁形按钮](assets/desktop-progress-overlay-hd.png)
 
@@ -129,7 +129,7 @@ DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示�
 
 ![思考与操作浮窗设置：显示思考与操作浮窗、锁定并穿透鼠标两个开关，各有小示意图，右上角是“打开浮窗并调整”按钮；展开的更多选项里有说明文字、浮窗内容（直接显示 DSH 输出）和背景不透明度（60）](assets/desktop-settings-overlay-hd.png)
 
-**接管提示。** agent 用鼠标键盘操作桌面时，屏幕边缘会亮起蓝色光晕，顶部或底部出现“DSH 正在控制电脑”提示条，鼠标旁跟着一个 DSH 标签。屏幕提示和鼠标提示可以分别开关，点“预览”能在你的屏幕上试看；提示位置、文字、保留时长和远程录屏可见收在“更多选项”里。
+**接管提示。** agent 用鼠标键盘操作桌面时，屏幕边缘会亮起蓝色光晕，顶部或底部出现“DSH 正在控制电脑”提示条（英文界面显示英文），鼠标旁跟着一个 DSH 标签。屏幕提示和鼠标提示可以分别开关，点“预览”能在你的屏幕上试看；提示位置、文字、保留时长和远程录屏可见收在“更多选项”里。
 
 ![接管提示设置：屏幕边缘与提示条、突出显示鼠标两个开关，各有小示意图，右上角是预览按钮；展开的更多选项里有提示位置（顶部或底部）、提示文字、操作后保留提示的毫秒数，以及远程与录屏可见](assets/desktop-settings-indicators-hd.png)
 
@@ -144,7 +144,7 @@ DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示�
 | 你想让 agent 做的事 | 插件怎么做到 |
 |---|---|
 | 找到窗口、按钮和输入框 | 列出打开的窗口，再通过 UI Automation（UIA，Windows 给程序读取界面控件的接口）找到控件和它们的名字 |
-| 读出界面上的文字，包括图片和自绘界面里的字 | 截图，用 Windows 自带的文字识别（OCR）找出文字和位置。界面控件很少、又没找到目标时，查找会自动改用 OCR |
+| 读出界面上的文字，包括图片和自绘界面里的字 | 截图，用 Windows 自带的文字识别（OCR）找出文字和位置；小字会先放大再识别，也可以指定识别语言。界面控件很少、又没找到目标时，查找会自动改用 OCR |
 | 点击、输入、填写表单 | 优先在后台直接操作控件：按下按钮、填入内容、往输入框里打字、滚动列表，都不动鼠标、不抢前台、不用剪贴板。必须用鼠标键盘的步骤（按坐标点击、粘贴、按键）只临时借用前台，做完把鼠标和前台还给你 |
 | 一次做完几个确定的操作 | `batch` 按顺序执行 1–20 个已经规划好的动作，每一步照常检查。出错、页面跳转、弹出对话框或出现新窗口时就停下，最后只观察一次，省下来回的轮数 |
 | 在浏览器里查资料、填网页，不占用你的鼠标 | Chrome 和 Edge 里的网页走浏览器通道：插件通过浏览器的调试协议直接读网页结构，按元素点击和填写。标签页在后台也能操作，不移动鼠标，也不把窗口切到前台（见 7.4） |
@@ -334,7 +334,7 @@ npm ci
 npm test
 ```
 
-单独运行的 MCP 服务不依赖任何第三方包；接入 DSH 时，用的是 DSH 自带的 Schemastery 和官方 MCP 桥。开发依赖只用于测试。`npm test` 会运行 **50 套互相隔离的回归测试**，覆盖设置兼容、接管与停止、思考与操作浮窗、界面读取、截图、文字识别协议、输入边界、批量动作和浏览器通道。它不会发出真实的键盘鼠标输入，也不会改动你装好的 DSH 配置；需要真实界面的测试只操作专用的测试窗口和临时的浏览器配置，日志写在命令输出的临时目录里。
+单独运行的 MCP 服务不依赖任何第三方包；接入 DSH 时，用的是 DSH 自带的 Schemastery 和官方 MCP 桥。开发依赖只用于测试。`npm test` 会运行 **52 套互相隔离的回归测试**，覆盖设置兼容、接管与停止、思考与操作浮窗、界面读取、截图、文字识别协议、输入边界、批量动作和浏览器通道。它不会发出真实的键盘鼠标输入，也不会改动你装好的 DSH 配置；需要真实界面的测试只操作专用的测试窗口和临时的浏览器配置，日志写在命令输出的临时目录里。
 
 `node test/notepad-e2e.mjs` 是另一项会真实打字的测试，它会打开记事本，请在专门的测试桌面上运行。
 
@@ -434,7 +434,7 @@ Each desktop action is a row with a mouse icon, such as “Entered text”, “S
 
 #### 2.3 Reasoning and progress overlay
 
-While DSH works on the computer, a translucent overlay in a corner of the screen shows what it is thinking and doing, step by step. Each step gets a heading with its action, followed by the reasoning for that step, the same text you see in the conversation. When the task ends, the heading shows that it is done, with the number of steps and the time taken, and the overlay shows the reply from its start for another 20 seconds. So you never have to bring the DSH window to the front to check on progress, which would interrupt the work. The overlay's headings are in Chinese.
+While DSH works on the computer, a translucent overlay in a corner of the screen shows what it is thinking and doing, step by step. Each step gets a heading with its action, followed by the reasoning for that step, the same text you see in the conversation. When the task ends, the heading shows that it is done, with the number of steps and the time taken, and the overlay shows the reply from its start for another 20 seconds. So you never have to bring the DSH window to the front to check on progress, which would interrupt the work. The overlay, the indicator bar and the AI summary use the DSH interface language: the language chosen in DSH, or the system's when none is chosen. Languages other than Chinese show English for now.
 
 ![Two frames of the progress overlay, redrawn by the plugin's overlay code from the record of a real task (open a browser, search for 晴天 and scroll to the end). Left, during the task: the heading reads DSH · step 3 · acting, the subheading reads run 7 actions: scroll the page, wait, and below it is the model's reasoning for that step, in English. Right, after the task: the heading reads DSH · done · 10 steps · 41 s, followed by the start of the reply. Both overlays have the padlock button in the top-right corner](assets/desktop-progress-overlay-hd.png)
 
@@ -463,7 +463,7 @@ The settings are under Computer Use, the tab with the mouse icon on the left (�
 
 ![Overlay settings: the Show reasoning and progress overlay and Lock and pass through mouse switches, each with a small picture, and the Open overlay to adjust button at the top right; More options is open with a description, the overlay content (DSH output) and the background opacity (60)](assets/desktop-settings-overlay-hd.png)
 
-**Control indicators.** While the agent uses the mouse or keyboard on the desktop, a blue glow lines the screen edges, a “DSH 正在控制电脑” bar appears at the top or bottom, and a DSH tag follows the pointer. The screen and pointer indicators have their own switches, and Preview shows them on your screen. Placement, text, how long they stay and remote visibility are under More options.
+**Control indicators.** While the agent uses the mouse or keyboard on the desktop, a blue glow lines the screen edges, a “DSH is controlling your computer” bar appears at the top or bottom (in Chinese when DSH is set to Chinese), and a DSH tag follows the pointer. The screen and pointer indicators have their own switches, and Preview shows them on your screen. Placement, text, how long they stay and remote visibility are under More options.
 
 ![Control indicator settings: switches for the screen edges and status bar and for highlighting the pointer, each with a small picture, and a Preview button; More options is open with top or bottom placement, the indicator text, how many milliseconds the indicator stays after an action, and remote and recording visibility](assets/desktop-settings-indicators-hd.png)
 
@@ -478,7 +478,7 @@ The settings are under Computer Use, the tab with the mouse icon on the left (�
 | What you want the agent to do | How the plugin does it |
 |---|---|
 | Find windows, buttons and text fields | It lists open windows, then uses UI Automation (UIA, the Windows interface that lets programs read on-screen controls) to find controls and their names |
-| Read text on screen, including text in images and custom-drawn apps | It takes a screenshot and uses the built-in Windows text recognition (OCR) to find words and their positions. When an app exposes few controls and a search finds nothing, the search switches to OCR by itself |
+| Read text on screen, including text in images and custom-drawn apps | It takes a screenshot and uses the built-in Windows text recognition (OCR) to find words and their positions; small text is enlarged before it is read, and the recognition language can be chosen. When an app exposes few controls and a search finds nothing, the search switches to OCR by itself |
 | Click, type and fill in forms | It operates controls directly in the background when it can: pressing buttons, filling in fields, typing into text boxes and scrolling lists move neither your mouse nor the foreground and leave the clipboard alone. Steps that need the real mouse and keyboard (clicks at screen positions, pastes, key presses) only borrow the foreground, and give the mouse and the foreground back afterwards |
 | Do several known steps at once | `batch` runs 1–20 planned actions in order and checks each one as usual. It stops on an error, a navigation, a dialog or a new window, and observes once at the end, which saves round trips |
 | Look things up and fill in web pages without taking over your mouse | Pages in Chrome and Edge go through the browser lane: the plugin reads the page structure over the browser's debugging protocol and clicks or fills elements directly. Background tabs work too, without moving your mouse or bringing a window forward (see 7.4) |
@@ -668,7 +668,7 @@ npm ci
 npm test
 ```
 
-The standalone MCP server needs no third-party packages at runtime. Inside DSH, it uses DSH's own Schemastery and the official MCP bridge. Development dependencies are only for testing. `npm test` runs **50 isolated regression suites** covering settings compatibility, takeover and stopping, the progress overlay, reading controls, capture, OCR protocols, input edge cases, batch actions and the browser lane. It sends no real keyboard or mouse input and does not touch your installed DSH profiles. Tests that need a real interface use only their own test windows and temporary browser profiles, and logs go to the temporary folder the command prints.
+The standalone MCP server needs no third-party packages at runtime. Inside DSH, it uses DSH's own Schemastery and the official MCP bridge. Development dependencies are only for testing. `npm test` runs **52 isolated regression suites** covering settings compatibility, takeover and stopping, the progress overlay, reading controls, capture, OCR protocols, input edge cases, batch actions and the browser lane. It sends no real keyboard or mouse input and does not touch your installed DSH profiles. Tests that need a real interface use only their own test windows and temporary browser profiles, and logs go to the temporary folder the command prints.
 
 `node test/notepad-e2e.mjs` is a separate test that really types. It opens Notepad, so run it on a dedicated test desktop.
 

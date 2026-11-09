@@ -19,6 +19,7 @@ const suites = [
   ['schema-compatibility',process.execPath,['test/schema-compatibility.mjs']],
   ['takeover-native', process.execPath, ['test/takeover-native.mjs']],
   ['activity-series',process.execPath,['test/activity-series.mjs']],
+  ['overlay-strings',process.execPath,['test/overlay-strings.mjs']],
   ['atomic-json', process.execPath, ['test/atomic-json.mjs']],
   ['takeover-cancellation', powershell, ['-NoProfile', '-File', 'test/takeover-cancellation.ps1']],
   ['selftest', process.execPath, ['mcp/server.mjs', '--self-test']],
@@ -60,6 +61,7 @@ const suites = [
   // 22 real Chrome/Edge restarts: 90-140 s on CI runners, past 180 s on a slow one.
   ['browser-profile-lifecycle', process.execPath, ['test/browser-profile-lifecycle.mjs', path.join(root, 'browser-profile-lifecycle')], 360000],
   ['ocr-query-contract', powershell, ['-NoProfile', '-File', 'test/ocr-query-contract.ps1']],
+  ['ocr-reading', powershell, ['-NoProfile', '-File', 'test/ocr-reading.ps1']],
   ['native-input-errors', powershell, ['-NoProfile', '-File', 'test/native-input-errors.ps1']],
   ['input-upgrade-contract', powershell, ['-NoProfile', '-File', 'test/input-upgrade-contract.ps1']],
   ['less-takeover-contract', powershell, ['-NoProfile', '-File', 'test/less-takeover-contract.ps1']]

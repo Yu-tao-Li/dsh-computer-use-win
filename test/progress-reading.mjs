@@ -8,7 +8,7 @@ import {TakeoverControl} from '../mcp/takeover.mjs';
 import {DEFAULT_SETTINGS} from '../mcp/settings.mjs';
 
 const root=await mkdtemp(path.join(os.tmpdir(),'wcu-progress-reading-'));
-const control=new TakeoverControl({testMode:true,powershell:process.env.WINDOWS_CU_POWERSHELL||'powershell.exe',config:{...DEFAULT_SETTINGS}});
+const control=new TakeoverControl({testMode:true,powershell:process.env.WINDOWS_CU_POWERSHELL||'powershell.exe',config:{...DEFAULT_SETTINGS},locale:'zh'});
 control.disabledForTest=false;control.layoutFile=path.join(root,'layout.json');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let settings={...DEFAULT_SETTINGS,progressOverlayPosition:'custom',progressOverlayX:80,progressOverlayY:80,progressOverlayLocked:false};
@@ -116,6 +116,30 @@ try{
  await capture('compact-summary.png');
  data={step:3,status:'waiting',tool:'',reasoning:'',reply:''};status=await show();
  assert.equal(status.progressReading.text,'等待 DSH 输出…');
+ // #74: the same overlay in English, when that is the DSH interface language.
+ control.locale='en';
+ const english={...history,steps:[{step:1,actions:[{label:'Open a new tab',state:'done'}],reasoning:'Opened.',reply:''},
+   {step:2,actions:[{label:'Run 4 actions: Scroll the page',state:'done'},{label:'Screenshot of the page',state:'error'}],reasoning:'Scrolling to the end.',reply:''},
+   {step:3,actions:[],reasoning:'Confirmed.',reply:'Reached the bottom of the page.'}]};
+ data=english;status=await show();
+ assert.ok(status.progressContent.startsWith('DSH · Done · 3 steps · 38 s'),status.progressContent.slice(0,80));
+ assert.equal(status.progressReading.text,['Step 1 · Open a new tab','Opened.','Step 2 · Run 4 actions: Scroll the page, Screenshot of the page (error)','Scrolling to the end.','Step 3','Confirmed.','Reply','Reached the bottom of the page.'].join('\n'));
+ await capture('history-english.png');
+ data={...english,step:1,steps:english.steps.slice(0,1)};status=await show();assert.ok(status.progressContent.startsWith('DSH · Done · 1 step · 38 s'),status.progressContent.slice(0,60));
+ data={...english,status:'stopped'};status=await show();assert.ok(status.progressContent.startsWith('DSH · Stopped · step 3'));
+ data={...english,status:'failed'};status=await show();assert.ok(status.progressContent.startsWith('DSH · Error · step 3'));
+ data={...english,status:'acting',endedAt:0,action:'Screenshot of the page'};status=await show();
+ assert.ok(status.progressContent.startsWith('DSH · Step 3 · Acting\nScreenshot of the page'),status.progressContent.slice(0,60));
+ data={...english,displayMode:'summary',summaries:[],summaryStatus:'unavailable'};status=await show();
+ assert.ok(status.progressReading.text.includes('Step 3\nNo summary right now; showing the steps.\nReply\nReached the bottom of the page.'),status.progressReading.text);
+ data={...english,displayMode:'summary',summaries:[{step:2,text:'Opened the search page.',final:false},{step:3,text:'Reached the bottom.',final:true}]};status=await show();
+ assert.equal(status.progressReading.text,'AI summary · Step 2\nOpened the search page.\nAI summary · Result\nReached the bottom.');
+ data={step:3,status:'waiting',tool:'',reasoning:'![](shot.png)',reply:''};status=await show();
+ assert.equal(status.progressReading.text,'Thinking\n(image)');
+ data={step:3,status:'waiting',tool:'',reasoning:'',reply:''};status=await show();
+ assert.equal(status.progressReading.text,'Waiting for DSH…');
+ assert.ok(!/[一-鿿]/.test(status.progressContent),'No Chinese is left in the English overlay');
+ control.locale='zh';
  // The lock button. Resting the user's own pointer on the padlock unlocks the
  // window for adjusting; DSH's pointer never does (injected input, or a cursor
  // that got there without a physical move); being away locks it again. The

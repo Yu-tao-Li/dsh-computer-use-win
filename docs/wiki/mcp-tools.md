@@ -324,7 +324,7 @@ Wait for a short period before observing the UI again.
 
 ### ocr
 
-Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns text, lines and word boxes in SCREEN coordinates. query is literal text matching, not semantic recognition; inspect lines if 'search' misses a placeholder. Click matched.word.x/y using foreground dispatch, then type_text with focusMode:'preserve'. Optional resolveControl performs a potentially blocking UIA hit-test; its control may be the whole page rather than the text input.
+Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns text, lines and word boxes in SCREEN coordinates. Best effort: small or faint text can still be misread and there is no confidence score, so prefer UIA names and values when the app exposes them. query is literal text matching, not semantic recognition; inspect lines if 'search' misses a placeholder. Click matched.word.x/y using foreground dispatch, then type_text with focusMode:'preserve'. Optional resolveControl performs a potentially blocking UIA hit-test; its control may be the whole page rather than the text input.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -333,10 +333,13 @@ Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns
 | nativeWindowHandle | integer | min: 1 |
 | activate | boolean | default: false |
 | scope | string | active_window/desktop; default: "active_window" |
-| maxWidth | integer | default: 1920; min: 0; max: 7680 |
+| maxWidth | integer | default: 0; min: 0; max: 7680 |
+| language | string | pattern: BCP 47 tag |
 | resolveControl | boolean | default: false |
 | includeScreenshot | boolean | default: false |
 | query | string |  |
+
+The capture is read at full size unless maxWidth shrinks it. Windows OCR misreads small text, so when the median word is under 30 px tall the image is read a second time enlarged toward 36 px, at most 3x (`ocrScale` in the result; word boxes stay in SCREEN coordinates). `language` picks an installed recognizer by tag or prefix (`zh-Hans` reads with zh-Hans-CN); without it the Windows user languages decide, and the result names the recognizer in `language`. Chinese and Japanese lines come back without spaces between characters; Latin words and digits keep theirs. Windows OCR gives no confidence score, so a misread cannot be detected here: when the app exposes the text through UIA (find or accessibility_tree names and values), that text is exact.
 
 ### screenshot
 

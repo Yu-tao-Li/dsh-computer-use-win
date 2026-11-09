@@ -1,6 +1,7 @@
 import {atomicJson} from './takeover.mjs';
 import {isQuietCall} from './browser.mjs';
 import {createProgressSummarizer} from './progress-summary.mjs';
+import {formatText,overlayLocale,overlayStrings,systemLocale} from './overlay-strings.mjs';
 
 export function isDesktopTool(name=''){
   return /^(?:mcp__wincu__)?windows_computer_use_(?!health$|tools$)[a-z_]+$/.test(name);
@@ -22,31 +23,28 @@ const shortName=name=>String(name??'').replace(/^(?:mcp__wincu__)?windows_comput
 const cleanText=text=>text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'');
 const tail=(text,limit)=>text.length>limit?'…'+text.slice(-(limit-1)):text;
 
-// Plain-language names for what a call does. They come from the tool name and
-// the shape of the call (page or window, which special element, how many batch
-// steps) and never from values: no typed text, URLs, selectors or coordinates.
-const LABELS={snapshot:['读取页面内容','读取窗口内容'],accessibility_tree:['读取界面结构'],list_windows:['查找浏览器或窗口'],
-  find:['查找页面元素','查找界面元素'],element_info:['查看元素信息'],click:['点击页面元素','点击'],double_click:['双击'],
-  move:['移动鼠标'],drag:['拖动'],scroll:['滚动页面','滚动窗口'],type_text:['输入文字'],keypress:['按键'],focus:['切换焦点'],
-  invoke:['操作控件'],activate_window:['切换到窗口'],wait:['等待'],ocr:['识别屏幕文字'],screenshot:['截图查看页面','截图查看屏幕'],
-  wait_for:['等待页面变化','等待界面变化'],close_window:['关闭窗口'],move_window:['移动窗口'],launch_app:['打开应用或网页'],
-  // DSH's own tools that often run inside a computer-use turn.
-  read_image:['查看截图'],web_search:['搜索网页'],web_fetch:['读取网页']};
-export function actionLabel(name,args={}){
-  const tool=shortName(name);
+// Plain-language names for what a call does, in the overlay's language. They
+// come from the tool name and the shape of the call (page or window, which
+// special element, how many batch steps) and never from values: no typed text,
+// URLs, selectors or coordinates.
+export function actionLabel(name,args={},locale='zh'){
+  const tool=shortName(name),words=overlayStrings(locale);
   if(tool==='batch'){
     const steps=Array.isArray(args.steps)?args.steps:[];
-    const kinds=[...new Set(steps.map(step=>actionLabel(step?.action,{...callArguments(step?.arguments),browserTab:args.browserTab})).filter(Boolean))];
-    return `连续执行 ${steps.length} 个操作${kinds.length?'：'+kinds.slice(0,2).join('、')+(kinds.length>2?' 等':''):''}`;
+    const kinds=[...new Set(steps.map(step=>actionLabel(step?.action,{...callArguments(step?.arguments),browserTab:args.browserTab},locale)).filter(Boolean))];
+    const count=formatText(steps.length===1?words.batchOne:words.batch,steps.length);
+    if(!kinds.length)return count;
+    const listed=kinds.slice(0,2).join(words.listSeparator);
+    return formatText(words.batchKinds,count,kinds.length>2?formatText(words.batchMore,listed):listed);
   }
   if(tool==='set_value'){
     const id=String(args.elementId??'');
-    if(/(?:^|:)new-tab$/.test(id))return '打开新标签页';
-    if(/:address$/.test(id))return '打开网址';
-    if(/:connect$/.test(id))return '连接浏览器';
-    return '填写或选择内容';
+    if(/(?:^|:)new-tab$/.test(id))return words.newTab;
+    if(/:address$/.test(id))return words.openAddress;
+    if(/:connect$/.test(id))return words.connectBrowser;
+    return words.fillIn;
   }
-  const label=LABELS[tool];
+  const label=words.labels[tool];
   if(!label)return '';
   return label.length>1&&!args.browserTab?label[1]:label[0];
 }
@@ -80,8 +78,11 @@ function addAction(progress,label){
 
 // The host knows turn boundaries; the stdio worker only knows individual calls.
 // Keep this lease outside the worker so tool-list reloads preserve the series.
-export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGRESS_LINGER_MS,getSettings=()=>({}),summaryOptions={}}={}){
+// getLocale gives the DSH interface language; the overlay, its step names and
+// its AI summary use it (#74).
+export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGRESS_LINGER_MS,getSettings=()=>({}),getLocale=systemLocale,summaryOptions={}}={}){
   let owner,lingering,closed=false,needsPublish=true;
+  const locale=()=>overlayLocale(getLocale());
   // A turn's text that arrived before its first computer-use call (usually the
   // model deciding to use the browser). Kept in memory only, per running turn,
   // and shown only if that turn starts using the computer.
@@ -90,7 +91,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
   // file keeps its last characters so the overlay follows the end; when the
   // turn finishes, a final reply longer than that is shown from its start.
   const replyStarts=new WeakMap();
-  const summaries=createProgressSummarizer(ctx,{...summaryOptions,getSettings,onChange:()=>{if(!closed)publish();}});
+  const summaries=createProgressSummarizer(ctx,{...summaryOptions,getSettings,getLocale:locale,onChange:()=>{if(!closed)publish();}});
   const expireIdle=()=>{if(owner&&owner.pending===0&&Date.now()-owner.lastActive>=idleMs)owner=undefined;};
   const publish=()=>{
     needsPublish=true;expireIdle();
@@ -99,7 +100,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     summaries.update(shown);
     // Only the overlay reads this text. While it is off the text stays in
     // memory, so turning it on mid-turn still shows the whole turn.
-    atomicJson(file,{active:!!owner,sessionId:owner?.id??null,turn:owner?.turn??null,indicator:!!owner?.desktop,expiresAt:owner?Date.now()+5000:0,
+    atomicJson(file,{active:!!owner,sessionId:owner?.id??null,turn:owner?.turn??null,indicator:!!owner?.desktop,expiresAt:owner?Date.now()+5000:0,locale:locale(),
       ...(shown&&getSettings().progressOverlayEnabled!==false?{progress:shown.progress}:{}),...(!owner&&lingering?{lingerUntil:lingering.until}:{})});
     needsPublish=false;
   };
@@ -120,7 +121,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     if(!isDesktopTool(exec.name)){
       // Another DSH tool inside a computer-use turn gets a line in the step
       // history when it has a plain-language name; nothing else changes.
-      const label=owner&&session?.id===owner.id&&turn===owner.turn?actionLabel(exec.name,callArguments(exec.arguments)):'';
+      const label=owner&&session?.id===owner.id&&turn===owner.turn?actionLabel(exec.name,callArguments(exec.arguments),locale()):'';
       if(!label)return next();
       const current=owner,progress=current.progress,action=addAction(progress,label);
       progress.status='acting';needsPublish=true;
@@ -140,7 +141,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
       // call turns on the screen indicator.
       const args=callArguments(exec.arguments),tool=shortName(exec.name);
       if(!isQuietCall(tool,args))current.desktop=true;
-      const action=addAction(current.progress,actionLabel(tool,args)||tool);
+      const action=addAction(current.progress,actionLabel(tool,args,locale())||tool);
       current.pending++;current.progress.status='acting';current.progress.tool=tool;publish();
       try{const result=readableAbort(exec,await next());action.state=result?.isError?'error':'done';current.progress.lastAction={tool,status:result?.isError?'error':'returned'};return result;}
       catch(error){action.state='error';current.progress.lastAction={tool,status:'error'};throw error;}

@@ -441,14 +441,15 @@ const tools = [
   },
   {
     name: "windows_computer_use_ocr",
-    description: "Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns text, lines and word boxes in SCREEN coordinates. query is literal text matching, not semantic recognition; inspect lines if 'search' misses a placeholder. Click matched.word.x/y using foreground dispatch, then type_text with focusMode:'preserve'. Optional resolveControl performs a potentially blocking UIA hit-test; its control may be the whole page rather than the text input.",
+    description: "Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns text, lines and word boxes in SCREEN coordinates. Best effort: small or faint text can still be misread and there is no confidence score, so prefer UIA names and values when the app exposes them. query is literal text matching, not semantic recognition; inspect lines if 'search' misses a placeholder. Click matched.word.x/y using foreground dispatch, then type_text with focusMode:'preserve'. Optional resolveControl performs a potentially blocking UIA hit-test; its control may be the whole page rather than the text input.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         ...windowTargetProperties,
         scope: { type: "string", enum: ["active_window", "desktop"], default: "active_window" },
-        maxWidth: { type: "integer", minimum: 0, maximum: 7680, default: 1920 },
+        maxWidth: { type: "integer", minimum: 0, maximum: 7680, default: 0, description: "Shrink the capture to at most this width before reading; 0 reads it at full size. Small text is enlarged automatically (ocrScale in the result)." },
+        language: { type: "string", pattern: "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$", description: "Installed OCR language to read with, e.g. zh-Hans, en-US or ja; a prefix picks the matching installed one. Default: the Windows user languages. An unknown language fails and lists the installed ones." },
         resolveControl: { type: "boolean", default: false },
         includeScreenshot: { type: "boolean", default: false },
         query: {
@@ -549,7 +550,7 @@ const conciseDescriptions = {
   set_value: 'Set a value in the background, with optional focus/type fallback. Page ids fill fields; <tab>:address navigates; new-tab opens a URL in a background tab.',
   activate_window: 'Activate target window; activation cannot be suppressed.',
   wait: 'Pause briefly before observing again.',
-  ocr: 'Read visible text without UIA. Literal query; inspect lines on misses. Click word.x/y in SCREEN coordinates.',
+  ocr: 'Read visible text without UIA, best effort (prefer UIA text when exposed). Literal query; inspect lines on misses. Click word.x/y in SCREEN coordinates.',
   screenshot: 'Capture without UIA. SCREEN = bounds origin + image pixel / imageScale. Inspect resulting state to verify actions. browserTab: page pixels.',
   wait_for: 'Wait for window/UIA element/literal OCR text. observed means condition met; partial UIA absence is inconclusive.',
   close_window: 'Post WM_CLOSE in background; application may close or show a save dialog.',
@@ -565,6 +566,7 @@ const concisePropertyDescriptions = {
   ocrFallback: 'Add OCR after empty sparse/incomplete UIA search.',
   focusMode: 'preserve keeps clicked focus; main chooses largest text control.',
   query: 'Literal text; OCR ignores case/whitespace.',
+  language: 'Installed OCR language (e.g. zh-Hans, en-US); default: Windows languages.',
   resolveControl: 'Optional UIA hit-test; may block or return a whole document.',
   browserTab: 'Browser tab id from list_windows; background page access.'
 };
@@ -688,6 +690,7 @@ function validateArguments(schema, value, location = "arguments") {
   }
   if (schema.type === "integer" ? !Number.isSafeInteger(value) : typeof value !== schema.type) fail(`must be ${schema.type}`);
   if (schema.enum && !schema.enum.includes(value)) fail(`must be one of ${schema.enum.join(", ")}`);
+  if (schema.pattern && !new RegExp(schema.pattern, "u").test(value)) fail(`must match ${schema.pattern}`);
   if (schema.minimum !== undefined && value < schema.minimum) fail(`must be >= ${schema.minimum}`);
   if (schema.maximum !== undefined && value > schema.maximum) fail(`must be <= ${schema.maximum}`);
   return value;
@@ -1099,7 +1102,7 @@ async function observeBackend(action, args, request) {
     : "Chromium is still building this page's accessibility tree. Observe the window again shortly before falling back to OCR coordinates.";
   if (action === "find" && args.ocrFallback && !args.controlType && result.results?.length === 0 && (sparse || result.truncated) && result.targetResponsive !== false && !request?.cancelled) {
     try {
-      const ocr = await runBackend("ocr", { ...args, resolveControl: false, maxWidth: 1920 }, 20000, request);
+      const ocr = await runBackend("ocr", { ...args, resolveControl: false, maxWidth: 0 }, 20000, request);
       result.ocr = ocr;
       result.results = (ocr.matched || []).map(hit => ({ source: "ocr", name: hit.word.text, boundingBox: hit.boundingBox, x: hit.word.x, y: hit.word.y }));
       result.source = "uia+ocr";

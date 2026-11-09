@@ -22,8 +22,10 @@ for(const entry of ['mcp','scripts','package.json','docs'])await cp(new URL('../
 for(const name of ['schemastery','cosmokit','dsh-mcp-client'])await symlink(path.dirname(require.resolve('@deepseek-ai/'+name+'/package.json')),path.join(peerRoot,name),'junction');
 const adapter=await import(pathToFileURL(path.join(packageRoot,'mcp/dsh-plugin.mjs')).href);
 const previousTemp=process.env.TEMP, previousTmp=process.env.TMP;process.env.TEMP=root;process.env.TMP=root;
-let raw={mode:'lite',indicatorEnabled:false},entry;
-const editor={documentPath:path.join(root,'profile-patch.json'),entries:()=>entry?[entry]:[],configuration:()=>entry?[{entry,inherited:{},override:raw}]:[],edit:async(target,change)=>{
+let raw={mode:'lite',indicatorEnabled:false},entry,localeEntry;
+// DSH's own locale plugin is listed beside this one for the #74 language check.
+const listedLocale=()=>localeEntry?[{entry:localeEntry,inherited:{},override:localeEntry.options.config}]:[];
+const editor={documentPath:path.join(root,'profile-patch.json'),entries:()=>entry?[entry]:[],configuration:()=>[...(entry?[{entry,inherited:{},override:raw}]:[]),...listedLocale()],edit:async(target,change)=>{
   const next=change(raw,{}),parsed=adapter.Config(next);
   // Validate before persisting, as ConfigEditor does before profile reconciliation.
   for(const key of Object.keys(parsed))if(typeof parsed[key]?.get==='function')updateVolatile((target.fiber.effectiveConfig??target.fiber.config)[key],parsed[key]);
@@ -52,6 +54,22 @@ try {
   assert.ok(row,'Modern DSH must expose the plugin Config form');
   assert.equal(row.autoGenerate,false,'Use the purpose-built settings page');
   assert.equal(row.value.enabledTools.length,26,'Even legacy profiles default to all tools until a selection is saved');
+  // #74: the overlay follows the DSH interface language, which the real settings
+  // service exposes as the `locale` entry's preference; a change is announced
+  // with settings/document-updated. No choice means the system locale.
+  const localePlugin=await load('@deepseek-ai/dsh-client-locale');
+  const localeFiber=ctx.plugin(localePlugin,{preference:'en'});await localeFiber;
+  localeEntry={id:2,options:{id:'locale',name:'@deepseek-ai/dsh-client-locale',config:{preference:'en'}},fiber:keepsWrapper?localeFiber:localeFiber.ctx.fiber};
+  await until(()=>settings.describe().some(x=>x.ns==='locale'));
+  assert.equal(adapter.readDshLocale(settings),'en','The chosen DSH language is read from its settings entry');
+  const notices=[];ctx.on('settings/document-updated',ns=>notices.push(String(ns)));
+  const nextLocale=localePlugin.Config({preference:'zh'});
+  updateVolatile((localeEntry.fiber.effectiveConfig??localeEntry.fiber.config).preference,nextLocale.preference);localeEntry.options.config={preference:'zh'};
+  await until(()=>adapter.readDshLocale(settings)==='zh');
+  assert.ok(notices.includes('locale'),'DSH announces a language change');
+  updateVolatile((localeEntry.fiber.effectiveConfig??localeEntry.fiber.config).preference,localePlugin.Config({}).preference);localeEntry.options.config={};
+  await until(()=>adapter.readDshLocale(settings)===Intl.DateTimeFormat().resolvedOptions().locale);
+  localeEntry=undefined;localeFiber.dispose?.();
   const originalFiber=fiber.uid;
   await settings.mutate(entry.options.id,[{op:'set',path:['indicatorPosition'],value:'bottom'},{op:'set',path:['indicatorIdleMs'],value:1200}],row.revision);
   assert.equal(fiber.uid,originalFiber,'Volatile settings must keep the owner instance alive');
