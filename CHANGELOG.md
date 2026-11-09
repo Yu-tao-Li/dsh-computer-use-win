@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.6 — 2026-11-09
+## 0.5.6 — 2026-11-10
 
 - 修复装上插件后，DSH 0.1.5 里所有会话的“加载更早”和右侧序列条失效，控制台报 “received more than one start Match”（[#76](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/76)）。对话里的电脑操控汇总改为只由 `turn/start` 开始一轮，同一轮的工具调用、结果和结束都算更新，和 DSH 自带的轮次定义一致；DSH 0.1.7 以后本来就容许，汇总照常显示。0.1.x 设置页“插件”里的卡片改用 `key` 注册，不再报 “keyed slot requires options.key”。/ On DSH 0.1.5 every conversation's “load earlier” and series bar stopped working: the computer-use series now starts a turn only on `turn/start`, as DSH's own turn definitions do, and the 0.1.x plugin settings card registers with `key`.
 - OCR 读小字（[#75](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/75)）：先按原尺寸读一遍，词的中位高度低于 30 像素时，把图放大到约 36 像素高再读（最多 3 倍，结果里的 `ocrScale`），坐标仍是屏幕坐标；在 9–20 像素的界面文字上，逐字错误率大约减半。`ocr` 默认按原尺寸截图（`maxWidth` 默认改为 0，不再先缩到 1920 宽）；新增 `language` 参数选识别语言，结果里的 `language` 写明实际用的语言（以前总是空的）；中文、日文的行不再逐字加空格；`text` 里的换行不再是字面的 `\n`；工具说明写明 OCR 是尽力而为，能读到 UIA 文字时优先用 UIA。/ OCR reads small text enlarged (a second pass, at most 3x), captures at full size by default, takes a `language`, names the recognizer, joins Chinese and Japanese words without spaces and returns real line breaks.
