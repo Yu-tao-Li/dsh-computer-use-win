@@ -253,7 +253,9 @@ namespace DshTakeover {
       SystemEventsSubscribe();
       new Thread(ReadCommands) { IsBackground = true, Name = "DSH takeover control" }.Start();
       RefreshDisplays(true);
-      Emit(new { kind = "ready", hookActive = true, monitors = displays.Length });
+      // The Windows process id: under WSL the server sees only the id of the
+      // interop process that started this one (#79).
+      Emit(new { kind = "ready", hookActive = true, monitors = displays.Length, pid = System.Diagnostics.Process.GetCurrentProcess().Id });
     }
 
     void SystemEventsSubscribe() { Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplaysChanged; Microsoft.Win32.SystemEvents.SessionSwitch += SessionChanged; Microsoft.Win32.SystemEvents.UserPreferenceChanged += PreferencesChanged; }

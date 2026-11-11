@@ -41,27 +41,36 @@ assert.ok(series,'client.js must register the wincu-series Definition');
 const previous={...series,match:event=>['turn/start','turn/end','tool/call','tool/result'].includes(event.type)&&Number.isInteger(event.data?.turn)?{id:String(event.data.turn),role:'start'}:null};
 
 const tool=name=>'mcp__wincu__windows_computer_use_'+name;
+// Results are built the way each host line's createToolResultMessage builds
+// them (@deepseek-ai/dsh-llm lib/types/message.js): DSH 0.1.7 and later send a
+// tool message with toolCallId, DSH 0.1.5 a user message holding one
+// tool-result block. Neither has a top-level callId.
+const toolMessages=version=>{const [major,minor,patch]=version.split(/[.-]/).map(Number);return major>0||minor>1||minor===1&&patch>=7;};
+const resultMessage=(version,callId)=>{
+  const content=[{type:'text',text:JSON.stringify({ok:true,verification:'observed'})}];
+  return toolMessages(version)?{role:'tool',source:{kind:'tool',callId},toolCallId:callId,content,isError:false}
+    :{role:'user',source:{kind:'tool',callId},content:[{type:'tool-result',toolCallId:callId,content,isError:false}]};
+};
 const call=(seq,turn,callId,name)=>({seq,time:1000+seq,type:'tool/call',data:{turn,callId,name,arguments:{}}});
-const result=(seq,turn,callId)=>({seq,time:1000+seq,type:'tool/result',data:{turn,message:{callId,content:[{type:'text',text:JSON.stringify({ok:true,verification:'observed'})}]}}});
+const result=(version,seq,turn,callId)=>({seq,time:1000+seq,type:'tool/result',data:{turn,message:resultMessage(version,callId)}});
 const start=(seq,turn)=>({seq,time:1000+seq,type:'turn/start',data:{turn}});
 const end=(seq,turn)=>({seq,time:1000+seq,type:'turn/end',data:{turn,reason:{kind:'completed'}}});
 // Turn 1 also calls a tool of another plugin, which the series ignores.
-const events=[
-  start(0,1),call(1,1,'a',tool('click')),result(2,1,'a'),call(3,1,'b','read_file'),result(4,1,'b'),end(5,1),
-  start(6,2),call(7,2,'c',tool('screenshot')),result(8,2,'c'),end(9,2),
-  start(10,3),call(11,3,'d',tool('type_text')),result(12,3,'d'),end(13,3)
+const conversation=version=>[
+  start(0,1),call(1,1,'a',tool('click')),result(version,2,1,'a'),call(3,1,'b','read_file'),result(version,4,1,'b'),end(5,1),
+  start(6,2),call(7,2,'c',tool('screenshot')),result(version,8,2,'c'),end(9,2),
+  start(10,3),call(11,3,'d',tool('type_text')),result(version,12,3,'d'),end(13,3)
 ];
 const record=event=>({type:'event',event});
-const between=(from,to)=>events.filter(event=>event.seq>=from&&event.seq<=to).map(record);
 const scenarios={
   // The loaded window starts inside turn 1; "load earlier" brings its start.
-  'window starts mid-turn, then load earlier, then live tail':assembler=>{assembler.replaceWindow(between(3,9),true);assembler.prepend(between(0,2),false);for(const entry of between(10,13))assembler.append(entry);},
-  'window starts at a turn, then load earlier':assembler=>{assembler.replaceWindow(between(6,13),true);assembler.prepend(between(0,5),false);},
-  'whole history, then live tail':assembler=>{assembler.replaceWindow(between(0,9),false);for(const entry of between(10,13))assembler.append(entry);}
+  'window starts mid-turn, then load earlier, then live tail':(assembler,between)=>{assembler.replaceWindow(between(3,9),true);assembler.prepend(between(0,2),false);for(const entry of between(10,13))assembler.append(entry);},
+  'window starts at a turn, then load earlier':(assembler,between)=>{assembler.replaceWindow(between(6,13),true);assembler.prepend(between(0,5),false);},
+  'whole history, then live tail':(assembler,between)=>{assembler.replaceWindow(between(0,9),false);for(const entry of between(10,13))assembler.append(entry);}
 };
-const run=(host,definition,scenario)=>{
+const run=(host,definition,scenario,events)=>{
   const assembler=new host.ConversationNodeAssembler({entries:()=>[definition],fallbackEntry:()=>undefined},{entries:()=>[]});
-  scenario(assembler);
+  scenario(assembler,(from,to)=>events.filter(event=>event.seq>=from&&event.seq<=to).map(record));
   // States come from the vm realm; compare them as plain JSON.
   return JSON.parse(JSON.stringify(Object.fromEntries([...assembler.contexts.values()].filter(context=>context.kind==='wincu-series').map(context=>[context.id,context.state??null]))));
 };
@@ -71,9 +80,9 @@ for(const bundle of bundles){
   const version=JSON.parse(readFileSync(path.join(path.dirname(bundle),'..','package.json'),'utf8')).version;
   const host=load(bundle);
   assert.equal(typeof host?.ConversationNodeAssembler,'function',`${bundle} exports no ConversationNodeAssembler`);
-  const entry={host:version,fixed:{},previous:{}};
+  const entry={host:version,results:toolMessages(version)?'tool message':'tool-result block',fixed:{},previous:{}},events=conversation(version);
   for(const [name,scenario] of Object.entries(scenarios)){
-    const states=run(host,series,scenario);
+    const states=run(host,series,scenario,events);
     for(const [turn,callId] of [['1','a'],['2','c'],['3','d']]){
       const state=states[turn];
       assert.ok(state,`${version} ${name}: turn ${turn} has no series state`);
@@ -81,7 +90,7 @@ for(const bundle of bundles){
       assert.deepEqual(state.calls.map(item=>[item.id,item.status]),[[callId,'completed']],`${version} ${name}: turn ${turn} calls`);
     }
     entry.fixed[name]='ok';
-    try{run(host,previous,scenario);entry.previous[name]='ok';}
+    try{run(host,previous,scenario,events);entry.previous[name]='ok';}
     catch(error){entry.previous[name]='throws: '+error.message;}
   }
   report.push(entry);

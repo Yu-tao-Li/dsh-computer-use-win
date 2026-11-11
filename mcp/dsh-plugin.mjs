@@ -176,13 +176,27 @@ export async function apply(ctx, config) {
     if (Date.now() - localeReadAt > 5000) { uiLocale = readDshLocale(settingsService); localeReadAt = Date.now(); }
     return uiLocale;
   };
-  installActivity(ctx,runtime.activityFile,{getSettings:()=>desired,getLocale});
+  const activity = installActivity(ctx,runtime.activityFile,{getSettings:()=>desired,getLocale});
+  // A new DSH language reaches the overlay while it is idle too. DSH sends its
+  // change notice from inside describe(), so the language is read once that
+  // call has returned.
+  let localeRefresh;
+  const refreshLocale = () => {
+    localeReadAt = 0;
+    if (localeRefresh) return;
+    localeRefresh = setTimeout(() => { localeRefresh = undefined; activity.refresh(); }, 0);
+    localeRefresh.unref?.();
+  };
+  ctx.effect(() => () => { clearTimeout(localeRefresh); localeRefresh = undefined; });
   let updates = Promise.resolve();
   let saveOverlayPatch, layoutId, layoutSaving = false, layoutRetry = { id: undefined, at: 0, delay: 0 };
   atomicJson(runtime.configFile, desired);
   ctx.effect(() => () => { stopped = true; });
   const applySettings = next => {
     const nextSettings = normalizeSettings(next);
+    // A preview shows the DSH language of this moment. It goes into the
+    // activity file before the server reads the new preview token.
+    if (nextSettings.previewToken !== desired.previewToken || nextSettings.progressPreviewToken !== desired.progressPreviewToken) { localeReadAt = 0; activity.refresh(); }
     atomicJson(runtime.configFile, nextSettings);
     // Windows readers can briefly deny replacement. Keep desired unchanged
     // on a failed write so the next poll retries the pending settings.
@@ -244,7 +258,7 @@ export async function apply(ctx, config) {
   ctx.inject(['settings'], settingsContext => {
     settingsService = settingsContext.settings; localeReadAt = 0;
     settingsContext.effect(() => () => { settingsService = undefined; localeReadAt = 0; });
-    settingsContext.on?.('settings/document-updated', ns => { if (String(ns) === 'locale') localeReadAt = 0; });
+    settingsContext.on?.('settings/document-updated', ns => { if (String(ns) === 'locale') refreshLocale(); });
     if (typeof settingsContext.settings.register !== 'function') {
       if(typeof settingsContext.settings.update==='function')settingsContext.inject(['configEditor'],owner=>{
         // DSH 0.2.2's Loader (cordis 4.1) keeps a wrapper of the plugin's fiber

@@ -418,20 +418,47 @@ function Get-CsHash {
 # "Backend process exited" on some machines (#54). The compiler writes a
 # file of its own and only a complete one is moved into place, because another
 # backend may be reading the cache at the same time.
+#
+# TEMP is often an 8.3 short path. Windows PowerShell's FileSystemProvider
+# rejects a short name that is longer than the name it stands for, such as
+# C:\Users\LIHUA~1 for "Li Hua", with "An object at the specified path ...
+# does not exist" (#78). Remove-Item met that on every OCR compile, so
+# temporary files are handled with .NET calls only, never with Remove-Item,
+# Get-ChildItem or Test-Path.
+function Remove-TempFile {
+  param([string]$Path)
+  try { [System.IO.File]::Delete($Path) } catch { }
+}
+
+# A compile that failed or was cut off leaves <helper>.<pid>.<guid>.dll and
+# its .cs source behind (one pair per OCR call on the machines of #78). Those
+# an hour old are removed before a helper is compiled.
+function Remove-StaleHelperParts {
+  param([string]$Directory)
+  $cutoff = [DateTime]::UtcNow.AddHours(-1)
+  try {
+    foreach ($file in [System.IO.Directory]::EnumerateFiles($Directory, 'wcu-*.dll*')) {
+      if ([System.IO.Path]::GetFileName($file) -cmatch '^wcu-(native|ocr|wgc)-[a-z0-9-]+\.\d+\.[0-9a-f]{32}\.dll(\.cs)?$' -and [System.IO.File]::GetLastWriteTimeUtc($file) -lt $cutoff) { Remove-TempFile $file }
+    }
+  } catch { }
+}
+
 function Import-HelperAssembly {
   param([string]$Path, [scriptblock]$Compile)
-  if (-not (Test-Path -LiteralPath $Path)) {
+  if (-not [System.IO.File]::Exists($Path)) {
+    Remove-StaleHelperParts ([System.IO.Path]::GetDirectoryName($Path))
     $partial = $Path -replace '\.dll$', (".$PID." + [Guid]::NewGuid().ToString('N') + '.dll')
     try {
       & $Compile $partial
       try { [System.IO.File]::Move($partial, $Path) }
-      catch { if (-not (Test-Path -LiteralPath $Path)) { throw } }
-      if (Test-Path -LiteralPath $partial) {
+      catch { if (-not [System.IO.File]::Exists($Path)) { throw } }
+      if ([System.IO.File]::Exists($partial)) {
         [void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($partial))
         return
       }
     } finally {
-      if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue }
+      Remove-TempFile $partial
+      Remove-TempFile "$partial.cs"
     }
   }
   [void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($Path))
@@ -1201,8 +1228,51 @@ function Post-BackgroundClick {
   return $ok
 }
 
+# Posted keyboard messages go to the control with the keyboard focus in the
+# target window. Each thread keeps its own focus while its windows are in the
+# background. A top-level window does not pass characters posted to it on to
+# its edit control, so posting to the window itself typed nothing. The focus
+# may be the window itself (Chromium), but never a window outside the target.
+function Get-BackgroundKeyTarget {
+  param([long]$Hwnd)
+  $focus = [WindowsComputerUseNative]::FocusedWindow([IntPtr]$Hwnd).ToInt64()
+  if (-not $focus -or (Get-RootWindow $focus) -ne (Get-RootWindow $Hwnd)) {
+    throw "background_unavailable: no control in the target window has the keyboard focus, so posted characters would reach nothing. Focus a field first (focus or click), or use method:'auto' / dispatch:'foreground'."
+  }
+  return $focus
+}
+
+# The text length of a Win32 edit, else $null: other controls answer
+# WM_GETTEXTLENGTH with their caption, not their content.
+function Get-EditTextLength {
+  param([long]$Hwnd)
+  $class = New-Object System.Text.StringBuilder 128
+  [void][WindowsComputerUseNative]::GetClassName([IntPtr]$Hwnd, $class, 128)
+  if ($class.ToString() -notmatch $script:NativeEditClass) { return $null }
+  $reply = [UIntPtr]::Zero
+  if ([WindowsComputerUseNative]::SendMessageTimeout([IntPtr]$Hwnd, [WindowsComputerUseNative]::WM_GETTEXTLENGTH, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 1000, [ref]$reply) -eq [IntPtr]::Zero) { return $null }
+  return [int64]$reply.ToUInt64()
+}
+
+# Posted characters arrive after the post returns. For a Win32 edit, wait up
+# to a second until its length grew by the text; when it did not (typing over
+# a selection), the text is still found in its value. $null when the control
+# is no Win32 edit and cannot be checked.
+function Test-BackgroundTyped {
+  param([long]$Hwnd, $Before, [string]$Text)
+  if ($null -eq $Before) { return $null }
+  $deadline = [DateTime]::UtcNow.AddMilliseconds(1000)
+  do {
+    Start-Sleep -Milliseconds 40
+    $now = Get-EditTextLength $Hwnd
+    if ($null -ne $now -and $now - $Before -eq $Text.Length) { return $true }
+  } while ([DateTime]::UtcNow -lt $deadline)
+  $value = Get-ValueText (Invoke-Safe { [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Hwnd) } $null)
+  return ($null -ne $value -and $value.Contains($Text))
+}
+
 function Post-BackgroundText {
-  # Post WM_CHAR per UTF-16 code unit into the target window. No clipboard,
+  # Post WM_CHAR per UTF-16 code unit to the given control. No clipboard,
   # no foreground, no system input queue. Works on controls that accept char
   # input (Edit, RichEdit, most Win32 dialogs).
   param([long]$Hwnd, [string]$Text)
@@ -1441,7 +1511,7 @@ function Get-OcrHelper {
     $refArgs = ($winmdRefs + @((Join-Path $fw "System.Runtime.dll"), (Join-Path $fw "System.dll"), (Join-Path $fw "System.Runtime.WindowsRuntime.dll"))) | ForEach-Object { "/r:$_" }
     $cscArgList = @("/nologo", "/target:library", "/out:$target") + $refArgs + @($src)
     $out = & $csc @cscArgList 2>&1
-    Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
+    Remove-TempFile $src
     if ($LASTEXITCODE -ne 0) {
       $msg = (($out | Out-String).Trim())
       throw "OCR helper compile failed: " + $msg.Substring(0, [Math]::Min(300, $msg.Length))
@@ -1700,7 +1770,7 @@ function Get-WgcHelper {
     }
     $cscArgs = @("/nologo", "/target:library", "/out:$target") + $refArgs + @($src)
     $out = & $csc $cscArgs 2>&1
-    Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
+    Remove-TempFile $src
     if ($LASTEXITCODE -ne 0) {
       $msg = (($out | Out-String).Trim())
       $script:WgcCompileFailed = $true
@@ -2349,13 +2419,21 @@ function Try-PrintWindowCapture {
   }
 }
 
+# Our own screenshot PNGs older than 30 minutes. Times compare in UTC: a
+# local write time against a UTC cutoff kept files for hours east of UTC and
+# deleted fresh ones west of it.
+function Remove-OldScreenshots {
+  $cutoff = [DateTime]::UtcNow.AddMinutes(-30)
+  try {
+    foreach ($file in [System.IO.Directory]::EnumerateFiles($env:TEMP, 'windows-computer-use-*.png')) {
+      if ([System.IO.File]::GetLastWriteTimeUtc($file) -lt $cutoff) { Remove-TempFile $file }
+    }
+  } catch { }
+}
+
 function Capture-Screenshot {
   param([object]$WindowElement = $null, [int]$MaxWidth = 1600)
-  # GC: drop our own screenshot PNGs older than 30 minutes.
-  $cutoff = [DateTimeOffset]::Now.AddMinutes(-30).UtcDateTime
-  Get-ChildItem -Path $env:TEMP -Filter "windows-computer-use-*.png" -ErrorAction SilentlyContinue |
-    Where-Object { $_.LastWriteTime -lt $cutoff } |
-    Remove-Item -Force -ErrorAction SilentlyContinue
+  Remove-OldScreenshots
   $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
   $bmp = $null
   $method = "screen"
@@ -2402,7 +2480,7 @@ function Capture-Screenshot {
         # frame from DWM, so it works even when the window is occluded.
         $wgcPng = Join-Path $env:TEMP ("wcu-wgc-" + [Guid]::NewGuid().ToString("N") + ".png")
         $wgc = Invoke-Safe { Invoke-WgcCapture -Hwnd $hwnd -Width $rect.width -Height $rect.height -OutPng $wgcPng -TimeoutMs 4000 } $null
-        if ($null -ne $wgc -and (Test-Path $wgcPng)) {
+        if ($null -ne $wgc -and [System.IO.File]::Exists($wgcPng)) {
           try {
             $src = New-Object System.Drawing.Bitmap($wgcPng)
             $dst = New-Object System.Drawing.Bitmap($src.Width, $src.Height)
@@ -2415,8 +2493,8 @@ function Capture-Screenshot {
           } catch {
             $bmp = $null
           }
-          Remove-Item $wgcPng -Force -ErrorAction SilentlyContinue
         }
+        Remove-TempFile $wgcPng
         if ($null -eq $bmp) {
           # Last resort: the on-screen part of the window rect. This may show
           # whatever is covering the window — flagged, not hidden.
@@ -3132,17 +3210,24 @@ function Invoke-Action {
         $method = 'clipboard'
       }
 
-      # Background path: post WM_CHAR straight into the target window's
-      # message queue — no clipboard, no foreground, no system input queue.
+      # Background path: post WM_CHAR to the control with the keyboard focus
+      # in the target window — no clipboard, no foreground, no system input
+      # queue.
       if ($method -eq "background") {
         if (-not (Has-WindowTarget $inputObject)) {
           throw "method:'background' requires a window target (windowTitle / processId / nativeWindowHandle)."
         }
         $hwnd = Resolve-TargetHwnd $inputObject
         if (-not ($hwnd -and $hwnd -ne 0)) { throw "No window handle found for the target." }
-        $ok = Post-BackgroundText -Hwnd $hwnd -Text $text
+        $focus = Get-BackgroundKeyTarget $hwnd
+        $before = Get-EditTextLength $focus
+        $ok = Post-BackgroundText -Hwnd $focus -Text $text
         if (-not $ok) { throw "background_unavailable: some WM_CHAR messages were refused. Retry with method:'clipboard'." }
-        return ([ordered]@{ ok = $true; action = "type_text"; length = $text.Length; method = "postmessage-wmchar"; verified = $false; note = "Background text queued, delivery unverified; controls that reject WM_CHAR (some custom UIs) need method:'clipboard'." })
+        $typed = Test-BackgroundTyped $focus $before $text
+        $result = [ordered]@{ ok = $true; action = "type_text"; length = $text.Length; method = "postmessage-wmchar"; verified = ($typed -eq $true) }
+        if ($null -eq $typed) { $result["note"] = "Background text queued to the focused control, delivery unverified; controls that reject WM_CHAR (some custom UIs) need method:'clipboard'." }
+        elseif (-not $typed) { $result["note"] = "The focused field did not take the text within a second: it may reject WM_CHAR or limit its length. Check the field, or use method:'clipboard'." }
+        return $result
       }
 
       # Foreground path (clipboard or sendinput): the target must be
@@ -3214,9 +3299,15 @@ function Invoke-Action {
         }
         $hwnd = Resolve-TargetHwnd $inputObject
         if (-not ($hwnd -and $hwnd -ne 0)) { throw "No window handle found for the target." }
-        $ok = [WindowsComputerUseNative]::PostMessageW([IntPtr]$hwnd, [WindowsComputerUseNative]::WM_CHAR, [IntPtr][int][char]$ch, [IntPtr]1)
+        $focus = Get-BackgroundKeyTarget $hwnd
+        $before = Get-EditTextLength $focus
+        [void](Test-Failsafe)
+        $ok = [WindowsComputerUseNative]::PostMessageW([IntPtr]$focus, [WindowsComputerUseNative]::WM_CHAR, [IntPtr][int][char]$ch, [IntPtr]1)
         if (-not $ok) { throw "background_unavailable: WM_CHAR was refused. Use dispatch:'foreground'." }
-        return ([ordered]@{ ok = $true; action = "keypress"; keys = $keys; method = "postmessage-wmchar"; verified = $false; note = "Background key queued, delivery unverified." })
+        $typed = Test-BackgroundTyped $focus $before $ch
+        $result = [ordered]@{ ok = $true; action = "keypress"; keys = $keys; method = "postmessage-wmchar"; verified = ($typed -eq $true) }
+        if ($typed -ne $true) { $result["note"] = "Background key queued to the focused control, delivery unverified." }
+        return $result
       }
       $chord = Convert-KeyChord -Keys $keys
       $result = [ordered]@{ ok = $true; action = "keypress"; keys = $keys; sendKeys = $chord; method = "sendkeys" }

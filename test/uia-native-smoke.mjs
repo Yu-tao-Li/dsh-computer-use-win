@@ -47,6 +47,13 @@ try{
   const frontBeforeTyping=await front();
   const keyed=await call('type_text',{...target,text:' typed'});assert.equal(keyed.method,'background:EM_REPLACESEL',JSON.stringify(keyed));assert.equal(keyed.verified,true);
   for(let i=0;i<40&&state.text!=='background text typed';i++)await delay(50);assert.equal(state.text,'background text typed');
+  // Explicit background typing and keys post WM_CHAR to the control with the
+  // focus in the fixture's thread. Posted to the top-level window, they were
+  // queued but never reached the edit.
+  const posted=await call('type_text',{...target,text:'!',method:'background'});assert.equal(posted.method,'postmessage-wmchar',JSON.stringify(posted));assert.equal(posted.verified,true,JSON.stringify(posted));
+  for(let i=0;i<40&&state.text!=='background text typed!';i++)await delay(50);assert.equal(state.text,'background text typed!');
+  const postedKey=await call('keypress',{...target,keys:['?'],dispatch:'background'});assert.equal(postedKey.method,'postmessage-wmchar',JSON.stringify(postedKey));assert.equal(postedKey.verified,true,JSON.stringify(postedKey));
+  for(let i=0;i<40&&state.text!=='background text typed!?';i++)await delay(50);assert.equal(state.text,'background text typed!?');
   // Without a window target, observations follow the window DSH gave input to.
   const followed=await call('accessibility_tree',{maxDepth:1});assert.equal(followed.tree.name,'WCU issue18 isolated native fixture',JSON.stringify(followed).slice(0,300));
   // An element with its own scroll bar scrolls by WM_VSCROLL.
@@ -73,7 +80,7 @@ try{
   }
   assert.ok(restored,'Owned fixture did not recover from Windows ghosting');
   const recovered=await call('accessibility_tree',{...target,maxDepth:5});assert.equal(recovered.targetResponsive,true);assert.ok(recovered.nodeCount>=3);
-  console.log('PASS real WinForms cached value/patterns, background BM_CLICK/EM_REPLACESEL, type_text, element scroll and followed observation without the foreground, WM_NULL hung-window circuit break, activation metadata/warning and recovery; no physical input');
+  console.log('PASS real WinForms cached value/patterns, background BM_CLICK/EM_REPLACESEL, type_text, posted text and keys to the focused edit, element scroll and followed observation without the foreground, WM_NULL hung-window circuit break, activation metadata/warning and recovery; no physical input');
 }finally{
   await writeFile(path.join(artifacts,'results.json'),JSON.stringify({state,results,stderr},null,2)+'\n');
   await writeFile(path.join(artifacts,'native-command.json'),JSON.stringify({id:100,action:'quit'}));client.child.stdin.end();
