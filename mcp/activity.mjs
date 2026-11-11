@@ -79,7 +79,9 @@ function addAction(progress,label){
 // The host knows turn boundaries; the stdio worker only knows individual calls.
 // Keep this lease outside the worker so tool-list reloads preserve the series.
 // getLocale gives the DSH interface language; the overlay, its step names and
-// its AI summary use it (#74).
+// its AI summary use it (#74). An idle publisher writes nothing, so the caller
+// asks for a write with refresh() when the language changes or before a
+// preview opens; otherwise the preview kept the language of the last series.
 export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGRESS_LINGER_MS,getSettings=()=>({}),getLocale=systemLocale,summaryOptions={}}={}){
   let owner,lingering,closed=false,needsPublish=true;
   const locale=()=>overlayLocale(getLocale());
@@ -252,4 +254,6 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     timer.unref();
     return ()=>{closed=true;clearInterval(timer);summaries.close();owner=undefined;lingering=undefined;early.clear();publish();};
   });
+  // A failed write keeps needsPublish set, so the timer retries it.
+  return {refresh(){if(!closed)try{publish();}catch(error){ctx.logger.error(error);}}};
 }

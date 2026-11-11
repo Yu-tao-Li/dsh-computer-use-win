@@ -84,7 +84,7 @@ foreach ($name in 'WcuCs', 'WcuOcrCs', 'WgcCs') {
   if ($null -eq $assignment) { throw "Missing helper source $name" }
   . ([scriptblock]::Create($assignment.Extent.Text))
 }
-foreach ($name in 'Write-BackendStage', 'Get-CsHash', 'Import-HelperAssembly', 'Load-Assemblies', 'Set-DpiAware', 'Get-OcrHelper', 'Get-WgcHelper') {
+foreach ($name in 'Write-BackendStage', 'Get-CsHash', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Load-Assemblies', 'Set-DpiAware', 'Get-OcrHelper', 'Get-WgcHelper') {
   $function = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
   if ($null -eq $function) { throw "Missing backend function $name" }
   . ([scriptblock]::Create($function.Extent.Text))

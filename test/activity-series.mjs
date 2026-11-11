@@ -178,3 +178,22 @@ try{
  assert.equal(textState().lingerUntil,undefined);
  console.log(JSON.stringify({overlayOffKeepsTextOutOfFile:true,turnedOnShowsKeptText:true,turnedOffDropsText:true,lingerShowsFinishedState:true,lingerEndClearsText:true}));
 }finally{for(const dispose of textDisposers)dispose?.();}
+
+// An idle publisher writes nothing, so a language change reached the overlay
+// preview only with the next tool call. refresh() writes it at once, and the
+// takeover control (which draws the preview) takes the new language.
+let idleLocale='en-US';
+const localeDisposers=[],localeFile=path.join(root,'locale-activity.json');
+const localeActivity=installActivity({on:()=>{},effect:fn=>localeDisposers.push(fn()),logger:{error:error=>{throw error;}}},localeFile,{getLocale:()=>idleLocale});
+const localeControl=new TakeoverControl({activityFile:localeFile,stateFile:path.join(root,'locale-state.json'),testMode:true});
+try{
+ assert.equal(JSON.parse(readFileSync(localeFile,'utf8')).locale,'en');
+ idleLocale='zh-CN';
+ await new Promise(r=>setTimeout(r,1300));
+ assert.equal(JSON.parse(readFileSync(localeFile,'utf8')).locale,'en','Idle, the publisher does not rewrite the file by itself');
+ localeActivity.refresh();
+ assert.equal(JSON.parse(readFileSync(localeFile,'utf8')).locale,'zh','refresh() writes the new language with no tool call');
+ await localeControl.sync();
+ assert.equal(localeControl.locale,'zh','The preview is drawn in the new language');
+ console.log(JSON.stringify({idleLanguageChangeReachesPreview:true}));
+}finally{await localeControl.close();for(const dispose of localeDisposers)dispose?.();}

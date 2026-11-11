@@ -16,14 +16,42 @@ $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]
 if ($parseErrors.Count) { throw 'Backend source did not parse.' }
 $helper = $ast.Find({param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$script:WcuOcrCs'}, $true)
 Invoke-Expression $helper.Extent.Text
-foreach ($name in @('Get-CsHash', 'Import-HelperAssembly', 'Get-OcrHelper', 'Invoke-Ocr')) {
+foreach ($name in @('Get-CsHash', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Get-OcrHelper', 'Invoke-Ocr')) {
   $function = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name}, $true)
   Invoke-Expression $function.Extent.Text
 }
 function Assert-Equal { param($Actual, $Expected, [string]$Message)
   if ($Actual -ne $Expected) { throw "$Message (expected=$Expected, actual=$Actual)" }
 }
-Get-OcrHelper
+
+# #78: TEMP as an 8.3 short path whose short name is longer than the name it
+# stands for (C:\Users\LIHUA~1 for "Li Hua"). Windows PowerShell's file system
+# provider rejects such a path, and every OCR call failed while compiling the
+# helper. The helper compiles and reads below with TEMP pointing there, on a
+# volume that makes short names. Leftovers of failed compiles an hour old go.
+$longTemp = [System.IO.Path]::GetFullPath($env:TEMP)
+$spaced = Join-Path $longTemp 'o r'
+[void][System.IO.Directory]::CreateDirectory($spaced)
+Add-Type -Namespace WcuOcrTest -Name Paths -MemberDefinition '[DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern uint GetShortPathName(string longPath, System.Text.StringBuilder shortPath, uint size);'
+$shortName = New-Object System.Text.StringBuilder 1024
+[void][WcuOcrTest.Paths]::GetShortPathName($spaced, $shortName, 1024)
+$alias = [System.IO.Path]::GetFileName($shortName.ToString().TrimEnd('\'))
+if ($alias -and $alias.Length -gt 'o r'.Length) {
+  $env:TEMP = Join-Path $longTemp $alias; $env:TMP = $env:TEMP
+  $leftover = Join-Path $spaced ('wcu-ocr-0123456789abcdef.4242.' + ('ab' * 16) + '.dll')
+  $fresh = Join-Path $spaced ('wcu-ocr-0123456789abcdef.4343.' + ('cd' * 16) + '.dll')
+  $other = Join-Path $spaced 'wcu-ocr-notes.dll.txt'
+  foreach ($file in @($leftover, "$leftover.cs", $fresh, $other)) { [System.IO.File]::WriteAllText($file, 'fixture') }
+  foreach ($file in @($leftover, "$leftover.cs", $other)) { [System.IO.File]::SetLastWriteTimeUtc($file, [DateTime]::UtcNow.AddHours(-2)) }
+  Get-OcrHelper
+  Assert-Equal ([System.IO.File]::Exists($leftover) -or [System.IO.File]::Exists("$leftover.cs")) $false 'Leftovers of a failed compile are removed'
+  Assert-Equal ([System.IO.File]::Exists($fresh) -and [System.IO.File]::Exists($other)) $true 'A compile in progress and other files stay'
+  Assert-Equal (@([System.IO.Directory]::GetFiles($spaced, 'wcu-ocr-*.dll')).Count) 2 'The helper is cached under its own name only'
+  Write-Output "PASS OCR helper compiles with TEMP as a short path longer than its name ($alias)"
+} else {
+  Get-OcrHelper
+  Write-Output 'PASS OCR helper compiles (this volume makes no 8.3 names, so the short TEMP case of #78 is not checked here)'
+}
 $ocr = [WindowsComputerUseOcr]
 
 # Joining: no space between CJK characters or next to CJK punctuation; a space
@@ -101,5 +129,7 @@ if ($chinese) {
   $read = Invoke-Ocr -PngPath $cjk -Language $chinese
   if ($read.text -match '\s') { throw "Chinese text must come back without spaces between characters: '$($read.text)'" }
 }
-Remove-Item -LiteralPath $png -Force -ErrorAction SilentlyContinue
+# TEMP may be the short path above, which Remove-Item rejects (#78).
+Remove-TempFile $png
+if ($cjk) { Remove-TempFile $cjk }
 Write-Output "PASS real OCR (12 px read at ${latinScale}x) with $($installed -join ', '): enlarged reading, mapped boxes, line breaks and language choice"

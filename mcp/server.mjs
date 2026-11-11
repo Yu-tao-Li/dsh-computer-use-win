@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { TakeoverControl, STOPPED } from './takeover.mjs';
+import { TakeoverControl, STOPPED, IN_WSL, linuxPath, windowsEnv, windowsScript } from './takeover.mjs';
 import { TOOL_NAMES, normalizeEnabledTools, browserRoutingInstructions } from './settings.mjs';
 import { BrowserLane, isBrowserCall, isQuietCall, BACKGROUND_FIRST } from './browser.mjs';
 
@@ -195,7 +195,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_list_windows",
-    description: "List top-level windows visible to Windows UI Automation. browserLane lists the tabs of connected Chromium browsers with ids for browserTab, and explains how to open a background tab (set_value elementId new-tab).",
+    description: "List top-level windows visible to Windows UI Automation. The result field browserLane (not an argument) lists the tabs of connected Chromium browsers with ids for browserTab, and explains how to open a background tab (set_value elementId new-tab).",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -338,7 +338,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_type_text",
-    description: "Type text into the focused control of the target (or active) window. method:'auto' (default) = a focused Win32 edit takes the text in the background (EM_REPLACESEL at the caret: no clipboard, keyboard or foreground; text with line breaks is pasted instead); any other control gets a clipboard paste with the window borrowed for it (reliable for CJK; the clipboard is restored and the paste kept out of clipboard history); method:'clipboard' always pastes; method:'sendinput' sends each character as a KEYEVENTF_UNICODE SendInput event (no clipboard, best for ASCII/short text); method:'background' posts WM_CHAR straight into the target window's message queue — no clipboard, no foreground steal, delivery unverified. After a background write, or with a window target and focusMode:'main', the result includes verifyValue (the text control's value after typing, truncated to 200 chars). With browserTab, insert the text at that page's focused field inside the browser: no clipboard, pointer or foreground change.",
+    description: "Type text into the focused control of the target (or active) window. method:'auto' (default) = a focused Win32 edit takes the text in the background (EM_REPLACESEL at the caret: no clipboard, keyboard or foreground; text with line breaks is pasted instead); any other control gets a clipboard paste with the window borrowed for it (reliable for CJK; the clipboard is restored and the paste kept out of clipboard history); method:'clipboard' always pastes; method:'sendinput' sends each character as a KEYEVENTF_UNICODE SendInput event (no clipboard, best for ASCII/short text); method:'background' posts WM_CHAR to the control with the keyboard focus in the target window — no clipboard, no foreground steal; checked on Win32 edits, unverified elsewhere, refused when nothing in the window has the focus. After a background write, or with a window target and focusMode:'main', the result includes verifyValue (the text control's value after typing, truncated to 200 chars). With browserTab, insert the text at that page's focused field inside the browser: no clipboard, pointer or foreground change.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -355,7 +355,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_keypress",
-    description: "Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. The keys go to the target (or active) window, which comes forward for them and then gives the foreground back, unless a menu or dialog they opened is showing. dispatch:'background' supports only a single printable character (posted as WM_CHAR into the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendKeys). With browserTab, the key goes to that page inside the browser: Alt+Left/Alt+Right/F5 go back/forward/reload, Enter/Escape answer an open JavaScript dialog, and browser-window shortcuts such as Ctrl+L or Ctrl+T are refused.",
+    description: "Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. The keys go to the target (or active) window, which comes forward for them and then gives the foreground back, unless a menu or dialog they opened is showing. dispatch:'background' supports only a single printable character (posted as WM_CHAR to the focused control of the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendKeys). With browserTab, the key goes to that page inside the browser: Alt+Left/Alt+Right/F5 go back/forward/reload, Enter/Escape answer an open JavaScript dialog, and browser-window shortcuts such as Ctrl+L or Ctrl+T are refused.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -535,7 +535,7 @@ const conciseDescriptions = {
   health: 'Check Windows backend availability.',
   snapshot: 'Screenshot and UIA tree. Partial trees report truncation; use OCR for sparse UIA. browserTab: page outline and viewport.',
   accessibility_tree: 'Read a bounded UIA tree; partial output does not establish absence. browserTab: page outline with element ids.',
-  list_windows: 'List native top-level windows, HWND/PID and responsiveness; browserLane lists browser tabs for browserTab.',
+  list_windows: 'List native top-level windows, HWND/PID and responsiveness; the result field browserLane lists browser tabs for browserTab.',
   find: 'Find UIA controls; empty sparse searches add OCR. OCR hits use SCREEN coordinates, not element IDs.',
   element_info: 'Inspect a UIA element ID, page element ID or physical SCREEN point.',
   click: 'Click elementId (in the background) or physical SCREEN x/y (real click; the foreground and pointer go back). background delivery is unverified. Page ids (t1a2b:57) act inside the page.',
@@ -543,7 +543,7 @@ const conciseDescriptions = {
   move: 'Move pointer to elementId or physical SCREEN x/y.',
   drag: 'Drag a path of physical SCREEN coordinates; the target comes forward for it.',
   scroll: 'Scroll elementId (in the background first) or physical SCREEN x/y; positive deltaY scrolls down.',
-  type_text: 'Type into the focus. auto: Win32 edits in the background, else a paste with the window borrowed; restores the clipboard. background (WM_CHAR) is unverified.',
+  type_text: 'Type into the focus. auto: Win32 edits in the background, else a paste with the window borrowed; restores the clipboard. background (WM_CHAR to the focused control) is checked on Win32 edits only.',
   keypress: 'Send key/chord, e.g. ["ctrl","a"]. Windows key blocked; background supports one printable character only.',
   focus: 'Focus a UIA element.',
   invoke: 'Invoke/toggle/select/expand a UIA element in the background, with optional click fallback; action expands, collapses or scrolls it into view.',
@@ -702,6 +702,9 @@ function validateArguments(schema, value, location = "arguments") {
 async function screenshotOutput(screenshot, includeImage = true) {
   if (!screenshot?.base64) return { metadata: screenshot, content: [] };
   const { base64, ...metadata } = screenshot;
+  // The backend saves desktop captures under the Windows TEMP. Under WSL,
+  // DSH's file tools read them through /mnt (#79).
+  if (IN_WSL && metadata.path) metadata.path = linuxPath(metadata.path);
   if (process.env.WCU_IMAGE_MODE === 'file') {
     if (includeImage && !metadata.path) {
       // Desktop capture already saves a PNG. Browser captures need a file too.
@@ -822,6 +825,10 @@ function failBackendWaiters(error, proc) {
   }
 }
 
+function backendEnv(env) {
+  return windowsEnv(env, Object.keys(env).filter(name => name.startsWith('WCU_')));
+}
+
 function spawnBackend() {
   let backendBuf = "";
   const proc = backendProc = spawn(
@@ -833,12 +840,13 @@ function spawnBackend() {
       "-ExecutionPolicy",
       "Bypass",
       "-File",
-      backendPath,
+      windowsScript(backendPath),
       "-Persistent"
     ],
     {
       cwd: pluginRoot,
-      env: { ...process.env, WCU_CANCEL_EVENT: takeover.disabledForTest ? '' : takeover.eventName },
+      // Under WSL the backend reads the WCU_ variables only when WSLENV names them (#79).
+      env: backendEnv({ ...process.env, WCU_CANCEL_EVENT: takeover.disabledForTest ? '' : takeover.eventName }),
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     }
@@ -952,7 +960,7 @@ async function runBackendOnce(action, args, timeoutMs, request, quiet) {
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
     // The series lets typing without a window target follow the window the
     // series last gave input to, after the user got the foreground back.
-    return await dispatchBackend(action, { ...args, _wcuCornerFailsafe: false, _wcuTakeoverPid: takeover.child?.pid ?? 0, _wcuSeries: takeover.seriesKey ?? null }, timeoutMs, request);
+    return await dispatchBackend(action, { ...args, _wcuCornerFailsafe: false, _wcuTakeoverPid: takeover.helperProcessId, _wcuSeries: takeover.seriesKey ?? null }, timeoutMs, request);
   } finally { if (acquired) await takeover.end({ quiet }); }
 }
 
@@ -1065,6 +1073,7 @@ async function callTool(name, args, request) {
 }
 
 async function imageResult(result, includeImage = true) {
+  if (IN_WSL) for (const item of [result, result.ocr]) if (typeof item?.image === 'string') item.image = linuxPath(item.image);
   const image = await screenshotOutput(result.screenshot, includeImage);
   const metadata = result.screenshot ? { ...result, screenshot: image.metadata } : result;
   const content = [{ type: "text", text: safeJson(metadata) }, ...image.content];

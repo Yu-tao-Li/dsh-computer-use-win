@@ -585,11 +585,20 @@ window.__ModuleLoader__.load({
     const shortTool=name=>String(name||'').replace(/^(?:mcp__wincu__)?windows_computer_use_/,'');
     const desktopTool=name=>/^(?:mcp__wincu__)?windows_computer_use_(?!health$|tools$)[a-z_]+$/.test(name||'');
     const objectArgs=value=>{if(typeof value==='string')try{return JSON.parse(value);}catch{return {};}return value&&typeof value==='object'?value:{};};
+    // DSH 0.1.7 and later send a tool result as {role:'tool', toolCallId,
+    // source:{callId}, content, isError}. DSH 0.1.5 wraps it in one
+    // {type:'tool-result', toolCallId, content, isError} block of a user
+    // message. Neither has a top-level callId.
+    function toolResult(message){
+      const block=Array.isArray(message?.content)?message.content.find(part=>part?.type==='tool-result'):undefined;
+      const inner=block??message??{};
+      return {id:inner.toolCallId??message?.toolCallId??message?.source?.callId??message?.callId,content:Array.isArray(inner.content)?inner.content:[],isError:inner.isError===true};
+    }
     function receipt(message){
-      for(const part of message?.content||[])if(part.type==='text'&&typeof part.text==='string')try{return JSON.parse(part.text);}catch{}
+      for(const part of toolResult(message).content)if(part.type==='text'&&typeof part.text==='string')try{return JSON.parse(part.text);}catch{}
       return {};
     }
-    const resultStatus=message=>message?.isError?((message.content||[]).some(part=>part.type==='text'&&/COMPUTER_USE_STOPPED_BY_USER/.test(part.text))?'stopped':'failed'):'completed';
+    const resultStatus=message=>{const result=toolResult(message);return result.isError?(result.content.some(part=>part.type==='text'&&/COMPUTER_USE_STOPPED_BY_USER/.test(part.text))?'stopped':'failed'):'completed';};
     const mouseIcon=()=>h('svg',{viewBox:'0 0 24 24',width:17,height:17,fill:'none',stroke:'currentColor',strokeWidth:1.7,'aria-hidden':true,style:{verticalAlign:'middle',flexShrink:0}},h('rect',{x:6,y:2,width:12,height:20,rx:6}),h('path',{d:'M12 2v7M6 10h12'}));
     const activityCss=`.wcu-activity{color:var(--dsw-alias-label-secondary,inherit);font-size:13px;line-height:1.6;margin:7px 0}.wcu-activity>summary{cursor:pointer;display:flex;align-items:center;gap:8px;list-style:none}.wcu-activity>summary::-webkit-details-marker{display:none}.wcu-activity .wcu-activity-label{color:var(--dsw-alias-label-primary,inherit)}.wcu-activity .wcu-activity-state{font-size:12px;opacity:.72;margin-left:4px}.wcu-activity[open]{padding-bottom:8px}.wcu-activity ol{margin:10px 0 4px 22px;padding-left:16px}.wcu-activity li{padding:3px 0}.wcu-activity pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:240px;overflow:auto}.wcu-activity .wcu-activity-note{font-size:12px;opacity:.75}.wcu-activity button{color:inherit;background:transparent;border:1px solid var(--dsw-alias-border-l2,#8885);border-radius:6px;padding:3px 8px;cursor:pointer}`;
     function actionText(call,t){
@@ -612,22 +621,29 @@ window.__ModuleLoader__.load({
       return actions.slice(-3).join(t('and'))||t('seriesTitle');
     }
     function activityBody(call,renderFactorySlot,loadImage,t){
-      const data=receipt(call.message),images=(call.message?.content||[]).filter(x=>x.type==='image'&&x.attachment);
+      const data=receipt(call.message),images=toolResult(call.message).content.filter(x=>x.type==='image'&&x.attachment);
       return h(React.Fragment,null,
         ['sent','dispatched'].includes(data.verification)&&h('div',{className:'wcu-activity-note'},t('sentOnly')),
         ['failed','stopped'].includes(call.status)&&h('div',{role:'status'},t(call.status==='stopped'?'stoppedAction':'stepError')),
         images.length>0&&renderFactorySlot&&loadImage&&renderFactorySlot('conversation.images.content',{images,loadImage,align:'start'}));
     }
+    // DSH 0.2 passes the call's phase and, once it returned, a node holding
+    // the result message. DSH 0.1.5 passes the node alone: a finished one has
+    // kind, call (with argsRaw), content and isError.
     function MouseToolRow({toolName,phase,block,renderFactorySlot,loadImage,inspect,t}){
-      const message=phase==='result'?block.message:undefined;
-      const status=phase==='result'?resultStatus(message):'working';
-      const call={name:toolName,args:block.call?.arguments??block.arguments,message,status};
+      const done=phase?phase==='result':!!block&&typeof block==='object'&&'kind' in block;
+      const message=done?block.message??block:undefined;
+      const status=done?resultStatus(message):'working';
+      const call={name:toolName,args:block?.call?.arguments??block?.call?.argsRaw??block?.arguments??block?.argsRaw,message,status};
       return h('details',{className:'wcu-activity','data-wincu-action':true},h('style',null,activityCss),h('summary',null,mouseIcon(),h('span',{className:'wcu-activity-label'},status==='working'?t('working'):actionText(call,t)),h('span',{className:'wcu-activity-state'},t(status==='failed'?'failedAction':status==='stopped'?'stoppedAction':status))),activityBody(call,renderFactorySlot,loadImage,t),inspect&&h('button',{type:'button',onClick:inspect},t('showDetails')));
     }
     function reduceSeries(state,event){
       const data=event.data||{};
       if(event.type==='tool/call'&&desktopTool(data.name))return {...state,calls:[...state.calls,{id:data.callId,name:data.name,args:data.arguments,seq:event.seq,status:'working'}]};
-      if(event.type==='tool/result')return {...state,calls:state.calls.map(call=>call.id===data.message?.callId?{...call,message:data.message,status:resultStatus(data.message)}:call)};
+      if(event.type==='tool/result'){
+        const id=toolResult(data.message).id??data.callId;
+        return {...state,calls:state.calls.map(call=>id!==undefined&&call.id===id?{...call,message:data.message,status:resultStatus(data.message)}:call)};
+      }
       if(event.type==='turn/end')return {...state,ended:true,reason:data.reason?.kind||'completed'};
       return state;
     }

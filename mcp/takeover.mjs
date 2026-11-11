@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
@@ -8,6 +8,43 @@ import { helperStrings, indicatorText, overlayLocale, overlayStrings, systemLoca
 
 export const STOPPED = 'COMPUTER_USE_STOPPED_BY_USER: The user stopped this operation series with Esc or their custom shortcut. Do not retry desktop input in this turn. A new user turn, including a request to continue, can use the desktop automatically; no settings change is required.';
 const helperScript = fileURLToPath(new URL('../scripts/windows-takeover.ps1', import.meta.url));
+
+// WSL (#79): DSH and this server can run inside WSL and reach powershell.exe
+// through interop. A Windows process resolves a Linux path such as
+// /home/me/x.ps1 against its own current drive, so started from /mnt/c it
+// looked for C:\home\me\x.ps1. Scripts therefore get their Windows form
+// (wslpath -w), Windows paths in results get their Linux form for DSH's file
+// tools, and a variable set here reaches a Windows process only when WSLENV
+// names it.
+const readText = file => { try { return readFileSync(file, 'utf8'); } catch { return ''; } };
+export const IN_WSL = process.platform === 'linux' && (!!process.env.WSL_DISTRO_NAME || !!process.env.WSL_INTEROP || /microsoft/i.test(readText('/proc/sys/kernel/osrelease')));
+const wslpath = (flag, file) => execFileSync('wslpath', [flag, file], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
+export function windowsPath(file, { wsl = IN_WSL, distro = process.env.WSL_DISTRO_NAME, convert = wslpath } = {}) {
+  if (!wsl || typeof file !== 'string' || !file.startsWith('/')) return file;
+  try { const converted = convert('-w', file); if (converted) return converted; } catch { }
+  const drive = /^\/mnt\/([a-z])(?=\/|$)(.*)$/i.exec(file);
+  if (drive) return `${drive[1].toUpperCase()}:${(drive[2] || '/').replaceAll('/', '\\')}`;
+  return distro ? `\\\\wsl.localhost\\${distro}${file.replaceAll('/', '\\')}` : file;
+}
+export function linuxPath(file, { wsl = IN_WSL, convert = wslpath } = {}) {
+  if (!wsl || typeof file !== 'string' || !/^[A-Za-z]:[\\/]/.test(file)) return file;
+  try { const converted = convert('-u', file); if (converted) return converted; } catch { }
+  return `/mnt/${file[0].toLowerCase()}${file.slice(2).replaceAll('\\', '/')}`;
+}
+// The variables named here reach Windows processes as they are (/w: only
+// when WSL starts a Windows process; /u would mean the other way round).
+export function windowsEnv(env, names, { wsl = IN_WSL } = {}) {
+  if (!wsl) return env;
+  const shared = String(env.WSLENV ?? '').split(':').filter(Boolean);
+  const listed = new Set(shared.map(item => item.split('/')[0]));
+  for (const name of names) if (!listed.has(name)) shared.push(name + '/w');
+  return { ...env, WSLENV: shared.join(':') };
+}
+const windowsScripts = new Map();
+export function windowsScript(file) {
+  if (!windowsScripts.has(file)) windowsScripts.set(file, windowsPath(file));
+  return windowsScripts.get(file);
+}
 // What "Open overlay to adjust" shows: the same layout as a real run.
 export function previewProgress(locale) {
   const words = overlayStrings(locale), scroll = words.labels.scroll[0];
@@ -81,7 +118,7 @@ export class TakeoverControl {
   }
   async resumeOperation(clearScope=true){
     if(this.child)await this.command('resume');
-    this.paused=false;if(clearScope)this.stoppedSeriesKey=null;
+    this.paused=false;this.helperFailed=false;if(clearScope)this.stoppedSeriesKey=null;
     this.persist('new-operation');
   }
   sync() {
@@ -102,6 +139,9 @@ export class TakeoverControl {
       if(this.fixedLocale===undefined&&typeof activity.locale==='string')this.locale=overlayLocale(activity.locale);
       const held=activity.active===true&&Number.isFinite(activity.expiresAt)&&activity.expiresAt>Date.now();
       const key=held?JSON.stringify([activity.sessionId,activity.turn]):this.seriesKey;
+      // A failure while this read is still under way belongs to this series:
+      // blocking the previous one would let the next read resume and retry.
+      this.syncKey=key;
       // A series of browser-lane calls is held for turn tracking but shows
       // nothing; the indicator starts with the series' first desktop call.
       const indicator=held&&activity.indicator!==false;
@@ -109,7 +149,9 @@ export class TakeoverControl {
       // short time; that holds no series, indicator or stop key.
       const lingering=!held&&!!activity.progress&&Number.isFinite(activity.lingerUntil)&&activity.lingerUntil>Date.now();
       const progress=JSON.stringify({enabled:this.config.progressOverlayEnabled&&(held||lingering),remoteIndicatorVisible:this.config.remoteIndicatorVisible,locale:this.locale,settings:this.config,progress:{...activity.progress,status:this.paused&&held?'stopped':activity.progress?.status??'waiting'}});
-      if(!this.disabledForTest&&this.sentProgress!==progress&&(this.child||(this.config.progressOverlayEnabled&&(held||lingering)))){
+      // After the helper failed, the overlay does not start it again in this
+      // series: the poll would launch PowerShell four times a second.
+      if(!this.disabledForTest&&this.sentProgress!==progress&&(this.child||(!this.helperFailed&&this.config.progressOverlayEnabled&&(held||lingering)))){
         await this.command('progress',JSON.parse(progress));this.sentProgress=progress;
       }
       if(held&&!this.blockedSeries.has(key)&&this.paused&&this.active===0)await this.resumeOperation();
@@ -144,19 +186,28 @@ export class TakeoverControl {
       if(!this.disabledForTest&&this.progressPreviewToken>0)await this.command('progress',{enabled:true,preview:true,settings:this.config,remoteIndicatorVisible:this.config.remoteIndicatorVisible,progress:previewProgress(this.locale)});
     }
   }
+  // The helper's Windows process id, which the backend watches during input.
+  // Under WSL the child's own pid is that of the interop process (#79).
+  get helperProcessId() { return this.child ? (this.helperPid || this.child.pid || 0) : 0; }
   // A quiet lease (browser-lane calls) checks the stopped state and counts as an
   // action in progress, but neither shows the indicator nor arms the stop keys.
+  // Quiet calls send no real input, so they need no stop listener: when the
+  // listener failed (it did not start, or it exited), they keep working and
+  // only real input stays refused. A stop by the user refuses everything (#79).
   async begin({ quiet = false } = {}) {
-    await this.sync();
-    if(this.seriesHeld&&this.blockedSeries.has(this.seriesKey))throw new Error(this.blockedSeries.get(this.seriesKey));
+    // A read that found the helper failing has paused the series; the checks
+    // below then decide.
+    try { await this.sync(); } catch (error) { if (!this.paused) throw error; }
+    const refuses = message => !(quiet && message !== STOPPED);
+    if(this.seriesHeld&&this.blockedSeries.has(this.seriesKey)&&refuses(this.blockedSeries.get(this.seriesKey)))throw new Error(this.blockedSeries.get(this.seriesKey));
     if(this.paused&&!this.activityFile&&this.active===0)await this.resumeOperation();
-    if (this.paused) throw new Error(this.pauseMessage);
+    if (this.paused&&refuses(this.pauseMessage)) throw new Error(this.pauseMessage);
     if (this.closed) throw new Error('COMPUTER_USE_STOPPING');
     if (!quiet&&!this.disabledForTest&&(!this.seriesHeld||!this.seriesIndicator||!this.child)) {
       try { await this.command('begin', this.config); this.sentShortcut = this.config.stopShortcut; this.sentCursorIndicator = this.config.cursorIndicatorEnabled;this.sentRemoteVisible=this.config.remoteIndicatorVisible; }
-      catch (error) { this.fail(error); throw error; }
+      catch (error) { this.fail(error); throw new Error(this.paused ? this.pauseMessage : error.message); }
     }
-    if (this.paused) throw new Error(this.pauseMessage);
+    if (this.paused&&refuses(this.pauseMessage)) throw new Error(this.pauseMessage);
     this.active++; if (!quiet) this.shown++; this.persist();
   }
   async end({ quiet = false } = {}) {
@@ -166,9 +217,10 @@ export class TakeoverControl {
   fail(error) {
     if (this.closed || this.paused) return;
     this.paused = true;
-    this.stoppedSeriesKey=this.seriesKey;
-    this.pauseMessage = error?.message === STOPPED ? STOPPED : `COMPUTER_USE_PAUSED: ${error?.message ?? error}. This operation series is paused. Do not retry in this turn; a new user turn can retry the desktop connection.`;
-    if(this.seriesKey!==null)this.blockedSeries.set(this.seriesKey,this.pauseMessage);
+    const key=this.syncKey??this.seriesKey;
+    this.stoppedSeriesKey=key;
+    this.pauseMessage = error?.message === STOPPED ? STOPPED : `COMPUTER_USE_PAUSED: ${error?.message ?? error}. Desktop input is paused for this operation series; reading the screen and browser-lane calls still work. Do not retry desktop input in this turn; a new user turn retries the desktop connection.`;
+    if(key!==null)this.blockedSeries.set(key,this.pauseMessage);
     this.persist(String(error?.message ?? error));
     // This also covers a control-file or presentation failure while input runs.
     this.child?.stdin.write(JSON.stringify({command:'stop'})+'\n',()=>{});
@@ -179,9 +231,10 @@ export class TakeoverControl {
     if (this.child) return;
     this.starting = new Promise((resolve, reject) => {
       let buffer = '', diagnostic = '', ready = false;
-      const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-File', helperScript, '-CancelEvent', this.eventName];
+      this.helperPid = 0;
+      const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-File', windowsScript(helperScript), '-CancelEvent', this.eventName];
       if (this.testMode) args.push('-TestMode');
-      const child = this.child = spawn(this.powershell, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      const child = this.child = spawn(this.powershell, args, { cwd: path.dirname(helperScript), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       const deadline = setTimeout(() => { reject(new Error('Takeover stop listener startup timed out')); child.kill(); }, 15000);
       child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
       child.stderr.on('data', chunk => { diagnostic = (diagnostic + chunk).slice(-6000); });
@@ -191,7 +244,7 @@ export class TakeoverControl {
           const at = buffer.indexOf('\n'); if (at < 0) break;
           const line = buffer.slice(0, at).trim(); buffer = buffer.slice(at + 1); if (!line) continue;
           let message; try { message = JSON.parse(line); } catch { continue; }
-          if (message.kind === 'ready') { ready = true; clearTimeout(deadline); resolve(); }
+          if (message.kind === 'ready') { ready = true; this.helperPid = Number.isSafeInteger(message.pid) && message.pid > 0 ? message.pid : 0; clearTimeout(deadline); resolve(); }
           else if (message.kind === 'stopped') this.fail(new Error(STOPPED));
           else if (message.kind === 'progress-layout') {
             if(this.layoutFile)try{atomicJson(this.layoutFile,{id:randomUUID(),patch:message.patch,base:message.base});}catch(error){process.stderr.write('Overlay settings sync failed: '+error.message+'\n');}
@@ -209,7 +262,7 @@ export class TakeoverControl {
         const failure = error ?? new Error(`Takeover stop listener exited${diagnostic ? ': ' + diagnostic : ''}`);
         if (!ready) reject(failure);
         for (const [id, pending] of this.waiters) { clearTimeout(pending.timer); pending.reject(failure); this.waiters.delete(id); }
-        if (!this.closed) this.fail(failure);
+        if (!this.closed) { this.helperFailed = true; this.fail(failure); }
       };
       child.once('error', died); child.once('exit', () => died());
       child.stdin.on('error', () => {});

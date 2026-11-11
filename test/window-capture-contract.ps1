@@ -102,7 +102,7 @@ public class FixtureGraphics : IDisposable {
   public void Dispose() { g.Dispose(); }
 }
 '@
-foreach ($name in @('Get-Prop','Invoke-Safe','Get-ExtendedFrameBounds','Try-PrintWindowCapture','Capture-Screenshot')) {
+foreach ($name in @('Get-Prop','Invoke-Safe','Get-ExtendedFrameBounds','Try-PrintWindowCapture','Remove-TempFile','Remove-OldScreenshots','Capture-Screenshot')) {
   $definition = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
   if ($null -eq $definition) { throw "Missing capture function: $name" }
   $body = $definition.Extent.Text.Replace('[System.Drawing.Graphics]', '[FixtureGraphics]')
