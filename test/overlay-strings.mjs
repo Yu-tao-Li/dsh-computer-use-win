@@ -55,7 +55,7 @@ for(const table of Object.values(OVERLAY_STRINGS))assert.ok(listed[1].includes(`
 console.log('PASS the helper and the overlay modules carry no built-in Chinese text');
 
 // Languages: DSH and system tags map to a shipped dictionary, else English.
-for(const [tag,expected] of [['zh','zh'],['zh-CN','zh'],['zh-Hans-CN','zh'],['ZH_tw','zh'],['en','en'],['en-US','en'],['ru-RU','en'],['ja','en'],['',''+'en'],[undefined,'en']])
+for(const [tag,expected] of [['zh','zh'],['zh-CN','zh'],['zh-Hans-CN','zh'],['ZH_tw','zh'],['en','en'],['en-US','en'],['ru','ru'],['ru-RU','ru'],['RU-ru','ru'],['ja','en'],['',''+'en'],[undefined,'en']])
   assert.equal(overlayLocale(tag),expected,`locale ${tag}`);
 assert.ok(typeof systemLocale()==='string'&&systemLocale().length>=2);
 // The banner: an unchanged default follows the language; the user's own words stay.
@@ -63,6 +63,9 @@ assert.equal(indicatorText('DSH 正在控制电脑','en'),'DSH is controlling yo
 assert.equal(indicatorText('DSH is controlling your computer','zh-CN'),'DSH 正在控制电脑');
 assert.equal(indicatorText('','en'),'DSH is controlling your computer');
 assert.equal(indicatorText('AI 助手接管中','en'),'AI 助手接管中');
+assert.equal(indicatorText('DSH управляет компьютером','en'),'DSH is controlling your computer');
+assert.equal(indicatorText('DSH is controlling your computer','ru-RU'),'DSH управляет компьютером');
+assert.equal(indicatorText('DSH управляет компьютером','zh-CN'),'DSH 正在控制电脑');
 assert.equal(isDefaultIndicatorText(' DSH 正在控制电脑 '),true);assert.equal(isDefaultIndicatorText('Robot at work'),false);
 console.log('PASS language tags and the banner default');
 

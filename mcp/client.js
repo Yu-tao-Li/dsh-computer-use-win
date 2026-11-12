@@ -57,7 +57,7 @@ window.__ModuleLoader__.load({
     // The banner's built-in text in every overlay language (indicatorDefault in
     // mcp/overlay-strings.mjs). An unchanged default shows, and is drawn, in the
     // interface language (#74).
-    const defaultIndicatorTexts=['DSH 正在控制电脑','DSH is controlling your computer'];
+    const defaultIndicatorTexts=['DSH 正在控制电脑','DSH is controlling your computer','DSH управляет компьютером'];
     Object.assign(dictionaries.zh,{indicatorDefault:defaultIndicatorTexts[0]});
     Object.assign(dictionaries.en,{indicatorDefault:defaultIndicatorTexts[1]});
     const isDefaultIndicatorText=text=>!String(text??'').trim()||defaultIndicatorTexts.includes(String(text).trim());

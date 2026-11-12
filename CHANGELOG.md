@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 浮窗、提示条和 AI 总结新增俄文词典（[#74](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/74)）：DSH 界面语言为俄文（或系统语言为俄文）时，浮窗和 AI 总结用俄文显示，提示文字保持默认时也跟着变成俄文；设置页仍回退到英文。/ Added a Russian dictionary for the overlay, the indicator bar and the AI summary: with DSH (or the system) set to Russian, the overlay and its AI summary read Russian, and the default banner text switches too; the settings page still falls back to English.
+
 ## 0.5.7 — 2026-11-11
 
 - 修复 OCR 在部分电脑上每次都报“指定路径 C:\Users\XXX~1 下的对象不存在”，`find` 的 OCR 兜底也一样（[#78](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/78)）。原因在 Windows PowerShell 5.1 的文件系统提供程序：TEMP 是 8.3 短路径、而短名比原名还长时（用户名很短又带空格，如 `Li Hua` 的短名是 `LIHUA~1`），删除临时文件的命令会报这句错。OCR 每次编译识别组件都要删临时文件，所以每次都失败，还在 TEMP 里留下一对半成品文件。现在临时文件全部用 .NET 处理，编译前清掉一小时前的半成品。顺带修正截图清理拿本地时间和 UTC 比较，在西半球的时区会删掉刚截的图。/ OCR failed on every call with “An object at the specified path C:\Users\XXX~1 does not exist” when TEMP is an 8.3 path whose short name is longer than the real one (a short user name with a space): Windows PowerShell 5.1 rejects such paths when deleting files, and every OCR compile deleted its temporary files. Temporary files are now handled with .NET calls, and leftover partial builds are removed. Screenshot cleanup compares times in UTC, so it no longer deletes fresh captures west of UTC.
