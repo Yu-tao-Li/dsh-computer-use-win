@@ -1,4 +1,4 @@
-# Actual backend functions, fake window metadata and UIA objects; no desktop changes.
+﻿# Actual backend functions, fake window metadata and UIA objects; no desktop changes.
 $ErrorActionPreference = 'Stop'
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/windows-uia.ps1'), [Text.Encoding]::UTF8)
 $tokens = $null
@@ -32,7 +32,7 @@ namespace Fixture {
   }
 }
 '@
-$names = @('Get-Prop','Get-ViewMode','Invoke-Safe','Has-WindowTarget','Test-TargetMatch','Get-NativeWindowList','Resolve-TargetWindow','Resolve-Element','Home-Point')
+$names = @('Get-Prop','Get-ViewMode','Invoke-Safe','Update-WindowCache','Has-WindowTarget','Test-TargetMatch','Get-NativeWindowList','Select-TargetWindow','Resolve-TargetWindow','Resolve-Element','Home-Point')
 foreach ($name in $names) {
   $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
   if ($null -eq $definition) { throw "Missing backend function: $name" }
@@ -48,7 +48,7 @@ function Assert-Equal { param($Actual, $Expected, [string]$Label)
   if ($Actual -ne $Expected) { throw "${Label}: expected $Expected; got $Actual" }
 }
 foreach ($target in @([pscustomobject]@{windowTitle='Fixture'}, [pscustomobject]@{processId=4242})) {
-  $script:WindowCache = @{}
+  $script:WindowCache = @{};$script:WindowObservations=@{}
   [WindowsComputerUseNative]::X = 100
   [WindowsComputerUseNative]::Y = 200
   $null = Get-NativeWindowList -RecordObservation
@@ -58,13 +58,22 @@ foreach ($target in @([pscustomobject]@{windowTitle='Fixture'}, [pscustomobject]
   $element = Resolve-TargetWindow $target
   Assert-Equal $script:WindowCache['42'].x 100 'Target resolution preserves observed X'
   Assert-Equal $script:WindowCache['42'].y 200 'Target resolution preserves observed Y'
-  $point = Home-Point -X 110 -Y 230 -Target $element
+  $current = Home-Point -X 230 -Y 310 -Target $element
+  Assert-Equal $current.x 230 'Current coordinates are not shifted again'
+  Assert-Equal $current.y 310 'Current coordinates keep their Y'
+  $token=$script:WindowCache['42'].token
+  $point = Home-Point -X 110 -Y 230 -Target $element -ObservationToken $token
   Assert-Equal $point.x 230 'Homed X'
   Assert-Equal $point.y 310 'Homed Y'
   Assert-Equal $point.homed.dx 120 'Window X displacement'
   Assert-Equal $point.homed.dy 80 'Window Y displacement'
   $null = Get-NativeWindowList -RecordObservation
   Assert-Equal $script:WindowCache['42'].x 220 'Explicit re-observation updates cache'
+  $point=Home-Point 110 230 $element $token
+  Assert-Equal $point.x 230 'An immutable old observation stays usable after a new observation'
+  $script:WindowObservations[$token].ts=0
+  $stale=$false;try{Home-Point 110 230 $element $token | Out-Null}catch{if($_.Exception.Message -notmatch 'OBSERVATION_TOKEN_STALE'){throw};$stale=$true}
+  Assert-Equal $stale $true 'Expired observation token is rejected'
 }
 $script:WindowCache = @{}
 $null = Resolve-TargetWindow ([pscustomobject]@{processId=4242})

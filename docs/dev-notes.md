@@ -72,8 +72,7 @@ computer use 在 Windows 上最阴险的失败都是**静默的**——返回 ok
    **直接干净关闭、不弹"是否保存"对话框**（经典 Win32 应用才会弹）。
    这类目标用 `foreground`/`clipboard` 路径。
 7. **PrintWindow 对 DirectComposition 表面渲染纯黑**（UWP/WinUI/游戏）：
-   捕获链检测纯黑帧后切 WGC（Windows.Graphics.Capture）读 DWM 合成帧，
-   再不行降级屏幕区域裁剪（带 `occludedPossible` 标记）。
+   当前候选版检测到无效 PrintWindow 帧后，降级为屏幕区域裁剪，带 `occludedPossible` 标记；未实现 WGC。
 8. **PS 5.1 编码**：无 BOM 的 UTF-8 .ps1 在非 UTF-8 系统代码页（如 CI runner）
    上按 ANSI 解析 → 行尾 CJK 字节吞 LF、脚本崩。后端与所有 .ps1 均带 UTF-8 BOM。
 
@@ -81,7 +80,7 @@ computer use 在 Windows 上最阴险的失败都是**静默的**——返回 ok
 
 | 项目 | 语言 | 值得借鉴的设计 | 本项目吸收情况 |
 |---|---|---|---|
-| [trycua/cua](https://github.com/trycua/cua)（Cua Driver，ex-MS 团队） | Rust | 分层输入分发（UIA pattern→PostMessage 后台→SendInput 前台，显式报 `background_unavailable`）；PrintWindow→WGC→BitBlt 截图链 + 黑帧检测；DWM extended frame bounds 去阴影边 | ✅ 截图链、extended frame bounds、诚实报错、后台 dispatch |
+| [trycua/cua](https://github.com/trycua/cua)（Cua Driver，ex-MS 团队） | Rust | 分层输入分发（UIA pattern→PostMessage 后台→SendInput 前台，显式报 `background_unavailable`）；PrintWindow→屏幕区域回退截图链 + 黑帧检测；DWM extended frame bounds 去阴影边 | ✅ 截图链、extended frame bounds、诚实报错、后台 dispatch |
 | [Harusame64/desktop-touch-mcp](https://github.com/Harusame64/desktop-touch-mcp) | TS+Rust | **常驻 COM 线程**消除 PowerShell 进程启动（366ms→2.2ms）；坐标 homing（窗口移动补偿）；鼠标贴左上角 500ms 急停；Win+R/X/L 组合键黑名单；窗口身份校验 | ✅ **persistent 后端**、homing、急停 failsafe、Win 键黑名单（全部实测通过） |
 | [SSCanine/iris-mcp](https://github.com/SSCanine/iris-mcp) | Python | 三后端路由（Win32/UIA/OCR）覆盖 UIA 盲区应用（Tk/自绘 Qt/游戏）；**SendInput 替代废弃的 mouse_event**；Per-Monitor V2 DPI；像素级 miss distance 实测 bench | ✅ SendInput、显式 Per-Monitor V2 DPI、bench 方法论、OCR 回退 |
 | [wangneal/PeekabooWin](https://github.com/wangneal/PeekabooWin) | Python | UIA 稀疏时 `find_element` **自动降级 OCR**（结果带 `source: ocr_fallback` 标记）；`wait_for_window`/`wait_for_element` 服务端轮询；`move_window`/`close_window`（WM_CLOSE）；环境变量配置体系 | ✅ find 稀疏提示、OCR 回退、wait_for、move_window/close_window、WCU_* 环境变量 |
@@ -101,7 +100,7 @@ computer use 在 Windows 上最阴险的失败都是**静默的**——返回 ok
    JSON 行协议；超时/崩溃 → kill + 下次调用懒重建（隔离性不丢）。
    首个调用 cold ~500ms（进程+程序集+首次编译），之后稳定 6~100ms。
 2. **C# P/Invoke 预编译 DLL 缓存**：按源码 hash 命名存 `%TEMP%`，
-   重启进程免现场编译（~300-500ms/次 → 0）。OCR/WGC 助手同机制。
+   重启进程免现场编译（~300-500ms/次 → 0）。OCR 助手同机制。
 3. **截图减重**：`captureWindow`（PrintWindow 窗口裁剪，非前台窗口也能抓）+
    `maxWidth` 降采样（默认 1600px）+ `imageScale/origin` 供模型换算坐标 +
    30 分钟自动 GC。全屏 3.8MB → 窗口裁剪 91KB。
@@ -134,8 +133,7 @@ computer use 在 Windows 上最阴险的失败都是**静默的**——返回 ok
 - 虚拟屏 5120×1440 @ (0,0)，主屏 2560×1440，中文 UI
 - WinMetadata：`C:\Windows\System32\WinMetadata`（每命名空间一个 .winmd，
   无统一 Windows.winmd；24H2+ 的 Graphics 系合并进 Windows.Graphics.winmd）
-- WGC 助手编译需 .NET Core 参考程序集（`Microsoft.NETCore.App.Ref` pack）——
-  缺失时 WGC 捕获优雅降级，不报错
+- 当前候选版已移除不可编译的 WGC 实现；不再承诺 WGC 回退。
 
 
 ## 2026-10-13：Issue #18 缓存观察与响应诊断

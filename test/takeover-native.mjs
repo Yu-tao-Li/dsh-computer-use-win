@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rename } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn,spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { TakeoverControl, STOPPED } from '../mcp/takeover.mjs';
 import { DEFAULT_SETTINGS, normalizeSettings } from '../mcp/settings.mjs';
@@ -51,16 +51,23 @@ try {
   assert.equal(eventProbe.status,0,eventProbe.stderr);
   await control.end();
   const replacement = new TakeoverControl({ powershell, configFile, stateFile });
+  await assert.rejects(replacement.begin(),error=>error.message===STOPPED);
+  assert.equal(replacement.active,0,'A refused begin must not leak a lease');
+  await assert.rejects(replacement.begin(),error=>error.message===STOPPED);
+  replacement.stoppedAt=Date.now()-31000;
   await replacement.begin();
-  assert.equal(replacement.paused,false,'A new standalone operation must not require a settings resume');
+  assert.equal(replacement.paused,false,'Standalone input resumes only after reporting stop and cooldown');
   await replacement.end();
   await replacement.close();
   await saveConfig({ ...DEFAULT_SETTINGS, indicatorEnabled: false, indicatorIdleMs: 200, resumeToken: 1 });
   await control.sync();
-  assert.equal(control.paused, false); assert.equal((await control.command('status')).cancelled, false);
+  assert.equal(control.paused, true,'Legacy resumeToken must not authorize input');
+  await saveConfig({...DEFAULT_SETTINGS,indicatorEnabled:false,previewToken:1,resumeToken:1});await control.sync();
+  assert.equal(control.paused,true,'Preview must not resume a stopped operation');
+  await control.resumeOperation();assert.equal((await control.command('status')).cancelled, false);
   let resumeToken=1;
   const configure=async stopShortcut=>{await saveConfig({...DEFAULT_SETTINGS,indicatorEnabled:false,indicatorIdleMs:200,resumeToken,stopShortcut});await control.sync();};
-  const resume=async stopShortcut=>{await control.end();resumeToken++;await configure(stopShortcut);assert.equal(control.paused,false);};
+  const resume=async stopShortcut=>{await control.end();resumeToken++;await configure(stopShortcut);await control.resumeOperation();assert.equal(control.paused,false);};
   const key=async(vk,extra={})=>control.command('test_key',{vk,...extra});
   await configure('F8');await control.begin();
   assert.equal((await key(0x77,{injected:true})).paused,false,'Injected custom key must not stop');
@@ -99,6 +106,11 @@ try {
   const excluded=await control.command('status');assert(excluded.overlayCaptureExcluded&&excluded.pointerCaptureExcluded,'Opt-out must exclude both layers live');
   await saveConfig({...visibleConfig,remoteIndicatorVisible:true});await control.sync();
   const visible=await control.command('status');assert(!visible.overlayCaptureExcluded&&!visible.pointerCaptureExcluded);
+  const captured=await control.command('capture_begin');assert(captured.overlayCaptureExcluded&&captured.pointerCaptureExcluded);
+  await control.command('capture_begin');await control.command('capture_end');assert((await control.command('status')).overlayCaptureExcluded,'Nested capture must keep overlays excluded');
+  await control.command('capture_end');assert.equal((await control.command('status')).overlayCaptureExcluded,false,'Capture must restore the user visibility setting');
+  await control.command('preview',{indicatorEnabled:true,indicatorIdleMs:200});await new Promise(r=>setTimeout(r,2050));
+  assert.equal((await control.command('status')).armed,true,'Preview during a lease must not disarm Esc');
   const waitDisplays=async expected=>{const deadline=Date.now()+2500;for(;;){const state=await control.command('status');if(JSON.stringify(state.overlayBounds)===JSON.stringify(expected))return state;if(Date.now()>deadline)throw Error('Display topology did not refresh: '+JSON.stringify(state));await new Promise(r=>setTimeout(r,50));}};
   const virtualScreens=[{left:-1280,top:0,width:1280,height:720},{left:0,top:0,width:1920,height:1080}];
   await control.command('test_displays',{displays:virtualScreens});const attached=await waitDisplays(virtualScreens);
@@ -124,9 +136,25 @@ try {
   assert.equal(previewOnly.windows,0);assert.equal(previewOnly.pointerVisible,true,'Preview must respect independent screen and pointer settings');
   await new Promise(resolve=>setTimeout(resolve,2150));
   assert.equal((await control.command('status')).pointerVisible,false,'Preview marker must clean itself up');
-  const report = { passed: true, physicalInputSent: false, nativeHook: true, injectedEscIgnored: true,
-    normalKeyIgnored: true, physicalEscStops: true, cancellationEvent: true, standaloneNextOperationAutoResumes: true,
-    legacyResumeSignal: true, customKeyStops:true,customCombinationStops:true,injectedShortcutIgnored:true,injectedModifiersIgnored:true,exactModifiers:true,keyupAndRepeatConsumed:true,shortcutChangesLive:true,shortcutClearKeepsEsc:true,nativeOverlay: true, overlayWindows: shown.windows, noFocusSteal: true, idleCleanup: true,pointerMarker:true,pointerClickThrough:true,remoteCaptureVisibleByDefault:true,captureOptOutLive:true,virtualDisplayAttachResizeDetachReconnect:true,topologySource:'EnumDisplayMonitors',pointerIndependentSwitch:true,pointerLiveUpdates:true,pointerStopAndIdleCleanup:true,pointerNegativeMonitorAndDpiLayout:true,pointerPositionSource:'test-seam',liveCursorAvailable:initial.liveCursorAvailable,preview, cursorPreview, state: JSON.parse(await readFile(stateFile, 'utf8')) };
+  await control.command('begin',{indicatorEnabled:false});
+  // Compile/start the observer before blocking the UI, so the deadline tests
+  // cancellation rather than cold PowerShell/.NET startup.
+  const probe=spawn(powershell,['-NoProfile','-File',fileURLToPath(new URL('./takeover-event.ps1',import.meta.url)),'-CancelEvent',control.eventName,'-ExpectCancelled','-WaitForCheck'],{windowsHide:true,stdio:['pipe','pipe','pipe']});
+  let probeOutput='',probeError='';probe.stdout.on('data',data=>{probeOutput+=data});probe.stderr.on('data',data=>{probeError+=data});
+  const probeExit=new Promise((resolve,reject)=>{probe.once('error',reject);probe.once('close',code=>resolve(code));});
+  try{
+    const readyUntil=Date.now()+15000;
+    while(!probeOutput.includes('WCU_PROBE_READY')){if(probe.exitCode!==null||Date.now()>readyUntil)throw Error('Cancellation probe did not become ready: '+probeError);await new Promise(r=>setTimeout(r,20));}
+    const blockStarted=Date.now(),blocked=control.command('test_block_ui_stop',{milliseconds:1500});
+    await new Promise(r=>setTimeout(r,180));probe.stdin.end('check\n');
+    const status=await Promise.race([probeExit,new Promise(resolve=>setTimeout(()=>resolve('timeout'),800))]);
+    assert.equal(status,0,'Dedicated keyboard pump must cancel while UI is blocked: '+probeError);
+    assert(Date.now()-blockStarted<1400,'The cancellation must be observed before the UI thread resumes');
+    await blocked;
+  }finally{if(probe.exitCode===null)probe.kill();}
+  const report = { passed: true, physicalInputSent: false, nativeHook: true, uiBlockedStop:true,captureLeaseRestoresVisibility:true,previewKeepsStopArmed:true,injectedEscIgnored: true,
+    normalKeyIgnored: true, physicalEscStops: true, cancellationEvent: true, standaloneStopReportedAndCooldown: true,
+    legacyResumeIgnored: true, customKeyStops:true,customCombinationStops:true,injectedShortcutIgnored:true,injectedModifiersIgnored:true,exactModifiers:true,keyupAndRepeatConsumed:true,shortcutChangesLive:true,shortcutClearKeepsEsc:true,nativeOverlay: true, overlayWindows: shown.windows, noFocusSteal: true, idleCleanup: true,pointerMarker:true,pointerClickThrough:true,remoteCaptureVisibleByDefault:true,captureOptOutLive:true,virtualDisplayAttachResizeDetachReconnect:true,topologySource:'EnumDisplayMonitors',pointerIndependentSwitch:true,pointerLiveUpdates:true,pointerStopAndIdleCleanup:true,pointerNegativeMonitorAndDpiLayout:true,pointerPositionSource:'test-seam',liveCursorAvailable:initial.liveCursorAvailable,preview, cursorPreview, state: JSON.parse(await readFile(stateFile, 'utf8')) };
   await writeFile(path.join(root, 'results.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ root, ...report }, null, 2));
 } finally { await control.close(); }

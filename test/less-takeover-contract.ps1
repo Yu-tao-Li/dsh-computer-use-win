@@ -1,9 +1,9 @@
-# Shipped less-takeover decisions on fake window, pointer and foreground APIs: no physical input.
+﻿# Shipped less-takeover decisions on fake window, pointer and foreground APIs: no physical input.
 $ErrorActionPreference='Stop'
 $tokens=$null; $parseErrors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/windows-uia.ps1'),[ref]$tokens,[ref]$parseErrors)
 if($parseErrors.Count){throw ($parseErrors | Out-String)}
-foreach($name in @('Get-Prop','Invoke-Safe','Convert-Rect','Get-WindowProcessId','Get-RootWindow','Get-RootWindowAt','Get-WorkWindow','Resolve-InputWindow','Start-Input','Assert-PointOnTarget','Complete-Input','Assert-InFront','Invoke-Guarded')) {
+foreach($name in @('Get-Prop','Invoke-Safe','Convert-Rect','Get-WindowProcessId','Get-RootWindow','Get-RootWindowAt','Get-WorkWindow','Resolve-InputWindow','Start-Input','Assert-PointOnTarget','Complete-Input','Assert-InFront','Assert-InputProcess','Assert-NativeInputTarget','Test-InputWindow','Invoke-Guarded')) {
   $f=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
   if($null -eq $f){throw "missing function $name"}
   . ([scriptblock]::Create($f.Extent.Text))
@@ -20,6 +20,7 @@ public static class WindowsComputerUseNative {
  public static bool SetCursorPos(int x,int y){CursorX=x;CursorY=y;Sets++;return true;}
  public static uint GetWindowThreadProcessId(IntPtr h,out uint pid){pid=Pids.ContainsKey(h.ToInt64())?Pids[h.ToInt64()]:0;return pid;}
  public static IntPtr GetAncestor(IntPtr h,uint flags){return h;}
+ public static IntPtr GetWindow(IntPtr h,uint command){return h.ToInt64()==211?new IntPtr(200):IntPtr.Zero;}
  public static IntPtr WindowFromPoint(POINT p){return new IntPtr(AtPoint);}
  public static bool IsWindow(IntPtr h){return Pids.ContainsKey(h.ToInt64());}
  public static bool IsWindowVisible(IntPtr h){return Pids.ContainsKey(h.ToInt64());}
@@ -115,10 +116,11 @@ Assert-Equal (Resolve-InputWindow ([pscustomobject]@{})) 100 'no host series: st
 $script:WcuSeries='["s",1]';$script:InputWindow=@{series='["s",1]';hwnd=[int64]250;at=0}
 Assert-Equal (Resolve-InputWindow ([pscustomobject]@{})) 100 'closed window: the window in front'; $checks+='targetless input follows DSH'
 
-# 8. The point must show the target or a window of its process.
+# 8. The point must show the target or its owned window, never a sibling of the same process.
 Scene
 $N::AtPoint=200; Assert-PointOnTarget 10 10 200
-$N::Pids[210]=2;$N::AtPoint=210; Assert-PointOnTarget 10 10 200
+$N::Pids[210]=2;$N::AtPoint=210; Expect-Error {Assert-PointOnTarget 10 10 200} 'POINT_COVERED'
+$N::Pids[211]=2;$N::AtPoint=211; Assert-PointOnTarget 10 10 200
 $N::Pids[500]=4;$N::AtPoint=500; Expect-Error {Assert-PointOnTarget 10 10 200} 'POINT_COVERED'; $checks+='covered point refused'
 
 # 9. Keys never go to a window that took the foreground in between.

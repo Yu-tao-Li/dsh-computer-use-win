@@ -1,5 +1,7 @@
 # 电脑操控设置 / Computer Use settings
 
+> 当前插件版本 `0.6.0`：设置标题显示包版本，悬停说明使用统一中英文词典，预览与已停止状态互不覆盖。
+
 ## 简体中文
 
 升级插件并完整退出、重新启动 DSH Desktop，打开 **设置 → 电脑操控**（鼠标图标；英文界面叫 Computer Use）。新版插件页面也有入口；旧宿主保留可配置插件卡片。DSH 0.2 使用插件条目 ID `mcp-dsh-computer-use-win` 的 Config 表单；旧接口使用 `windows-computer-use`。
@@ -10,7 +12,7 @@
 
 ### 浏览器操控（Browser Use）
 
-默认打开“网页优先用浏览器操控”和“显示浏览器窗口”。DSH 专用浏览器单独启动，用哪个浏览器由“使用的浏览器”决定：默认跟随 Windows 的默认浏览器，默认浏览器不是 Edge 或 Chrome 时用已安装的 Chrome 或 Edge。默认使用临时的空白配置，不加载扩展，不带你的登录、Cookie 和浏览记录（打开“记住登录”后改用保留的配置，见下段）；退出 DSH 或空闲 10 分钟后自动关闭。窗口请求在后台创建，普通网页操作不移动系统鼠标；Chrome 的 JavaScript 模态弹窗实测可能短暂来到前台，不能保证可见浏览器始终不影响焦点；你可以自己切换标签页观看。提示参照 Codex 的浏览器操控，不遮挡网页内容：专用浏览器的窗口框是 DSH 蓝，和你自己的浏览器一眼能分开；DSH 正在操作的标签页，图标换成蓝色箭头，这一轮结束后换回网页自己的图标；网页上一个带光晕的小箭头停在 DSH 点的位置，鼠标点击会穿过它，截图里也没有它。关掉“显示浏览器窗口”后，浏览器在后台运行，没有窗口。JavaScript 模态弹窗会暂停页面脚本，标签页图标在弹窗关闭后同步。
+默认打开“网页优先用浏览器操控”和“显示浏览器窗口”。DSH 专用浏览器单独启动，用哪个浏览器由“使用的浏览器”决定：默认跟随 Windows 的默认浏览器，默认浏览器不是 Edge 或 Chrome 时用已安装的 Chrome 或 Edge。默认使用临时的空白配置，不加载扩展，不带你的登录、Cookie 和浏览记录（打开“记住登录”后改用保留的配置，见下段）；退出 DSH 后关闭；无头模式空闲 10 分钟、可见窗口空闲 2 小时后自动关闭，页面活动也延长计时。窗口请求在后台创建，普通网页操作不移动系统鼠标；Chrome 的 JavaScript 模态弹窗实测可能短暂来到前台，不能保证可见浏览器始终不影响焦点；你可以自己切换标签页观看。提示参照 Codex 的浏览器操控，不遮挡网页内容：专用浏览器的窗口框是 DSH 蓝，和你自己的浏览器一眼能分开；DSH 正在操作的标签页，图标换成蓝色箭头，这一轮结束后换回网页自己的图标；网页上一个带光晕的小箭头停在 DSH 点的位置，鼠标点击会穿过它，截图里也没有它。关掉“显示浏览器窗口”后，浏览器在后台运行，没有窗口。JavaScript 模态弹窗会暂停页面脚本，标签页图标在弹窗关闭后同步。
 
 多个 DSH 会话使用同一个保留配置时共用浏览器。结束最早启动它的会话不会关闭其他会话正在用的标签页；最后一个会话退出后正常关闭并保存 Cookie。所有服务意外结束时，独立清理进程会在确认没有活跃会话后关闭浏览器。不同会话的“显示浏览器窗口”设置不一致时会明确报冲突，先结束旧会话或统一设置再重试。
 
@@ -18,7 +20,7 @@
 
 浏览器操控、读取界面（截图、控件树、文字识别、等待）和在后台完成的控件操作，都不显示屏幕边缘、提示条和鼠标标签，也不挂全局 Esc：这样的一轮操作里，你在其他程序按 Esc 不会被拦下；要停止，用 DSH 里的停止按钮。同一轮里一旦用到真实的鼠标或键盘，接管提示和 Esc 从这一步开始照常生效；按 Esc 停下的一轮，后续的浏览器操控也不再执行。
 
-网页能完成的步骤优先使用浏览器通道；原生应用、浏览器工具栏、无可用 CDP 连接、iframe 内容和 canvas 坐标动作，转为同一目标窗口的 UIA，再用截图/OCR/坐标兜底。必须重新读取桌面状态，不把网页坐标当屏幕坐标。不确定是否成功的动作先观察再决定，不能盲目重放。停止、取消、权限拒绝、禁用或只读控件，不允许通过桌面输入绕过。临时浏览器没有用户登录状态，不能代替已登录工作流。精简/自定义禁用 set_value 时不能新开标签页。设置修改在当前动作完成后重连，会关闭临时浏览器。
+网页能完成的步骤优先使用浏览器通道；原生应用、浏览器工具栏、无可用 CDP 连接、浏览器通道无法处理的内容，转为同一目标窗口的 UIA，再用截图/OCR/坐标兜底。必须重新读取桌面状态，不把网页坐标当屏幕坐标。不确定是否成功的动作先观察再决定，不能盲目重放。停止、取消、权限拒绝、禁用或只读控件，不允许通过桌面输入绕过。临时浏览器没有用户登录状态，不能代替已登录工作流。精简/自定义禁用 set_value 时不能新开标签页。设置修改在当前动作完成后重连，会关闭临时浏览器。
 
 Firefox 系网页通道为实验功能：选择“Firefox 系（实验性）”后，自动启动需关闭“显示浏览器窗口”；也可以通过显式 BiDi 端点连接单独启动的浏览器。默认浏览器选项仍按上述 Chrome/Edge 规则回退。Firefox 不具备上述蓝色状态提示、可见登录和多会话共享流程；具体范围见 [BiDi 说明](browser-bidi.md)。桌面通道读取现有 Gecko 窗口无需启用实验选项。
 
@@ -44,9 +46,9 @@ DSH 从一轮操作第一次用到鼠标或键盘开始持续显示提示，包�
 
 ### 停止与恢复
 
-按物理 **Esc** 停止。也可在“自定义停止方式”点击“录制快捷键”，按 F8 或 Ctrl + Alt + K 等按键／组合键并保存；标题旁的“恢复默认（Esc）”清除额外快捷键。录制时 Esc 用于取消；失焦或 15 秒未录入会退出录制。
+按 **Esc** 停止。也可在“自定义停止方式”点击“录制快捷键”，按 F8 或 Ctrl + Alt + K 等按键／组合键并保存；标题旁的“恢复默认（Esc）”清除额外快捷键。录制时 Esc 用于取消；失焦或 15 秒未录入会退出录制。
 
-Esc 只停止当前这一轮及其排队操作，同一轮不会自动重试。下次发起任务或发送“继续”时自动可用，无需进入设置恢复。普通鼠标移动与其他按键不会停止；程序发送的按键不视为物理停止输入。关闭提示仍保留停止监听。浏览器操控、读取界面和后台控件操作不占用 Esc；一轮操作用到鼠标键盘之前，要停止请用 DSH 里的停止按钮。
+Esc 只停止当前这一轮及其排队操作，同一轮不会自动重试。下次发起任务或发送“继续”时自动可用，无需进入设置恢复。普通鼠标移动与其他按键不会停止；仅忽略携带插件标记的自身按键，未带该标记的远程 Esc 也可停止。关闭装饰提示仍保留停止监听。同一 Windows 用户会话内，一处停止会通知其他正在控制桌面的插件后端。浏览器操控、读取界面和后台控件操作不占用 Esc；一轮操作用到鼠标键盘之前，要停止请用 DSH 里的停止按钮。
 
 取消会在可分段输入与 UIA 解析后的执行边界检查，并在收尾时释放按住的输入。已送达应用的操作无法撤回，阻塞的应用 Provider 调用需要先返回。按 Esc 不会请求重启或退出 DSH，也不能据此判断应用崩溃。
 
@@ -70,7 +72,7 @@ Lazy starts with one management entry while allowing all tools to be loaded on d
 
 The screen edge glow/status pill and the pointer glow/DSH tag have independent controls. Their pictures follow the switches and the top/bottom placement. Customize text, placement and the 200–3000ms hide delay under More options, save and preview. The layers let clicks pass through, keep focus and leave Windows cursor themes intact. **Visible in remote sessions and recordings** is on by default, including virtual displays, and also covers the progress overlay, so screen sharing and recordings see its text, including the model's reasoning and replies. Turning it off requests capture exclusion for the indicators and the overlay on supported Windows capture paths. Active monitor enumeration, display/session events and a 500ms topology check refresh the layers after display, layout or DPI changes. The indicators cover this plugin's complete desktop operation series, or a requested preview.
 
-Physical **Esc**, or a recorded key/combination, stops the current operation series and queued input. It cannot retry in the same turn. A new user task or request to continue can use the desktop automatically, without visiting settings. Record a shortcut and save; Restore default (Esc), next to the section title, clears the additional key. Esc cancels recording, and blur or 15 seconds of inactivity exits it. Ordinary mouse movement, other keys and injected keys do not trigger a physical stop. Hiding the indicator keeps the listener active. Browser Use, reads and background control actions do not take Esc; until a turn first uses the mouse or keyboard, stop it with the stop button in DSH.
+**Esc** or a recorded key/combination stops the current operation series and queued input. It cannot retry in the same turn. A new user task or request to continue can use the desktop automatically, without visiting settings. Record a shortcut and save; Restore default (Esc), next to the section title, clears the additional key. Esc cancels recording, and blur or 15 seconds of inactivity exits it. Ordinary mouse movement and other keys do not trigger a stop. Only the plugin's own tagged keys are ignored; unmarked remote Esc can stop. Hiding decorative indicators keeps the listener available. Stopping also signals other armed helpers in the same Windows user session. Browser Use, reads and background control actions do not take Esc; until a turn first uses the mouse or keyboard, stop it with the stop button in DSH.
 
 In DSH, indicators appear with the first call that uses the real mouse or keyboard and stay visible through later observations and short reasoning gaps. They release on turn completion/cancellation, or after 30 idle seconds following the last completed desktop call; the next call shows them again. Running tools do not count as idle. A host lease releases stale state; another conversation receives a busy result while the desktop is owned. Standalone stdio clients retain per-call indicators because they provide no DSH turn boundary. Regular mouse movement does not stop a series.
 

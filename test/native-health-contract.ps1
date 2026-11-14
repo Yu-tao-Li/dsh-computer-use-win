@@ -1,3 +1,6 @@
+﻿# Input lease behavior is exercised across real processes in input-mutex.mjs.
+function Enter-DesktopInput { return $null }
+function Exit-DesktopInput { param($Lease) }
 param([switch]$ExpectLegacyFailure)
 $ErrorActionPreference = 'Stop'
 Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop
@@ -60,4 +63,7 @@ Assert-Equal $health.targetResponsive $null 'Unknown responsiveness without targ
 [WindowsComputerUseNative]::Foreground = 42; $script:Missing = $true
 $health = Invoke-Action 'health'
 Assert-Equal $health.activeWindow $null 'Window disappearance race'
+$env:WCU_FAILSAFE='1'
+Assert-Equal (Invoke-Action 'health' ([pscustomobject]@{_wcuCornerFailsafe=$false})).failsafe $false 'MCP explicitly disables the corner failsafe'
+Assert-Equal (Invoke-Action 'health' ([pscustomobject]@{_wcuCornerFailsafe=$true})).failsafe $true 'Standalone opt-in reports its actual corner setting'
 Write-Output 'PASS native health while UIA providers throw, hung/no foreground/disappeared targets and observation cache; fake native API only'

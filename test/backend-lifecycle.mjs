@@ -16,7 +16,7 @@ async function fixture(name,script,shortTimeout=false){
   // worker startup/replacement must not be measured against a 1.5s hang budget.
   if(shortTimeout){assert.ok(server.includes('timeoutMs = 30000'));server=server.replace('function runBackend(action, args = {}, timeoutMs = 30000, request) {','function runBackend(action, args = {}, timeoutMs = 30000, request) { timeoutMs = action === "wait" && args.milliseconds === 5000 ? 1500 : 15000;');}
   await writeFile(path.join(dir,'mcp/server.mjs'),server);
-  for(const file of ['settings.mjs','takeover.mjs','overlay-strings.mjs','browser.mjs'])await copyFile(path.join(source,'mcp',file),path.join(dir,'mcp',file));
+  for(const file of ['settings-schema.mjs','settings.mjs','takeover.mjs','overlay-strings.mjs','browser.mjs','browser-frames.mjs','browser-pipe.mjs','policy.mjs','page-values.mjs','catalog.mjs','protocol.mjs'])await copyFile(path.join(source,'mcp',file),path.join(dir,'mcp',file));
   if(script)await writeFile(path.join(dir,'scripts/windows-uia.ps1'),script);else await copyFile(path.join(source,'scripts/windows-uia.ps1'),path.join(dir,'scripts/windows-uia.ps1'));
   const client=new McpTestClient(process.execPath,[path.join(dir,'mcp/server.mjs')],{env});clients.push(client);await client.init();return client;
 }
@@ -46,7 +46,7 @@ try{
   const slow=await fixture('slow-start',`param([switch]$Persistent)
 Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop
 Start-Sleep -Milliseconds 1800
-while($null -ne ($line=[Console]::In.ReadLine())) {
+[Console]::WriteLine((@{type='ready';protocol=1;pid=$PID}|ConvertTo-Json -Compress));while($null -ne ($line=[Console]::In.ReadLine())) {
   $r=$line | ConvertFrom-Json
   Start-Sleep -Milliseconds $r.args.milliseconds
   [Console]::WriteLine((@{id=$r.id;ok=$true} | ConvertTo-Json -Compress))
@@ -57,7 +57,7 @@ while($null -ne ($line=[Console]::In.ReadLine())) {
   slowResult=await call(slow,'wait',{milliseconds:1});assert.equal(slowResult.isError,undefined,JSON.stringify(slowResult));
   console.log('PASS delayed cold startup and replacement, retaining the 1500ms stalled-action watchdog');
   const marker=path.join(root,'cleanup.txt');
-  const script=`param([switch]$Persistent)\nwhile($null -ne ($line=[Console]::In.ReadLine())){\n$r=$line|ConvertFrom-Json\nif($r.action -eq 'click'){Start-Sleep -Milliseconds 500;[IO.File]::WriteAllText('${marker.replaceAll("'","''")}','released')}\n[Console]::WriteLine((@{id=$r.id;ok=$true}|ConvertTo-Json -Compress))\n}\n`;
+  const script=`param([switch]$Persistent)\n[Console]::WriteLine((@{type='ready';protocol=1;pid=$PID}|ConvertTo-Json -Compress));while($null -ne ($line=[Console]::In.ReadLine())){\n$r=$line|ConvertFrom-Json\nif($r.action -eq 'click'){Start-Sleep -Milliseconds 500;[IO.File]::WriteAllText('${marker.replaceAll("'","''")}','released')}\n[Console]::WriteLine((@{id=$r.id;ok=$true}|ConvertTo-Json -Compress))\n}\n`;
   const input=await fixture('synthetic-input',script);
   assert.equal((await call(input,'wait',{milliseconds:1})).isError,undefined);
   // Deliver both requests together so indicator preparation cannot let the

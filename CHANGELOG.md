@@ -1,8 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-11-15
 
-- 浮窗、提示条和 AI 总结新增俄文词典（[#74](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/74)）：DSH 界面语言为俄文（或系统语言为俄文）时，浮窗和 AI 总结用俄文显示，提示文字保持默认时也跟着变成俄文；设置页仍回退到英文。/ Added a Russian dictionary for the overlay, the indicator bar and the AI summary: with DSH (or the system) set to Russian, the overlay and its AI summary read Russian, and the default banner text switches too; the settings page still falls back to English.
+- 融入 caendeith 的 [PR #81](https://github.com/Yu-tao-Li/dsh-computer-use-win/pull/81)：浮窗、提示条和 AI 总结新增俄文（含俄文单双复数规则）及本地化审批原因；设置页仍回退英文。客户端默认提示文字继续从共享词典生成。
+- 浏览器安全与传输加固：统一标准化 URL/IP/UNC 校验并阻止云元数据及宿主内部端口重定向与子资源 SSRF（CDP `Fetch` + Firefox BiDi `network.beforeRequestSent`）；临时与保留登录态的 DSH 浏览器均改用零监听端口的 Named Pipe 管道复用与托管守卫（不再暴露本地调试端口）；连接用户已打开的浏览器时按标签页细粒度授权并持久化状态标记；拒绝 WebDriver PUA 私用区按键注入。
+- 接入 DSH 细粒度敏感操作审批与加密授权令牌：启动应用、打开本地 `file:` URL、文件上传、连接个人浏览器及首次操作个人已有标签页均按资源项精确绑定一次性签名授权，不支持伪造或宽泛复用；修复 `host-ports.json` 启动竞争与 `.lock` 僵尸锁恢复；`batch` 传播剩余调用预算防止宿主超时中断；补充逐响应随机 `wcu_untrusted_<nonce>` 数据边界与 `RpcFramer` 多头部解析及并发同 `id` 拒绝。
+- 原生输入、剪贴板隐私与 Gecko 桌面 UIA 修复：
+  - 粘贴剪贴板写入 `ExcludeClipboardContentFromMonitorProcessing`、禁止剪贴板历史与云同步格式，修复 `SetClipboardData` 失败内存泄漏、监控程序预读取竞态与目标窗口 `WM_NULL` 屏障、并安全回收 STA 线程句柄。
+  - 增强 `launch_app` 防护：剥离尾随点号后校验扩展名、直启解析后的真实 `.exe`、校验 PE `OriginalFilename` 防止命令宿主改名绕过；动态每进程 `WCU_INPUT_MARKER` 校验；补齐 `double_click`/`scroll` 输入门禁、UIPI 高权限目标检测、非交互式桌面（`DESKTOP_NOT_INTERACTIVE`）识别及无 DWM 桌面 `PrintWindow` 兜底（含高效 `LockBits` 采样）；修复 `Import-HelperAssembly` 长 `TEMP` 路径 `MAX_PATH` 问题并迁移默认缓存至 `%LOCALAPPDATA%` + SHA-256 校验。
+  - 修复桌面通道对 Firefox/Gecko 页面的无障碍读取：新增 `Initialize-GeckoPages` 唤醒、将 `IsOffscreen` 过滤由 `TreeWalker` 后移至 `Convert-Tree` 叶子裁剪、为 `desktop` 范围提升默认超时预算，同时启用 Gecko UIA 与无障碍首选项。
+- 接管与进度浮窗可靠性：修复锁屏/会话切换按键卡死、去除每秒挂钩重建、统一 `Frame.Draw` 为物理像素单位、跨屏 `SetProcessDpiAwarenessContext` 布尔返回值修正；跨进程输入互斥与 Session 停止广播。
+- 客户端设置与工程发布门禁：支持大小写不敏感快捷键规范化与空数值校验；收敛 `package.json` 显式 `"files"` 白名单；`check-build.mjs` 增加 `npm pack --dry-run` 产物与本地路径泄露检查；新增 Tag 触发 `.github/workflows/release.yml` 与 `test/security-regressions.mjs` 安全回归测试。
 
 ## 0.5.7 — 2026-11-11
 

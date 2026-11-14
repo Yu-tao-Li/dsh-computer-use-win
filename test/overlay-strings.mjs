@@ -1,7 +1,9 @@
 // #74: the overlay's words live in one dictionary per language. Pure checks:
 // no window, model or host is started.
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
+import {readFile,glob} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import vm from 'node:vm';
 import {HELPER_KEYS,OVERLAY_STRINGS,helperStrings,indicatorText,isDefaultIndicatorText,overlayLocale,systemLocale} from '../mcp/overlay-strings.mjs';
 import {actionLabel} from '../mcp/activity.mjs';
 import {summaryInput} from '../mcp/progress-summary.mjs';
@@ -11,11 +13,13 @@ import {readDshLocale} from '../mcp/dsh-plugin.mjs';
 // Every module the published package loads is in its file list (a new module
 // such as overlay-strings.mjs must be added to package.json "files").
 const pkg=JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8'));
-for(const file of pkg.files.filter(name=>/^mcp\/.*\.(?:mjs|js)$/.test(name))){
+const shipped=new Set();
+for await(const file of glob(pkg.files,{cwd:fileURLToPath(new URL('../',import.meta.url))}))shipped.add(file.replaceAll('\\','/'));
+for(const file of [...shipped].filter(name=>/^mcp\/.*\.(?:mjs|js)$/.test(name))){
   const source=await readFile(new URL('../'+file,import.meta.url),'utf8');
   for(const [,target] of source.matchAll(/(?:from\s*|import\s*\(\s*)['"](\.\.?\/[^'"]+)['"]/g)){
     const resolved=new URL(target,new URL('../'+file,import.meta.url)).pathname.split('/').slice(-2).join('/');
-    assert.ok(pkg.files.includes(resolved),`${file} loads ${target}, which package.json "files" leaves out`);
+    assert.ok(shipped.has(resolved),`${file} loads ${target}, which package.json "files" leaves out`);
   }
 }
 console.log('PASS every module the package loads is published');
@@ -35,6 +39,8 @@ for(const [language,table] of Object.entries(others)){
 }
 for(const key of HELPER_KEYS)assert.ok(typeof zh[key]==='string',`helper key ${key} exists`);
 assert.deepEqual(Object.keys(helperStrings('en')),[...HELPER_KEYS]);
+for(const lang of ['zh','en','ru']){for(const key of ['headerDoneOne','headerDoneFew','headerDone'])assert.ok(typeof OVERLAY_STRINGS[lang][key]==='string'&&OVERLAY_STRINGS[lang][key].includes('{0}')&&OVERLAY_STRINGS[lang][key].includes('{1}'),`${lang}.${key}`);}
+assert.notEqual(OVERLAY_STRINGS.ru.headerDoneFew,OVERLAY_STRINGS.ru.headerDone,'Russian plural form differs for 2-4');
 console.log('PASS dictionaries have the same keys and placeholders in every language');
 
 // The C# helper draws only words it is sent: no Chinese text left in its code,
@@ -49,9 +55,10 @@ for(const file of ['../mcp/activity.mjs','../mcp/progress-summary.mjs','../mcp/t
 }
 // The settings page shows the same built-in banner texts.
 const client=await readFile(new URL('../mcp/client.js',import.meta.url),'utf8');
-const listed=client.match(/const defaultIndicatorTexts=(\[[^\]]*\])/);
-assert.ok(listed,'client.js lists the built-in banner texts');
-for(const table of Object.values(OVERLAY_STRINGS))assert.ok(listed[1].includes(`'${table.indicatorDefault}'`),`client.js knows "${table.indicatorDefault}"`);
+let definition;
+vm.runInNewContext(client.replace('return {apply,inject:','return {apply,defaultIndicatorTexts,inject:'),{window:{__ModuleLoader__:{load:d=>definition=d}}});
+const listed=Array.from(definition.factory(()=>({})).defaultIndicatorTexts);
+assert.deepEqual(listed,Object.values(OVERLAY_STRINGS).map(table=>table.indicatorDefault),'The generated client uses the actual overlay defaults');
 console.log('PASS the helper and the overlay modules carry no built-in Chinese text');
 
 // Languages: DSH and system tags map to a shipped dictionary, else English.
@@ -82,6 +89,12 @@ assert.equal(input,'Task status: done; current step 2\nModel output at the start
 assert.ok(!cjk.test(JSON.stringify(previewProgress('en'))));
 assert.equal(previewProgress('zh-CN').steps[0].actions[0].label,'打开新标签页');
 console.log('PASS English step names, summary input and preview');
+assert.equal(actionLabel('windows_computer_use_scroll',{},'ru-RU'),'Прокрутить окно');
+assert.equal(actionLabel('windows_computer_use_scroll',{browserTab:'t1'},'ru-RU'),'Прокрутить страницу');
+assert.equal(previewProgress('ru-RU').steps[0].actions[0].label,'Открыть новую вкладку');
+assert.ok(summaryInput({step:1,status:'done',steps:[{step:1,actions:[],reasoning:'Проверено.',reply:'Готово.'}]},2400,'ru-RU').startsWith('Состояние задачи: готово; сейчас шаг 1'));
+assert.equal(overlayLocale(readDshLocale({describe:()=>[{ns:'locale',value:{preference:'ru-RU'}}]})),'ru');
+console.log('PASS Russian host locale, page/window names, preview and summary labels');
 
 // DSH's language comes from its `locale` settings entry, as DSH Desktop reads it.
 assert.equal(readDshLocale({describe:()=>[{ns:'other',value:{}},{ns:'locale',value:{preference:'en'}}]}),'en');

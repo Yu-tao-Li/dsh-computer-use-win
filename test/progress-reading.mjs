@@ -139,6 +139,19 @@ try{
  data={step:3,status:'waiting',tool:'',reasoning:'',reply:''};status=await show();
  assert.equal(status.progressReading.text,'Waiting for DSH…');
  assert.ok(!/[一-鿿]/.test(status.progressContent),'No Chinese is left in the English overlay');
+ // PR #81: Cyrillic reaches the real .NET reader/renderer on a live switch.
+ control.locale='ru';
+ const russian={...english,steps:[{step:1,actions:[{label:'Открыть новую вкладку',state:'done'}],reasoning:'Страница открыта.',reply:''},
+   {step:3,actions:[],reasoning:'Проверка завершена.',reply:'Готово. 😀'}]};
+ data=russian;status=await show();
+ assert.ok(status.progressContent.startsWith('DSH · готово · шагов: 3 · 38 с'),status.progressContent.slice(0,90));
+ assert.equal(status.progressReading.text,'Шаг 1 · Открыть новую вкладку\nСтраница открыта.\nШаг 3\nПроверка завершена.\nОтвет\nГотово. 😀');
+ assert.equal(status.foreground,initial.foreground,'Changing to Russian must not activate the overlay');
+ await capture('history-russian.png');
+ data={...russian,displayMode:'summary',summaries:[{step:3,text:'Результат подтверждён.',final:true}]};status=await show();
+ assert.equal(status.progressReading.text,'Сводка ИИ · результат\nРезультат подтверждён.');
+ data={step:3,status:'waiting',tool:'',reasoning:'',reply:''};status=await show();
+ assert.equal(status.progressReading.text,'Жду вывода DSH…');
  control.locale='zh';
  // The lock button. Resting the user's own pointer on the padlock unlocks the
  // window for adjusting; DSH's pointer never does (injected input, or a cursor

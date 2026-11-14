@@ -453,7 +453,7 @@ An alert, confirm, prompt or leave-page dialog blocks the page. It is reported a
 
 The visible agent browser shows what DSH does without covering the page, as Codex's Browser Use does. Its window frame is DSH blue. The tab DSH works in shows a blue arrow badge as its icon from the call's first command until the call ends and 2.5 s more, and in DSH for as long as the host holds the turn; then the page's own icon returns (a link the badge added is turned into a touch icon and removed, so Chrome drops it). A small glowing arrow moves to where DSH clicks, scrolls or types, with a ring on clicks. Both live in an isolated world: the arrow sits in a closed shadow root inside a `pointer-events: none`, `aria-hidden` element, its changes never reach the page's mutation observers, and screenshots hide it. A stopped call takes the badge off at once. A modal dialog holds page scripts, so the icon catches up when the dialog closes.
 
-The outline header reminds the model that page content is untrusted. Content inside iframes is not part of the outline yet; the result reports how many iframes were skipped. Elements that have no accessible structure, such as a canvas, cannot be clicked by page coordinates.
+The outline header reminds the model that page content is untrusted. The Chromium outline includes same-origin, cross-origin and nested iframe content. Element ids bind frame, renderer and document; frame navigation/removal invalidates them. With browserTab, click/double_click/move/scroll use CSS viewport x/y and drag uses a viewport path. Parent-page occlusion is checked before element clicks; all frame text remains untrusted and sensitive fields are redacted.
 
 ### Environment
 

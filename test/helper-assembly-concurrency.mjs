@@ -13,7 +13,7 @@ const results=[];
 let saving=Promise.resolve();
 async function health(shell,cache,label) {
   await mkdir(cache,{recursive:true});
-  const child=spawn(shell,['-NoLogo','-NoProfile','-NonInteractive','-File',source,'-Action','health'],{windowsHide:true,env:{...process.env,TEMP:cache,TMP:cache}});
+  const child=spawn(shell,['-NoLogo','-NoProfile','-NonInteractive','-File',source,'-Action','health'],{windowsHide:true,env:{...process.env,TEMP:cache,TMP:cache,WCU_DISABLE_PRECOMPILED:'1'}});
   child.stdin.end('{}');
   let stdout='',stderr='';child.stdout.setEncoding('utf8');child.stderr.setEncoding('utf8');child.stdout.on('data',s=>stdout+=s);child.stderr.on('data',s=>stderr+=s);
   const timer=setTimeout(()=>child.kill(),60000);

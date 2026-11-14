@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import http from 'node:http';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { BrowserLane } from '../mcp/browser.mjs';
@@ -60,19 +60,21 @@ try {
 
 // A real, task-owned headless browser behind a counted TCP proxy. It models
 // the consent-success case without touching the user's actual profile.
-const owner = new BrowserLane({ env: { ...process.env, WCU_BROWSER_HEADLESS: '1', WCU_BROWSER_PROFILE: path.join(root, 'agent'), WCU_BROWSER_APP: 'chrome', WCU_BROWSER_ATTACH_USER: '0' } });
+const owner = new BrowserLane({ env: { ...process.env, WCU_BROWSER_HEADLESS: '1', WCU_BROWSER_SIGNIN:'1', WCU_BROWSER_PROFILE: path.join(root, 'agent'), WCU_BROWSER_APP: 'chrome', WCU_BROWSER_ATTACH_USER: '0' } });
 let proxy, user, site;
 const proxySockets = new Set(); let connections = 0;
 try {
   const browser = await owner.ensureAgent({}); const endpoint = new URL(browser.url);
-  proxy = net.createServer(socket => { connections++; proxySockets.add(socket); const upstream = net.connect(Number(endpoint.port), '127.0.0.1'); proxySockets.add(upstream); socket.pipe(upstream).pipe(socket); socket.on('error', () => upstream.destroy()); upstream.on('error', () => socket.destroy()); });
+  const pipeMatch = browser.url.startsWith('ws+pipe://') ? /^\/devtools\/pipe\/([a-z0-9._-]+)(\/devtools\/.*)$/i.exec(endpoint.pathname) : null;
+  proxy = net.createServer(socket => { connections++; proxySockets.add(socket); const upstream = pipeMatch ? net.connect(`\\\\.\\pipe\\${pipeMatch[1]}`) : net.connect(Number(endpoint.port), '127.0.0.1'); proxySockets.add(upstream); socket.pipe(upstream).pipe(socket); socket.on('error', () => upstream.destroy()); upstream.on('error', () => socket.destroy()); });
   await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
-  await writeFile(path.join(profile('chrome'), 'DevToolsActivePort'), `${proxy.address().port}\n${endpoint.pathname}`);
+  await writeFile(path.join(profile('chrome'), 'DevToolsActivePort'), `${proxy.address().port}\n${pipeMatch ? pipeMatch[2] : endpoint.pathname}`);
   site = http.createServer((request, response) => response.end('<!doctype html><title>User attach fixture</title><h1>Fixture</h1>'));
   await new Promise(resolve => site.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${site.address().port}/?token=fixture#fragment`;
   await owner.openTab(browser.key, url, {});
-  user = new BrowserLane({ env: { ...env, WCU_BROWSER_ATTACH_TIMEOUT_MS: '3000' } });
+  const userTabsFile = path.join(root, 'user-tabs.json');
+  user = new BrowserLane({ env: { ...env, WCU_BROWSER_ATTACH_TIMEOUT_MS: '3000', WCU_USER_TABS_FILE: userTabsFile } });
   const first = (await user.annotateWindows({ windows: [] })).browserLane.browsers[0];
   assert.equal(connections, 0);
   await user.run('set_value', { elementId: first.connect, value: 'connect' }, {});
@@ -83,6 +85,12 @@ try {
   assert.ok((await browser.cdp.send('Browser.getVersion')).product);
   let listed = (await user.annotateWindows({ windows: [] })).browserLane.browsers[0];
   assert.ok(listed.tabs.every(tab => !tab.url.includes('token=') && !tab.url.includes('#')));
+  const existingTab = listed.tabs.find(tab => tab.url.startsWith(`http://127.0.0.1:${site.address().port}`));
+  assert.ok(existingTab, 'Existing user tab is listed');
+  assert.equal(JSON.parse(await readFile(userTabsFile, 'utf8')).tabs[existingTab.id]?.approved, false);
+  await assert.rejects(user.run('snapshot', { browserTab: existingTab.id }, {}), /WCU_APPROVAL_REQUIRED/);
+  await user.run('snapshot', { browserTab: existingTab.id }, { policyApproved: true });
+  assert.equal(JSON.parse(await readFile(userTabsFile, 'utf8')).tabs[existingTab.id]?.approved, true);
   await user.run('set_value', { elementId: first.id + ':new-tab', value: url }, {});
   listed = (await user.annotateWindows({ windows: [] })).browserLane.browsers[0];
   assert.ok(listed.tabs.some(tab => tab.url.includes('token=')), 'Tabs DSH opened can retain their full URL');

@@ -65,7 +65,7 @@ const profiles = await mkdtemp(path.join(os.tmpdir(), 'wcu-browser-lane-'));
 const foreground = () => Number(spawnSync('powershell.exe', ['-NoProfile', '-Command',
   "Add-Type -Name Fg -Namespace W -MemberDefinition '[DllImport(\"user32.dll\")] public static extern System.IntPtr GetForegroundWindow();'; [W.Fg]::GetForegroundWindow().ToInt64()"], { encoding: 'utf8', windowsHide: true }).stdout.trim());
 const prefix = 'windows_computer_use_', steps = [];
-const client = new McpTestClient(process.execPath, [path.join(import.meta.dirname, '../mcp/server.mjs')], { env: { ...process.env, WCU_BROWSER_PROFILE: profiles } });
+const client = new McpTestClient(process.execPath, [path.join(import.meta.dirname, '../mcp/server.mjs')], { env: { ...process.env, WCU_BROWSER_PROFILE: profiles, WCU_ALLOWED_UPLOAD_ROOTS: profiles } });
 async function call(tool, args, { error } = {}) {
   const started = performance.now();
   const response = await client.call(prefix + tool, args);

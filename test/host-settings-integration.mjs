@@ -12,7 +12,7 @@ const modules = process.argv[2];
 if (!modules) throw new Error('Pass the installed DSH node_modules directory');
 const require = createRequire(path.join(modules, '../package.json'));
 const load = name => import(pathToFileURL(require.resolve(name)).href);
-const [{Context},{ToolRuntime},{SettingsForms},{updateVolatile}] = await Promise.all([
+const [{Context,resolveConfig},{ToolRuntime},{SettingsForms},{updateVolatile}] = await Promise.all([
   load('@deepseek-ai/cordis'),load('@deepseek-ai/dsh-tools'),load('@deepseek-ai/dsh-settings'),load('@deepseek-ai/cosmokit')
 ]);
 const root=await mkdtemp(path.join(os.tmpdir(),'wcu-host-settings-'));
@@ -26,7 +26,7 @@ let raw={mode:'lite',indicatorEnabled:false},entry,localeEntry;
 // DSH's own locale plugin is listed beside this one for the #74 language check.
 const listedLocale=()=>localeEntry?[{entry:localeEntry,inherited:{},override:localeEntry.options.config}]:[];
 const editor={documentPath:path.join(root,'profile-patch.json'),entries:()=>entry?[entry]:[],configuration:()=>[...(entry?[{entry,inherited:{},override:raw}]:[]),...listedLocale()],edit:async(target,change)=>{
-  const next=change(raw,{}),parsed=adapter.Config(next);
+  const next=change(raw,{});resolveConfig({Config:adapter.Config},next);const parsed=adapter.Config(next);
   // Validate before persisting, as ConfigEditor does before profile reconciliation.
   for(const key of Object.keys(parsed))if(typeof parsed[key]?.get==='function')updateVolatile((target.fiber.effectiveConfig??target.fiber.config)[key],parsed[key]);
   raw=next;target.options.config=raw;
@@ -228,8 +228,10 @@ try {
   assert.equal(fiber.uid,originalFiber,'Tool changes keep the adapter owner while refreshing its bridge');
   await settings.update(entry.options.id,{resumeToken:1,previewToken:1});
   await until(async()=>JSON.parse(await readFile(liveFile,'utf8')).resumeToken===1);
+  const settingsMatrix=process.env.WCU_TEST_ALL_SETTINGS==='1'
+    ?await (await import('./settings-matrix.mjs')).runSettingsMatrix({settings,namespace:entry.options.id,liveFile,documentPath:editor.documentPath,until,root}):undefined;
   const report={passed:true,hostVersion:require('@deepseek-ai/dsh/package.json').version,bridgeVersion:require('@deepseek-ai/dsh-mcp-client/package.json').version,
-    namespace:entry.options.id,volatileSettings:true,liveDisplayConfig:true,toolSelectionReload:[26,2,0,26],presetReload:[1,12,26,1,26,1,26,1,1,26],lazyPresetPersistence:true,lazyWorkerRestart:true,lazyDynamicRegistry:[1,3,26,1,2,1],customSelectionPreserved:true,allToolsDefault:true,toolSelectionPersistence:true,invalidToolRejected:true,
+    namespace:entry.options.id,settingsMatrix,volatileSettings:true,liveDisplayConfig:true,toolSelectionReload:[26,2,0,26],presetReload:[1,12,26,1,26,1,26,1,1,26],lazyPresetPersistence:true,lazyWorkerRestart:true,lazyDynamicRegistry:[1,3,26,1,2,1],customSelectionPreserved:true,allToolsDefault:true,toolSelectionPersistence:true,invalidToolRejected:true,
     remoteVisibilityPersistence:true,remoteVisibilityLiveConfig:true,previewAndResumeSignals:true,cursorIndicatorPersistence:true,cursorIndicatorLiveConfig:true,shortcutPersistence:true,shortcutValidation:true,shortcutClear:true,lockedConfigWriteRetried:true,existingUserProfilesModified:false,physicalInputSent:false,profileFixture:root};
   await writeFile(path.join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 } finally {await ctx.fiber.dispose();process.env.TEMP=previousTemp;process.env.TMP=previousTmp;}

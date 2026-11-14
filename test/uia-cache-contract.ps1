@@ -1,5 +1,8 @@
 ﻿# Exercise shipped observation code against an instrumented provider. No desktop input.
+# Input lease behavior is exercised across real processes in input-mutex.mjs.
 param([string]$BackendPath = "$PSScriptRoot/../scripts/windows-uia.ps1", [switch]$Legacy)
+function Enter-DesktopInput { return $null }
+function Exit-DesktopInput { param($Lease) }
 $ErrorActionPreference = 'Stop'
 $source = [IO.File]::ReadAllText($BackendPath, [Text.Encoding]::UTF8)
 $tokens = $null; $parseErrors = $null
@@ -86,7 +89,7 @@ public static class WindowsComputerUseNative {
   public static uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId) {processId=4242; return 1;}
 }
 '@
-$names = @('Get-Prop','Get-ViewMode','Get-DetailLevel','Get-ViewCondition','Invoke-Safe','Convert-Rect','Get-ControlTypeName','Get-Patterns','Get-ValueText','New-ElementCacheRequest','Convert-ElementInfo','Test-TreeBudget','Get-Children','Convert-Tree','Element-Matches','Search-Tree','Initialize-ChromiumPages','Get-TreeResult','Invoke-Action')
+$names = @('Get-Prop','Get-ViewMode','Get-DetailLevel','Get-ViewCondition','Invoke-Safe','Convert-Rect','Get-ControlTypeName','Get-Patterns','Get-ValueText','New-ElementCacheRequest','Register-ObservedElement','Convert-ElementInfo','Test-TreeBudget','Get-Children','Convert-Tree','Element-Matches','Search-Tree','Initialize-ChromiumPages','Get-TreeResult','Invoke-Action')
 foreach ($name in $names) {
   $definition = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name}, $true)
   if ($null -ne $definition) { . ([scriptblock]::Create($definition.Extent.Text.Replace('System.Windows','Fixture'))) }

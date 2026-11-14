@@ -1,4 +1,7 @@
-﻿# Exercise the shipped OCR action with deterministic words and fake UIA hit tests.
+﻿# Input lease behavior is exercised across real processes in input-mutex.mjs.
+function Enter-DesktopInput { return $null }
+function Exit-DesktopInput { param($Lease) }
+# Exercise the shipped OCR action with deterministic words and fake UIA hit tests.
 # No screen capture, physical input, or desktop changes.
 param([string]$BackendPath = "$PSScriptRoot/../scripts/windows-uia.ps1")
 $ErrorActionPreference = 'Stop'

@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify tag matches package version
+        shell: pwsh
+        run: |
+          $pkg = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          if ($pkg -ne $tag) { throw "Tag $tag does not match package.json version $pkg" }
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify build and pack hygiene
+        run: npm run check:pack
+
+      - name: Publish to npm
+        if: env.NODE_AUTH_TOKEN != ''
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

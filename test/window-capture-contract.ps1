@@ -19,7 +19,10 @@ public static class WindowsComputerUseNative {
   public static IntPtr[] TopLevelWindows() { return Array.ConvertAll(Order, h => new IntPtr(h)); }
   public static bool IsWindowVisible(IntPtr h) { return !Hidden.Contains(h.ToInt64()); }
   public static bool IsIconic(IntPtr h) { return Minimized.Contains(h.ToInt64()); }
-  public static bool GetWindowRect(IntPtr h, out RECT r) { return Bounds.TryGetValue(h.ToInt64(), out r); }
+  public static bool GetWindowRect(IntPtr h, out RECT r) {
+    if(h.ToInt64()==42){r=new RECT{left=93+FrameShift,top=91,right=507+FrameShift,bottom=409};return true;}
+    return Bounds.TryGetValue(h.ToInt64(), out r);
+  }
   public static bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags) { PrintCalls++; return false; }
   public static int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT r, int size) {
     r = new RECT {left=100+FrameShift,top=100,right=500+FrameShift,bottom=400}; return 0;
@@ -109,7 +112,6 @@ foreach ($name in @('Get-Prop','Invoke-Safe','Get-ExtendedFrameBounds','Try-Prin
   $body = $body.Replace('[System.Windows.Forms.SystemInformation]::VirtualScreen', '([Drawing.Rectangle]::new(0,0,1000,800))')
   . ([scriptblock]::Create($body))
 }
-function Invoke-WgcCapture { throw 'Deterministic WGC unavailable fixture' }
 if ($env:TEMP -notmatch 'wcu-isolated-tests-') { throw 'Run bitmap routing through test/run-tests.mjs with an isolated TEMP directory' }
 $target = @{nativeWindowHandle=42}
 [WindowsComputerUseNative]::Foreground = 42
@@ -125,7 +127,7 @@ try {
 [WindowsComputerUseNative]::Foreground = 99
 $shot = Capture-Screenshot -WindowElement $target -MaxWidth 0
 if ($shot.method -ne 'screen-region' -or $shot.occludedPossible -ne $true -or
-    [WindowsComputerUseNative]::PrintCalls -ne 1) { throw 'Background PrintWindow failure plus unavailable WGC must reach flagged screen fallback' }
+    [WindowsComputerUseNative]::PrintCalls -ne 1) { throw 'Background PrintWindow failure must reach flagged screen fallback' }
 [WindowsComputerUseNative]::Foreground = 42
 [FixtureGraphics]::DuringCopy = { [WindowsComputerUseNative]::Foreground = 99 }
 $shot = Capture-Screenshot -WindowElement $target -MaxWidth 0
@@ -135,4 +137,13 @@ if ($shot.occludedPossible -ne $true -or [WindowsComputerUseNative]::PrintCalls 
 $shot = Capture-Screenshot -WindowElement $target -MaxWidth 0
 if ($shot.occludedPossible -ne $true -or [WindowsComputerUseNative]::PrintCalls -ne 3) { throw 'Geometry race must discard clear crop' }
 [FixtureGraphics]::DuringCopy = $null
+$script:WcuImageData = $false
+[WindowsComputerUseNative]::FrameShift = 0
+$fileOnly = Capture-Screenshot -WindowElement $target -MaxWidth 200
+if ($fileOnly.Contains('base64') -or $fileOnly.bytes -le 0 -or -not (Test-Path -LiteralPath $fileOnly.path)) { throw 'File delivery must save pixels without encoding image data' }
+$inline = Capture-Screenshot -WindowElement $target -MaxWidth 200 -IncludeImageData $true
+if (-not $inline.base64) { throw 'Inline delivery must retain image data' }
+$actual = [Convert]::ToBase64String([IO.File]::ReadAllBytes($fileOnly.path))
+if ($actual -ne $inline.base64) { throw 'File-only and inline modes must retain identical PNG pixels' }
+Write-Output 'PASS file-mode capture omits base64; explicit inline retains byte-identical PNG pixels'
 Write-Output 'PASS actual capture routing: full lower-half pixels, scaling, failed PrintWindow/unavailable WGC fallback, focus and geometry races (synthetic pixels only)'

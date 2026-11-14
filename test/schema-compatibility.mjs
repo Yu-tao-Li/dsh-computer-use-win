@@ -32,7 +32,7 @@ try{
  assert.equal(stale.issues,undefined,JSON.stringify(stale.issues));
  assert.equal(stale.value.toolPreset.get(),'auto');assert.equal(stale.value.browserApp.get(),'default');assert.equal(stale.value.browserVisible.get(),true);
  assert.deepEqual(stale.value.enabledTools.get(),['health','tools']);
- assert.deepEqual(stale.value[adapter.REPAIRED_SETTINGS],['toolPreset: "smart"','browserApp: "unknown-browser"','browserVisible: "yes"','enabledTools: "removed_tool"']);
+ assert.deepEqual([...stale.value[adapter.REPAIRED_SETTINGS]].sort(),['toolPreset: "smart"','browserApp: "unknown-browser"','browserVisible: "yes"','enabledTools: "removed_tool"'].sort());
  assert.equal(Object.getOwnPropertyDescriptor(stale.value,adapter.REPAIRED_SETTINGS).enumerable,false,'The report is not a setting and is never saved');
  const unknownOnly=validate({enabledTools:['removed_tool']});
  assert.equal(unknownOnly.issues,undefined);assert.equal(unknownOnly.value.enabledTools.get().length,TOOL_NAMES.length,'A list of unknown tools falls back to all tools, not none');

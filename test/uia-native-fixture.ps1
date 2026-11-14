@@ -11,9 +11,12 @@ public class InactiveFixtureForm : System.Windows.Forms.Form {
   protected override bool ShowWithoutActivation {get {return true;}}
   [System.Runtime.InteropServices.DllImport("user32.dll")]
   public static extern System.IntPtr GetForegroundWindow();
+  [System.Runtime.InteropServices.DllImport("user32.dll")]
+  public static extern bool SetProcessDpiAwarenessContext(System.IntPtr context);
 }
 '@
 [Console]::WriteLine('{"phase":"form-type-compiled"}')
+[void][InactiveFixtureForm]::SetProcessDpiAwarenessContext([IntPtr](-4))
 $form=New-Object InactiveFixtureForm
 $form.Text='WCU issue18 isolated native fixture'
 $form.Width=500;$form.Height=300

@@ -51,6 +51,7 @@ const BARE = 'https://example.test/inbox', FULL = `${BARE}?token=fixture#fragmen
 const cdp = {
   closed: false,
   send: async method => {
+    if (method === 'Target.getTargets') return {targetInfos:[]};
     if (method === 'Target.attachToTarget') return { sessionId: 'session' };
     if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'frame', loaderId: 'document' } } };
     if (method === 'Accessibility.getFullAXTree') return { nodes: [] };

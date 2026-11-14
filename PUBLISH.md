@@ -1,5 +1,15 @@
 # 发布流程：GitHub + 插件商城（dshmarket）
 
+## 0.6.0 候选发布清单
+
+当前为 `0.6.0` 本地发布分支构建，尚未推送或发布到 npm / GitHub Release。任何外部发布必须由维护者单独确认并执行。
+
+验证入口：`node scripts/check-build.mjs --pack`；`node test/run-tests.mjs`；`node test/browser-bidi.mjs --live`；向宿主 `node_modules` 目录运行 `test/host-policy.mjs`、`test/host-settings-integration.mjs`、`test/host-settings-legacy.mjs`；`WCU_SETTINGS_TEST_API=legacy` 运行 `test/client-settings-contract.mjs`。
+
+运行 `node test/measure-tool-context.mjs --write` 更新工具大小，核对 package / lock / 设置页版本一致；`npm pack --dry-run --json --ignore-scripts` 确认仅包含显式白名单内的运行时文件、策略与剪贴板模块，无测试产物、调试文档、凭据或本地路径泄露。
+
+
+
 调研自 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 （插件商城 [dshmarket](https://github.com/dsh-market/dsh-market) 的数据源）及其
 `contributing.md`，对照已上架插件（如 STARDUSTLC666/dsh-email、

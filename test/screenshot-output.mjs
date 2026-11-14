@@ -21,14 +21,16 @@ const image = path.join(root, 'fixture.png');
 await writeFile(image, png);
 await writeFile(path.join(root, 'scripts/windows-uia.ps1'), `param([switch]$Persistent)
 Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop
-while($null -ne ($line=[Console]::In.ReadLine())) {
+[Console]::WriteLine((@{type='ready';protocol=1;pid=$PID}|ConvertTo-Json -Compress));while($null -ne ($line=[Console]::In.ReadLine())) {
   $r=$line | ConvertFrom-Json
   $result=@{id=$r.id;ok=$true;action=$r.action;nodeCount=30;tree=@{name='Fixture'}}
   if($r.args.query -eq 'failed'){$result.ok=$false}
   if($r.action -eq 'find' -and $r.args.query -eq 'timeout'){Start-Sleep -Seconds 8}
   if($r.action -eq 'screenshot' -or $r.args.includeScreenshot -or $r.args.query -eq 'failed'){
     $bytes=[IO.File]::ReadAllBytes($env:WCU_IMAGE_FIXTURE)
-    $result.screenshot=@{path=$env:WCU_IMAGE_FIXTURE;base64=[Convert]::ToBase64String($bytes);mimeType='image/png';bytes=$bytes.Length;bounds=@{x=100;y=200;width=800;height=600};imageScale=0.5}
+    $result.imageDataRequested=$r.args._wcuImageData
+    $result.screenshot=@{path=$env:WCU_IMAGE_FIXTURE;mimeType='image/png';bytes=$bytes.Length;bounds=@{x=100;y=200;width=800;height=600};imageScale=0.5}
+    if($r.args._wcuImageData -ne $false){$result.screenshot.base64=[Convert]::ToBase64String($bytes)}
   }
   [Console]::WriteLine(($result | ConvertTo-Json -Depth 20 -Compress))
 }
@@ -58,6 +60,7 @@ for (const mode of ['file', 'inline', 'default']) {
   async function check(name, args = {}) {
     const result = await call(name, args);
     const shot = data(result).screenshot;
+    if(!args.browserTab&&name!=='find')assert.equal(data(result).imageDataRequested,mode!=='file');
     assert.ok(shot, name + ' screenshot metadata missing');
     const wire = JSON.stringify(result);
     if (mode === 'file') {
