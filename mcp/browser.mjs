@@ -1,10 +1,16 @@
+import {ELEMENT_ID,NEW_TAB,USER_CONNECT,isBrowserElementId,isBrowserCall,isQuietCall,BACKGROUND_FIRST} from './catalog.mjs';
+export {isBrowserElementId,isBrowserCall,isQuietCall,BACKGROUND_FIRST} from './catalog.mjs';
+import {readSafeValue} from './page-values.mjs';
+import {BrowserFrames,sameFrameNode} from './browser-frames.mjs';
+import {BrowserPipe} from './browser-pipe.mjs';
+import { assertBrowserUrl, assertUpload, canonicalizeBrowserUrl, isBlockedRuntimeRequestUrl } from './policy.mjs';
 // Browser lane: Chromium pages over the Chrome DevTools Protocol (CDP).
 // A page is read as an accessibility outline whose element ids act inside the
 // page itself, so a tab can be read and operated in the background: no desktop
 // pointer, no keyboard focus, no clipboard and no window activation.
 import { execFile, spawn } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import tls from 'node:tls';
 import os from 'node:os';
@@ -15,8 +21,8 @@ const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppDat
 // The browser the lane runs is the one picked in settings, else the Windows
 // default, always on a profile of its own: a throwaway one per launch or, with
 // sign-ins kept, one kept profile per browser, in which the sites the user
-// signed in to stay signed in. The user's own browser is never used: it lets a
-// program in only after the user allows it there, at every connection.
+// signed in to stay signed in. Experimental attachment to the user's existing
+// browser is separate and requires approval plus browser consent.
 const APPS = {
   chrome: { name: 'Google Chrome', exe: 'Google/Chrome/Application/chrome.exe' },
   edge: { name: 'Microsoft Edge', exe: 'Microsoft/Edge/Application/msedge.exe' }
@@ -100,6 +106,307 @@ async function watchProfile(profile, url, pid) {
   }
 }
 
+function writeJsonAtomic(file, value) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const pending = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.pending`;
+  writeFileSync(pending, JSON.stringify(value));
+  renameSync(pending, file);
+}
+
+function sendWsServerFrame(socket, opcode, payload) {
+  if (socket.destroyed || !socket.writable) return;
+  const length = payload.length;
+  const header = length < 126 ? Buffer.from([0x80 | opcode, length])
+    : length < 65536 ? Buffer.from([0x80 | opcode, 126, length >> 8, length & 255])
+      : Buffer.concat([Buffer.from([0x80 | opcode, 127]), Buffer.from(BigInt(length).toString(16).padStart(16, '0'), 'hex')]);
+  try { socket.write(Buffer.concat([header, payload])); } catch { }
+}
+
+// Host a signed-in Chromium browser over --remote-debugging-pipe behind a local
+// Windows named pipe so multiple DSH servers can share it with 0 TCP listeners.
+async function hostKeptProfile(configFile) {
+  let config;
+  try { config = JSON.parse(readFileSync(configFile, 'utf8')); }
+  catch { return; }
+  finally { try { rmSync(configFile, { force: true }); } catch { } }
+  const { executablePath, executableName, args, profile, readyFile } = config;
+  const pipeName = `dsh-wcu-cdp-${randomBytes(16).toString('hex')}`;
+  const pipePath = `\\\\.\\pipe\\${pipeName}`;
+  const browserGuid = randomUUID();
+  const browserRoute = `/devtools/browser/${browserGuid}`;
+  const pipeRoute = `/devtools/pipe/${pipeName}${browserRoute}`;
+  const pipeUrl = `ws+pipe://127.0.0.1${pipeRoute}`;
+  const activePortFile = path.join(profile, 'DevToolsActivePort');
+  const writeReady = data => { try { writeJsonAtomic(readyFile, data); } catch { } };
+
+  const child = spawn(executablePath, args, {
+    stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+    detached: false,
+  });
+  const cdpPipe = new BrowserPipe(child);
+  let nextUpId = 0;
+  let explicitClose = false;
+  let settledReady = false;
+  let closing = false;
+  let exitingCode = null;
+  let discoverStarted = false;
+  const inflight = new Map();
+  const clients = new Set();
+  const sessionOwners = new Map();
+
+  const sendUpstream = msg => {
+    if (cdpPipe.closed) return false;
+    try { cdpPipe.send(JSON.stringify(msg)); return true; } catch { return false; }
+  };
+
+  const cleanupClient = client => {
+    if (!clients.has(client)) return;
+    clients.delete(client);
+    for (const sid of client.sessions) {
+      sessionOwners.delete(sid);
+      sendUpstream({ id: ++nextUpId, method: 'Target.detachFromTarget', params: { sessionId: sid } });
+    }
+    client.sessions.clear();
+    for (const [upId, entry] of inflight) {
+      if (entry.client === client) inflight.delete(upId);
+    }
+  };
+
+  const shutdownHost = () => {
+    if (closing) return;
+    closing = true;
+    for (const client of [...clients]) {
+      client.sessions.clear();
+      clients.delete(client);
+      try { sendWsServerFrame(client.socket, 8, Buffer.alloc(0)); } catch { }
+      try { client.socket.destroy(); } catch { }
+    }
+    sessionOwners.clear();
+    for (const entry of inflight.values()) entry.reject?.(new Error('Browser closed during startup'));
+    inflight.clear();
+    try { pipeServer.close(); } catch { }
+  };
+
+  child.once('error', error => {
+    if (!settledReady) {
+      settledReady = true;
+      writeReady({ error: `BROWSER_LANE_UNAVAILABLE: ${executableName} failed to launch (${error.message})` });
+    }
+    shutdownHost();
+  });
+
+  child.once('exit', code => {
+    exitingCode = code;
+    if (!settledReady) {
+      settledReady = true;
+      writeReady({ error: `BROWSER_LANE_UNAVAILABLE: ${executableName} exited during startup (${code}); if a window of the kept DSH profile (${profile}) is open without DSH, close it and try again` });
+    }
+    shutdownHost();
+  });
+
+  cdpPipe.onclose = () => {
+    setTimeout(() => { if (exitingCode !== null || child.exitCode !== null || child.signalCode !== null) shutdownHost(); }, 200).unref();
+  };
+
+  const pipeServer = net.createServer(socket => {
+    let head = Buffer.alloc(0);
+    let client = null;
+    const onHandshakeData = chunk => {
+      head = Buffer.concat([head, chunk]);
+      const end = head.indexOf('\r\n\r\n');
+      if (end < 0) {
+        if (head.length > 8192) socket.destroy();
+        return;
+      }
+      socket.off('data', onHandshakeData);
+      const reqText = head.subarray(0, end).toString('latin1');
+      const rest = head.subarray(end + 4);
+      const [requestLine, ...headerLines] = reqText.split('\r\n');
+      const reqMatch = /^GET (\S+) HTTP\/1\.1$/i.exec(requestLine ?? '');
+      const headers = new Map();
+      for (const line of headerLines) {
+        const colon = line.indexOf(':');
+        if (colon > 0) headers.set(line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim());
+      }
+      const key = headers.get('sec-websocket-key');
+      const reqPath = (reqMatch?.[1] ?? '').split('?')[0];
+      if (!reqMatch || (reqPath !== browserRoute && reqPath !== pipeRoute)
+        || headers.get('upgrade')?.toLowerCase() !== 'websocket'
+        || !key || !/^[A-Za-z0-9+/=]{16,64}$/.test(key)) {
+        try { socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); } catch { socket.destroy(); }
+        return;
+      }
+      const accept = createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+      socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+      client = { socket, sessions: new Set(), discovering: false, knownTargets: new Set(), buf: Buffer.alloc(0), parts: [] };
+      clients.add(client);
+      const onClientText = text => {
+        let msg;
+        try { msg = JSON.parse(text); } catch { return; }
+        if (msg.method === 'Browser.close') explicitClose = true;
+        if (msg.method === 'Target.setDiscoverTargets' && msg.params?.discover) {
+          client.discovering = true;
+          if (discoverStarted) {
+            const upId = ++nextUpId;
+            inflight.set(upId, { client, clientId: msg.id, method: 'Target.getTargets', replayForSetDiscover: true });
+            if (!sendUpstream({ id: upId, method: 'Target.getTargets', params: {} })) {
+              inflight.delete(upId);
+              sendWsServerFrame(client.socket, 1, Buffer.from(JSON.stringify({ id: msg.id, result: {} })));
+            }
+            return;
+          }
+          discoverStarted = true;
+        }
+        const upId = ++nextUpId;
+        inflight.set(upId, { client, clientId: msg.id, method: msg.method, sessionId: msg.sessionId, params: msg.params });
+        if (!sendUpstream({ ...msg, id: upId })) {
+          inflight.delete(upId);
+          sendWsServerFrame(client.socket, 1, Buffer.from(JSON.stringify({ id: msg.id, error: { code: -32000, message: 'Browser pipe closed' } })));
+        }
+      };
+      const handleWs = data => {
+        client.buf = Buffer.concat([client.buf, data]);
+        while (client.buf.length >= 2) {
+          const b0 = client.buf[0], b1 = client.buf[1];
+          const fin = (b0 & 0x80) !== 0, opcode = b0 & 0x0f;
+          const masked = (b1 & 0x80) !== 0;
+          let len = b1 & 0x7f, off = 2;
+          if (len === 126) {
+            if (client.buf.length < 4) break;
+            len = client.buf.readUInt16BE(2); off = 4;
+          } else if (len === 127) {
+            if (client.buf.length < 10) break;
+            const bigLen = client.buf.readBigUInt64BE(2);
+            if (bigLen > 67108864n) { socket.destroy(); return; }
+            len = Number(bigLen); off = 10;
+          }
+          if (masked) { if (client.buf.length < off + 4) break; off += 4; }
+          if (client.buf.length < off + len) break;
+          const payload = Buffer.from(client.buf.subarray(off, off + len));
+          if (masked) {
+            const mask = client.buf.subarray(off - 4, off);
+            for (let i = 0; i < len; i++) payload[i] ^= mask[i & 3];
+          }
+          client.buf = client.buf.subarray(off + len);
+          if (opcode === 8) { sendWsServerFrame(socket, 8, Buffer.alloc(0)); socket.end(); return; }
+          if (opcode === 9) { sendWsServerFrame(socket, 10, payload); continue; }
+          if (opcode === 10) continue;
+          client.parts.push(payload);
+          if (fin) { const text = Buffer.concat(client.parts).toString('utf8'); client.parts = []; onClientText(text); }
+        }
+      };
+      socket.on('data', handleWs);
+      if (rest.length) handleWs(rest);
+    };
+    socket.on('data', onHandshakeData);
+    socket.on('close', () => { if (client) cleanupClient(client); });
+    socket.on('error', () => socket.destroy());
+  });
+  pipeServer.on('error', () => { });
+
+  cdpPipe.onmessage = raw => {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.id !== undefined) {
+      const entry = inflight.get(msg.id);
+      if (!entry) return;
+      inflight.delete(msg.id);
+      if (entry.onReply) { entry.onReply(msg); return; }
+      if (!clients.has(entry.client)) return;
+      if (entry.replayForSetDiscover) {
+        if (!msg.error && Array.isArray(msg.result?.targetInfos)) {
+          for (const targetInfo of msg.result.targetInfos) {
+            if (!entry.client.knownTargets.has(targetInfo.targetId)) {
+              entry.client.knownTargets.add(targetInfo.targetId);
+              sendWsServerFrame(entry.client.socket, 1, Buffer.from(JSON.stringify({ method: 'Target.targetCreated', params: { targetInfo } })));
+            }
+          }
+        }
+        sendWsServerFrame(entry.client.socket, 1, Buffer.from(JSON.stringify({ id: entry.clientId, ...(msg.error ? { error: msg.error } : { result: {} }) })));
+        return;
+      }
+      if (entry.method === 'Target.attachToTarget' && msg.result?.sessionId) {
+        sessionOwners.set(msg.result.sessionId, entry.client);
+        entry.client.sessions.add(msg.result.sessionId);
+      } else if (entry.method === 'Target.detachFromTarget' && entry.params?.sessionId) {
+        sessionOwners.delete(entry.params.sessionId);
+        entry.client.sessions.delete(entry.params.sessionId);
+      }
+      sendWsServerFrame(entry.client.socket, 1, Buffer.from(JSON.stringify({ ...msg, id: entry.clientId })));
+      return;
+    }
+    if (msg.sessionId) {
+      const owner = sessionOwners.get(msg.sessionId);
+      if (!owner || !clients.has(owner)) return;
+      if (msg.method === 'Target.attachedToTarget' && msg.params?.sessionId) {
+        sessionOwners.set(msg.params.sessionId, owner);
+        owner.sessions.add(msg.params.sessionId);
+      }
+      sendWsServerFrame(owner.socket, 1, Buffer.from(raw, 'utf8'));
+      return;
+    }
+    if (msg.method === 'Target.detachedFromTarget' && msg.params?.sessionId) {
+      const owner = sessionOwners.get(msg.params.sessionId);
+      sessionOwners.delete(msg.params.sessionId);
+      if (owner) {
+        owner.sessions.delete(msg.params.sessionId);
+        if (clients.has(owner)) sendWsServerFrame(owner.socket, 1, Buffer.from(raw, 'utf8'));
+      }
+      return;
+    }
+    if (msg.method?.startsWith('Target.')) {
+      for (const client of clients) {
+        if (!client.discovering) continue;
+        if (msg.method === 'Target.targetCreated' && msg.params?.targetInfo?.targetId) {
+          client.knownTargets.add(msg.params.targetInfo.targetId);
+        } else if (msg.method === 'Target.targetDestroyed' && msg.params?.targetId) {
+          client.knownTargets.delete(msg.params.targetId);
+        }
+        sendWsServerFrame(client.socket, 1, Buffer.from(raw, 'utf8'));
+      }
+      return;
+    }
+    for (const client of clients) sendWsServerFrame(client.socket, 1, Buffer.from(raw, 'utf8'));
+  };
+
+  await new Promise((resolve, reject) => {
+    pipeServer.once('error', reject);
+    pipeServer.listen(pipePath, resolve);
+  });
+
+  const initId = ++nextUpId;
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { inflight.delete(initId); reject(new Error('Timed out waiting for Chrome pipe readiness')); }, 15000);
+      inflight.set(initId, {
+        onReply: reply => { clearTimeout(timer); if (reply.error) reject(new Error(reply.error.message)); else resolve(reply.result); },
+        reject: err => { clearTimeout(timer); reject(err); },
+      });
+      if (!sendUpstream({ id: initId, method: 'Browser.getVersion', params: {} })) {
+        clearTimeout(timer);
+        inflight.delete(initId);
+        reject(new Error('Failed to write initial CDP command'));
+      }
+    });
+  } catch (error) {
+    if (!settledReady) {
+      settledReady = true;
+      writeReady({ error: `BROWSER_LANE_UNAVAILABLE: ${error.message}` });
+    }
+    shutdownHost();
+    return;
+  }
+
+  const pendingPort = `${activePortFile}.${process.pid}.pending`;
+  writeFileSync(pendingPort, `0\n${pipeRoute}\n`);
+  renameSync(pendingPort, activePortFile);
+  if (!settledReady) {
+    settledReady = true;
+    writeReady({ ok: true, url: pipeUrl, chromePid: child.pid, hostPid: process.pid });
+  }
+}
+
 // The Windows default browser as an APPS key, or null for any other browser.
 export function appForProgId(progId) {
   return /^MSEdge/i.test(progId ?? '') ? 'edge' : /^Chrome/i.test(progId ?? '') ? 'chrome' : /^FirefoxURL-/i.test(progId ?? '') ? 'firefox' : null;
@@ -108,7 +415,8 @@ export function appForProgId(progId) {
 // The ProgId of the default https handler. Windows 11 keeps the current choice
 // under UserChoiceLatest\ProgId; earlier builds keep it under UserChoice only.
 export async function defaultProgId() {
-  const output = await new Promise(resolve => execFile('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https', '/s'],
+  const registry=process.platform==='win32'?path.win32.join(process.env.SystemRoot||process.env.WINDIR||'C:\\Windows','System32','reg.exe'):'reg.exe';
+  const output = await new Promise(resolve => execFile(registry, ['query', 'HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https', '/s'],
     { windowsHide: true, timeout: 5000 }, (error, stdout) => resolve(error ? '' : String(stdout))));
   let key = '', latest = null, legacy = null;
   for (const line of output.split(/\r?\n/)) {
@@ -122,6 +430,7 @@ export async function defaultProgId() {
 const INTERNAL_PAGE = /^(?:chrome|edge|brave|devtools|chrome-extension|extension|about|chrome-search):/i;
 const BLANK_PAGE = /^(?:about:blank|(?:chrome|edge):\/\/newtab\/?)$/i;
 const AGENT_IDLE_MS = 10 * 60 * 1000;
+const AGENT_VISIBLE_IDLE_MS = 2 * 60 * 60 * 1000;
 const MAX_LISTED_TABS = 40;
 const BACKOFF_MS = 60 * 1000;
 const INDICATOR_WORLD = 'DSH browser status';
@@ -191,39 +500,6 @@ const INDICATOR_SCRIPT = '(' + function () {
 const INDICATOR_LINGER_MS = 2500;
 
 export const NEW_TAB_ID = 'new-tab';
-const ELEMENT_ID = /^(?:web:)?(t[0-9a-z]+):(\d+|address)$/;
-const NEW_TAB = /^(?:(b[0-9a-z]+):)?new-tab$/;
-const USER_CONNECT = /^(b[0-9a-z]+):connect$/;
-export function isBrowserElementId(id) {
-  return typeof id === 'string' && (ELEMENT_ID.test(id) || NEW_TAB.test(id) || USER_CONNECT.test(id));
-}
-// A call belongs to the browser lane when it names a tab or a page element.
-export function isBrowserCall(args) {
-  return !!args && (args.browserTab !== undefined || isBrowserElementId(args.elementId));
-}
-
-// Calls that use neither the user's pointer nor keyboard take a quiet lease: it
-// still honours a stopped series, but shows no indicator and arms no Esc stop.
-// They are Browser Use calls, discovery and delays, reads of the screen and
-// of UI Automation and app launches (unless activate:true brings a window
-// forward), and element actions that start in the background (window
-// messages, UIA patterns). One of those that turns out to need real input fails with
-// WCU_NEEDS_INPUT before sending any, and the server runs it again loudly.
-const READS = new Set(['snapshot', 'tree', 'accessibility_tree', 'find', 'element_info', 'screenshot', 'ocr', 'wait_for']);
-export const BACKGROUND_FIRST = new Set(['invoke', 'set_value', 'scroll', 'type_text']);
-export function isQuietCall(action, args = {}) {
-  if (isBrowserCall(args) || ['health', 'list_windows', 'wait'].includes(action)) return true;
-  if (!args || args.activate === true) return false;
-  if (READS.has(action) || action === 'launch_app') return true;
-  // Window messages posted to the target window.
-  if ((['click', 'double_click', 'keypress'].includes(action) && args.dispatch === 'background') || (action === 'type_text' && args.method === 'background')) return true;
-  // method:'auto' types into a focused Win32 edit with EM_REPLACESEL first.
-  if (action === 'type_text') return (args.method ?? 'auto') === 'auto' && args.focusMode !== 'main';
-  if (args.elementId === undefined || args.elementId === null) return false;
-  if (BACKGROUND_FIRST.has(action)) return true;
-  return action === 'click' && (args.dispatch ?? 'auto') === 'auto' && (args.button ?? 'left') === 'left';
-}
-
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
 const fail = (code, message) => { throw new Error(`${code}: ${message}`); };
@@ -233,8 +509,11 @@ const fold = value => squash(value).toLowerCase().replace(/\s+/g, '');
 
 function activePort(dir) {
   try {
-    const [port, wsPath] = readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').split(/\r?\n/);
-    if (/^\d+$/.test(port) && wsPath?.startsWith('/devtools/browser/')) return `ws://127.0.0.1:${port}${wsPath}`;
+    const [port, wsPath] = readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').trim().split(/\r?\n/);
+    if (port === '0' && /^\/devtools\/pipe\/[a-z0-9._-]+\/devtools\/browser\/[a-z0-9-]+$/i.test(wsPath ?? '')) {
+      return `ws+pipe://127.0.0.1${wsPath}`;
+    }
+    if (/^\d+$/.test(port) && Number(port) > 0 && wsPath?.startsWith('/devtools/browser/')) return `ws://127.0.0.1:${port}${wsPath}`;
   } catch { }
   return null;
 }
@@ -245,13 +524,22 @@ function activePort(dir) {
 class Socket {
   static open(url, timeoutMs, request) {
     const { protocol, hostname, port, pathname, search, host: hostHeader } = new URL(url);
-    if (!['ws:', 'wss:'].includes(protocol)) return Promise.reject(new Error('DevTools requires a ws: or wss: URL'));
+    if (!['ws:', 'wss:', 'ws+pipe:'].includes(protocol)) return Promise.reject(new Error('DevTools requires a ws:, wss: or ws+pipe: URL'));
+    let pipeName = null, requestPath = `${pathname}${search}`;
+    if (protocol === 'ws+pipe:') {
+      const match = /^\/devtools\/pipe\/([a-z0-9._-]+)(\/devtools\/.*)$/i.exec(pathname);
+      if (!match) return Promise.reject(new Error('Invalid ws+pipe DevTools URL'));
+      pipeName = match[1];
+      requestPath = `${match[2]}${search}`;
+    }
     const host = hostname === 'localhost' ? '127.0.0.1' : hostname.replace(/^\[|\]$/g, '');
     return new Promise((resolve, reject) => {
       const key = randomBytes(16).toString('base64');
       const secure = protocol === 'wss:';
       const options = { host, port: Number(port) || (secure ? 443 : 80) };
-      const tcp = secure ? tls.connect({ ...options, ...(net.isIP(host) ? {} : { servername: host }) }) : net.connect(options);
+      const tcp = pipeName
+        ? net.connect(`\\\\.\\pipe\\${pipeName}`)
+        : secure ? tls.connect({ ...options, ...(net.isIP(host) ? {} : { servername: host }) }) : net.connect(options);
       const cancellation = request ? setInterval(() => { if (request.cancelled) tcp.destroy(new Error('COMPUTER_USE_CANCELLED')); }, 50) : null;
       tcp.once('close', () => clearInterval(cancellation));
       const timer = setTimeout(() => { tcp.destroy(); reject(new Error(`timed out connecting to ${url}`)); }, timeoutMs);
@@ -282,7 +570,7 @@ class Socket {
       };
       tcp.on('data', onData);
       tcp.once('error', error => { clearTimeout(timer); reject(new Error(`could not connect to ${url} (${error.code ?? error.message})`)); });
-      tcp.write(`GET ${pathname}${search} HTTP/1.1\r\nHost: ${hostHeader}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+      tcp.write(`GET ${requestPath} HTTP/1.1\r\nHost: ${hostHeader}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
     });
   }
   constructor(tcp, rest) {
@@ -356,7 +644,8 @@ class Cdp {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`BROWSER_TIMEOUT: ${method} did not answer within ${timeoutMs} ms`)); }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer, method });
-      this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+      try { this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); }
+      catch(error){clearTimeout(timer);this.pending.delete(id);reject(error);}
     });
   }
   fail(error) {
@@ -459,6 +748,7 @@ function buildOutline(nodes, idOf, maxLines) {
   return { lines, truncated, total, focused, iframes, title: squash(root?.name?.value) };
 }
 
+const quadArea = q => Math.abs(q.reduce((sum,value,i)=>i%2===0?sum+value*q[(i+3)%8]-q[(i+2)%8]*q[i+1]:sum,0))/2;
 const render = lines => lines.map(line => `${'  '.repeat(line.depth)}${line.id ? `[${line.id}] ` : ''}${line.text}`).join('\n');
 
 const KEYS = {
@@ -470,7 +760,7 @@ const KEYS = {
   pageup: ['PageUp', 'PageUp', 33], pagedown: ['PageDown', 'PageDown', 34], pgup: ['PageUp', 'PageUp', 33], pgdn: ['PageDown', 'PageDown', 34],
   insert: ['Insert', 'Insert', 45], ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`f${i + 1}`, [`F${i + 1}`, `F${i + 1}`, 112 + i]]))
 };
-const MODIFIERS = { alt: [1, 'Alt', 'AltLeft', 18], ctrl: [2, 'Control', 'ControlLeft', 17], control: [2, 'Control', 'ControlLeft', 17], shift: [8, 'Shift', 'ShiftLeft', 16] };
+const MODIFIERS = { alt: [1, 'Alt', 'AltLeft', 18], option: [1, 'Alt', 'AltLeft', 18], ctrl: [2, 'Control', 'ControlLeft', 17], control: [2, 'Control', 'ControlLeft', 17], shift: [8, 'Shift', 'ShiftLeft', 16] };
 // Printable keys besides letters on a US layout: code, virtual key and the shifted character.
 const PRINTABLE = {
   '`': ['Backquote', 192, '~'], 1: ['Digit1', 49, '!'], 2: ['Digit2', 50, '@'], 3: ['Digit3', 51, '#'], 4: ['Digit4', 52, '$'], 5: ['Digit5', 53, '%'],
@@ -574,12 +864,7 @@ const SET_VALUE = `function (value) {
   return this.value;
 }`;
 const FORMATS = { number: 'a number such as 12 or -0.5', date: 'YYYY-MM-DD', time: 'HH:MM', 'datetime-local': 'YYYY-MM-DDTHH:MM', month: 'YYYY-MM', week: 'YYYY-Www', color: '#rrggbb' };
-const READ_VALUE = `function () {
-  if (this.tagName === 'SELECT') return [...this.selectedOptions].map(option => option.text.trim()).join(', ');
-  if (this.type === 'checkbox' || this.type === 'radio') return this.checked ? 'checked' : 'unchecked';
-  if (this.type === 'file') return [...this.files].map(file => file.name).join(', ');
-  return 'value' in this && typeof this.value === 'string' ? this.value : (this.innerText ?? this.textContent ?? '');
-}`;
+const READ_VALUE = `function () { return (${readSafeValue.toString()})(this); }`;
 // A click at the element's center counts if it lands on the element, inside it
 // (shadow content included), or on an ancestor: a text node or a
 // pointer-events:none icon hands its click to the element around it.
@@ -595,7 +880,7 @@ const ELEMENT_FACTS = `function () {
   const r = element.getBoundingClientRect();
   const text = String((this.nodeType === 1 ? this.innerText : this.textContent) ?? '').trim();
   return { tag: element.tagName.toLowerCase(), ...(this.nodeType === 3 ? { node: 'text' } : {}), type: element.type || undefined, href: element.href || undefined, placeholder: element.placeholder || undefined,
-    value: 'value' in element && typeof element.value === 'string' ? element.value.slice(0, 500) : undefined, checked: typeof element.checked === 'boolean' ? element.checked : undefined,
+    value: 'value' in element ? String((${readSafeValue.toString()})(element)).slice(0, 500) : undefined, checked: typeof element.checked === 'boolean' ? element.checked : undefined,
     disabled: element.disabled === true || undefined, text: text.slice(0, 4000) || undefined, ...(text.length > 4000 ? { textLength: text.length } : {}),
     viewportBox: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) },
     inViewport: r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth };
@@ -614,7 +899,7 @@ const FOCUSED_FIELD = `(() => {
   if (!element || element.tagName === 'BODY' || !(element.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName))) return 'none';
   return element.disabled || element.readOnly ? 'locked' : 'editable';
 })()`;
-const FOCUSED_VALUE = `(() => { const element = ${DEEP_FOCUS}; return element && ('value' in element ? element.value : element.innerText); })()`;
+const FOCUSED_VALUE = `(() => { const element = ${DEEP_FOCUS}; return (${readSafeValue.toString()})(element); })()`;
 const DIALOG_NOTE = 'A JavaScript dialog opened; keypress Enter accepts it, Escape dismisses it (for a prompt, type_text first sets the answer). A visible browser may activate its native dialog window; browser-lane input itself does not move the desktop pointer.';
 // The scroll offset of the nearest scrollable box around a node.
 const SCROLL_POSITION = `function () {
@@ -627,6 +912,7 @@ const SCROLL_POSITION = `function () {
 
 export class BrowserLane {
   constructor({ env = process.env } = {}) {
+    this.frames=new BrowserFrames(this);
     this.env = env;
     this.disabled = env.WCU_BROWSER_LANE === 'off';
     this.app = env.WCU_BROWSER_APP === 'firefox' || Object.hasOwn(APPS, env.WCU_BROWSER_APP ?? '') ? env.WCU_BROWSER_APP : 'default';
@@ -727,6 +1013,8 @@ export class BrowserLane {
       const browser = await this.connect({ ...candidate, request }, timeout);
       if (request.cancelled) { browser.cdp.close(); fail('COMPUTER_USE_CANCELLED', 'cancelled while connecting'); }
       attempt.status = 'connected';
+      await this.pages(browser).catch(() => {});
+      this.syncUserTabs();
       return { meta: { ok: true, action: 'connect', channel: 'browser', browser: key, verification: 'observed' }, text: 'Connected. Use list_windows to select only the tabs the user requested.' };
     } catch (error) {
       attempt.status = request.cancelled ? 'cancelled' : /timed out|TIMEOUT/i.test(error.message) ? 'timedOut' : 'notAllowed';
@@ -756,7 +1044,7 @@ export class BrowserLane {
   }
 
   async resolveUrl(url) {
-    if (/^wss?:\/\//i.test(url)) return url;
+    if (/^(?:wss?|ws\+pipe):\/\//i.test(url)) return url;
     const response = await fetch(new URL('/json/version', url), { signal: AbortSignal.timeout(3000) });
     const version = await response.json();
     if (!version.webSocketDebuggerUrl) fail('BROWSER_LANE_UNAVAILABLE', `${url} did not report a DevTools WebSocket`);
@@ -772,8 +1060,10 @@ export class BrowserLane {
     const key = candidate.key ?? existing?.key ?? this.shortKey('b', guid, key => [...this.browsers.values()].some(browser => browser.key === key));
     const record = { key, name: candidate.name, source: candidate.source, url: candidate.url, child: candidate.child, status: 'connecting' };
     this.browsers.set(candidate.url, record);
-    record.ready = (async () => {
-      const cdp = await Cdp.open(await this.resolveUrl(candidate.url), timeoutMs, candidate.request);
+    let timer = null, timedOut = false;
+    const handshake = (async () => {
+      const cdp = candidate.cdp ?? await Cdp.open(await this.resolveUrl(candidate.url), timeoutMs, candidate.request);
+      if (timedOut) { cdp.close(); fail('BROWSER_TIMEOUT', `timed out connecting to ${candidate.url}`); }
       record.cdp = cdp;
       cdp.listeners.add(message => this.onEvent(record, message));
       await cdp.send('Target.setDiscoverTargets', { discover: true });
@@ -783,9 +1073,15 @@ export class BrowserLane {
       try { record.pid = (await cdp.send('SystemInfo.getProcessInfo')).processInfo.find(info => info.type === 'browser')?.id; } catch { }
       record.status = 'connected';
       return record;
-    })().catch(error => {
+    })();
+    const timed = timeoutMs > 0
+      ? Promise.race([handshake, new Promise((_, reject) => { timer = setTimeout(() => { timedOut = true; reject(new Error(`BROWSER_TIMEOUT: timed out connecting to ${candidate.url}`)); }, timeoutMs); timer.unref?.(); })])
+      : handshake;
+    record.ready = timed.finally(() => { if (timer) clearTimeout(timer); }).catch(error => {
       record.cdp?.close();
-      record.status = 'failed'; record.error = error.message; this.backoff.set(candidate.url, Date.now() + BACKOFF_MS);
+      this.browsers.delete(candidate.url);
+      record.status = 'failed'; record.error = error.message;
+      if (candidate.discover) this.backoff.set(candidate.url, Date.now() + BACKOFF_MS);
       throw error;
     });
     record.ready.catch(() => { });
@@ -800,7 +1096,7 @@ export class BrowserLane {
       if (known?.status === 'connected' && !known.cdp.closed) continue;
       if (known?.status === 'connecting') { pending.push(known.ready); continue; }
       if ((this.backoff.get(candidate.url) ?? 0) > Date.now()) continue;
-      pending.push(this.connect(candidate));
+      pending.push(this.connect({ ...candidate, discover: true }));
     }
     if (waitMs && pending.length) await Promise.race([Promise.allSettled(pending), sleep(waitMs)]);
     return [...this.browsers.values()].filter(browser => browser.status === 'connected' && !browser.cdp.closed);
@@ -857,47 +1153,112 @@ export class BrowserLane {
     // for the user's own browser. On a kept profile, --restore-last-session
     // keeps the session cookies of sites that sign in without "remember me";
     // with no startup window it reopens none of the last tabs (Edge 156).
-    const child = this.agentChild = spawn(executable.path, ['--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run',
-      '--no-default-browser-check', '--disable-search-engine-choice-screen', '--disable-sync', '--disable-extensions', '--mute-audio', '--window-size=1280,900',
+    const launchArgs = [
+      '--remote-debugging-pipe',
+      `--user-data-dir=${profile}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-search-engine-choice-screen',
+      '--disable-sync',
+      '--disable-extensions',
+      '--mute-audio',
+      '--window-size=1280,900',
       ...(this.keepSignIns ? ['--restore-last-session', '--hide-crash-restore-bubble'] : []),
       ...(this.env.WCU_TEST_WINDOW_X ? [`--window-position=${Number(this.env.WCU_TEST_WINDOW_X)},80`] : []),
-      ...(headless ? ['--headless=new', 'about:blank'] : [AGENT_THEME, '--no-startup-window'])], { stdio: 'ignore', windowsHide: true, detached: this.keepSignIns });
+      ...(headless ? ['--headless=new', 'about:blank'] : [AGENT_THEME, '--no-startup-window']),
+    ];
+    if (this.keepSignIns) {
+      const nonce = randomBytes(6).toString('hex');
+      const configFile = path.join(profile, `dsh-host-${process.pid}-${nonce}.json`);
+      const readyFile = path.join(profile, `dsh-host-${process.pid}-${nonce}.ready.json`);
+      writeJsonAtomic(configFile, {
+        executablePath: executable.path,
+        executableName: executable.name,
+        args: launchArgs,
+        profile,
+        readyFile,
+      });
+      const host = spawn(process.execPath, [fileURLToPath(import.meta.url), '--host-kept-profile', configFile], {
+        env: { ...this.env, ELECTRON_RUN_AS_NODE: '1' },
+        stdio: 'ignore',
+        windowsHide: true,
+        detached: true,
+      });
+      let hostExited = null;
+      host.once('exit', code => { hostExited = code; });
+      host.once('error', error => { hostExited = error.message; });
+      host.unref();
+      let ready = null;
+      const started = Date.now();
+      try {
+        while (!ready) {
+          try { ready = JSON.parse(readFileSync(readyFile, 'utf8')); break; } catch { }
+          if (hostExited !== null) {
+            try { ready = JSON.parse(readFileSync(readyFile, 'utf8')); break; } catch { }
+            fail('BROWSER_LANE_UNAVAILABLE', `${executable.name} exited during startup (${hostExited}); if a window of the kept DSH profile (${profile}) is open without DSH, close it and try again`);
+          }
+          if (Date.now() - started > 20000) {
+            try { host.kill(); } catch { }
+            fail('BROWSER_LANE_UNAVAILABLE', `${executable.name} did not open its DevTools pipe within 20 s`);
+          }
+          await sleep(50);
+        }
+      } finally {
+        try { rmSync(configFile, { force: true }); } catch { }
+        try { rmSync(readyFile, { force: true }); } catch { }
+      }
+      if (!ready?.ok || !ready.url) {
+        fail('BROWSER_LANE_UNAVAILABLE', String(ready?.error || `${executable.name} exited during startup`).replace(/^BROWSER_LANE_UNAVAILABLE:\s*/, ''));
+      }
+      const url = ready.url;
+      let browser;
+      try {
+        browser = await this.connect({ url, name: `${executable.name} (agent)`, source: 'agent' }, 10000);
+      } catch (error) {
+        try { if (ready.chromePid) process.kill(ready.chromePid); } catch { }
+        try { if (ready.hostPid) process.kill(ready.hostPid); } catch { }
+        throw error;
+      }
+      browser.headless = headless;
+      browser.kept = profile;
+      if (Number.isInteger(ready.chromePid) && ready.chromePid > 0) browser.pid = ready.chromePid;
+      if (Number.isInteger(ready.hostPid) && ready.hostPid > 0) browser.hostPid = ready.hostPid;
+      writeFileSync(path.join(profile, OWNER_FILE), String(process.pid));
+      joinProfile(browser);
+      const watcher = spawn(process.execPath, [fileURLToPath(import.meta.url), '--watch-profile', profile, url, String(browser.pid)], { env: { ...this.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'ignore', windowsHide: true, detached: true });
+      watcher.on('error', () => { }); watcher.unref();
+      return this.prepareAgent(browser);
+    }
+    const child = this.agentChild = spawn(executable.path, launchArgs, {
+      stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: false,
+    });
     child.unref();
-    let exited = null, url;
+    let exited = null;
+    const url = `pipe://${process.pid}/${child.pid}`;
+    const pipeCdp = new Cdp(new BrowserPipe(child));
     child.once('exit', code => {
       exited = code;
-      // A throwaway profile goes with its browser. A kept one stays, and only
-      // the port file that named this browser goes, unless a new one replaced it.
+      // A throwaway profile goes with its browser.
       setTimeout(() => {
-        try {
-          if (!this.keepSignIns) rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-          else if (url && activePort(profile) === url) rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
-        } catch { }
+        try { rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { }
       }, 500).unref();
     });
     child.once('error', error => { exited = error.message; });
-    const started = Date.now();
-    while (!(url = activePort(profile))) {
-      // A second launch on a profile in use hands its window to the browser
-      // already running there and exits.
-      if (exited !== null) fail('BROWSER_LANE_UNAVAILABLE', `${executable.name} exited during startup (${exited})` + (this.keepSignIns ? `; if a window of the kept DSH profile (${profile}) is open without DSH, close it and try again` : ''));
-      if (Date.now() - started > 20000) { child.kill(); fail('BROWSER_LANE_UNAVAILABLE', `${executable.name} did not open its DevTools port within 20 s`); }
-      await sleep(100);
+    let browser;
+    try {
+      browser = await this.connect({ url, cdp: pipeCdp, name: `${executable.name} (agent)`, source: 'agent', child }, 10000);
+    } catch (error) {
+      try { pipeCdp.close(); } catch { }
+      try { if (exited === null) child.kill(); } catch { }
+      throw error;
     }
-    const browser = await this.connect({ url, name: `${executable.name} (agent)`, source: 'agent', child }, 10000);
+    // Agent tabs on a throwaway profile live in an isolated context: no
+    // cookies, sign-ins or history of the profile reach them, whichever
+    // browser runs the lane.
     browser.headless = headless;
-    if (this.keepSignIns) {
-      browser.kept = profile;
-      writeFileSync(path.join(profile, OWNER_FILE), String(process.pid));
-      joinProfile(browser);
-      const watcher = spawn(process.execPath, [fileURLToPath(import.meta.url), '--watch-profile', profile, url, String(browser.pid)], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'ignore', windowsHide: true, detached: true });
-      watcher.on('error', () => { }); watcher.unref();
-    } else {
-      // Agent tabs on a throwaway profile live in an isolated context: no
-      // cookies, sign-ins or history of the profile reach them, whichever
-      // browser runs the lane.
-      browser.contextId = (await browser.cdp.send('Target.createBrowserContext', { disposeOnDetach: true })).browserContextId;
-    }
+    browser.contextId = (await browser.cdp.send('Target.createBrowserContext', { disposeOnDetach: true })).browserContextId;
     return this.prepareAgent(browser);
   }
 
@@ -950,12 +1311,20 @@ export class BrowserLane {
   }
 
   async closeIdleAgent() {
-    if (Date.now() - this.lastUsed < AGENT_IDLE_MS) return;
+    if (this.seriesActive() || Date.now() - this.lastUsed < AGENT_IDLE_MS) return;
     for (const browser of this.browsers.values()) {
       if (browser.source !== 'agent' || browser.status !== 'connected' || browser.cdp.closed) continue;
+      const idleMs=browser.headless?AGENT_IDLE_MS:AGENT_VISIBLE_IDLE_MS;
+      if(Date.now()-Math.max(this.lastUsed,browser.lastActivity??0)<idleMs)continue;
+      if([...this.tabs.values()].some(tab=>tab.browser===browser&&(tab.dialog||tab.acting||tab.loading)))continue;
       const close = async () => {
-        if (otherClients(browser, Date.now() - AGENT_IDLE_MS).length) return;
+        if (otherClients(browser, Date.now() - idleMs).length) return;
         try { await browser.cdp.send('Browser.close', {}, undefined, 5000); } catch { }
+        const until = Date.now() + 5000;
+        while (Date.now() < until && (!browser.cdp.closed || (browser.pid && processAlive(browser.pid)))) await sleep(50);
+        if (browser.kept && (!browser.pid || !processAlive(browser.pid)) && activePort(browser.kept) === browser.url) {
+          try { rmSync(path.join(browser.kept, 'DevToolsActivePort'), { force: true }); } catch { }
+        }
       };
       try { if (browser.kept) await profileLock(browser.kept, close); else await close(); } catch { }
     }
@@ -967,7 +1336,7 @@ export class BrowserLane {
   async shutdown(timeoutMs = CLOSE_MS) {
     await this.bidi?.shutdown();
     const kept = [...this.browsers.values()].filter(browser => browser.kept && browser.status === 'connected' && !browser.cdp.closed);
-    const running = browser => browser.child ? browser.child.exitCode === null && browser.child.signalCode === null : browser.pid ? processAlive(browser.pid) : !browser.cdp.closed;
+    const running = browser => browser.pid ? processAlive(browser.pid) : browser.child ? browser.child.exitCode === null && browser.child.signalCode === null : !browser.cdp.closed;
     await Promise.allSettled(kept.map(browser => profileLock(browser.kept, async () => {
       rmSync(path.join(browser.kept, LEASE_PREFIX + process.pid), { force: true });
       const others = otherClients(browser);
@@ -977,9 +1346,16 @@ export class BrowserLane {
         if (this.agentChild === browser.child) this.agentChild = null;
         return;
       }
+      try { rmSync(path.join(browser.kept, OWNER_FILE), { force: true }); } catch { }
       const until = Date.now() + timeoutMs;
       try { await browser.cdp.send('Browser.close', {}, undefined, timeoutMs); } catch { }
       while (Date.now() < until && running(browser)) await sleep(50);
+      if (running(browser)) {
+        try { if (browser.pid && processAlive(browser.pid)) process.kill(browser.pid); } catch { }
+        try { if (browser.hostPid && processAlive(browser.hostPid)) process.kill(browser.hostPid); } catch { }
+        const killUntil = Date.now() + 1000;
+        while (Date.now() < killUntil && running(browser)) await sleep(50);
+      }
       if (!running(browser) && activePort(browser.kept) === browser.url) try { rmSync(path.join(browser.kept, 'DevToolsActivePort'), { force: true }); } catch { }
     })));
     this.close();
@@ -1005,10 +1381,12 @@ export class BrowserLane {
   }
 
   onEvent(browser, message) {
+    if(this.frames.onEvent(browser,message))return;
     const { method, params = {}, sessionId } = message;
     if (method === 'Lane.closed') {
       browser.status = 'failed'; browser.error = 'disconnected';
       for (const [key, tab] of this.tabs) if (tab.browser === browser) { this.tabs.delete(key); this.byTarget.delete(tab.targetId); this.bySession.delete(tab.sessionId); tab.closed = true; }
+      if (browser.source === 'user') this.syncUserTabs();
       // An agent browser the lane can no longer drive is closed, not left
       // running. A closing browser drops the connection before it exits, so it
       // first gets CLOSE_MS to save its profile: killed sooner, a kept profile
@@ -1017,7 +1395,14 @@ export class BrowserLane {
       if (child && !browser.relinquished && child.exitCode === null) setTimeout(() => { if (!browser.relinquished && !otherClients(browser).length && child.exitCode === null && child.signalCode === null) child.kill(); }, CLOSE_MS).unref();
       return;
     }
-    if (method === 'Target.targetInfoChanged') { const tab = this.byTarget.get(params.targetInfo.targetId); if (tab) { tab.title = params.targetInfo.title; tab.url = params.targetInfo.url; } return; }
+    if (method === 'Target.targetInfoChanged') {
+      const tab = this.byTarget.get(params.targetInfo.targetId);
+      if (tab) {
+        tab.title = params.targetInfo.title; tab.url = params.targetInfo.url; browser.lastActivity = Date.now();
+        if (browser.source === 'user') this.syncUserTabs();
+      }
+      return;
+    }
     // A page opened by a lane tab (a target=_blank link, window.open) is reported with the action.
     if (method === 'Target.targetCreated') {
       const info = params.targetInfo, opener = info.type === 'page' && info.openerId && this.byTarget.get(info.openerId);
@@ -1036,12 +1421,17 @@ export class BrowserLane {
     }
     if (method === 'Target.targetDestroyed') {
       const tab = this.byTarget.get(params.targetId);
-      if (tab) { this.tabs.delete(tab.key); this.byTarget.delete(tab.targetId); this.bySession.delete(tab.sessionId); tab.closed = true; }
+      if (tab) {
+        this.tabs.delete(tab.key); this.byTarget.delete(tab.targetId); this.bySession.delete(tab.sessionId); tab.closed = true;
+        if (browser.source === 'user') this.syncUserTabs();
+      }
       return;
     }
     if (method === 'Target.detachedFromTarget') { const tab = this.bySession.get(params.sessionId); if (tab) { tab.sessionId = null; this.bySession.delete(params.sessionId); } return; }
     const tab = sessionId && this.bySession.get(sessionId);
     if (!tab) return;
+    if (method === 'Fetch.requestPaused') { this.onFetchPaused(tab, sessionId, params); return; }
+    if(['Page.frameNavigated','Page.javascriptDialogOpening','Page.javascriptDialogClosed'].includes(method))browser.lastActivity=Date.now();
     const wake = () => { for (const resolve of tab.loadWaiters.splice(0)) resolve(); };
     // Each main-frame load gets a number, so an action waits only for a load it started.
     if (method === 'Page.frameStartedLoading' && params.frameId === tab.mainFrameId) { tab.loading = true; tab.domReady = false; tab.loadSeq++; }
@@ -1049,7 +1439,11 @@ export class BrowserLane {
     else if ((method === 'Page.frameStoppedLoading' && params.frameId === tab.mainFrameId) || method === 'Page.loadEventFired') {
       tab.loading = false; tab.domReady = true; wake();
       this.updateIndicator(tab).catch(() => {});
-    } else if (method === 'Page.frameNavigated' && !params.frame.parentId) { tab.document = params.frame.loaderId; tab.navigatingTo = null; tab.crashed = false; }
+    } else if (method === 'Page.frameNavigated') {
+      this.frames.invalidate(tab,params.frame);
+      if(!params.frame.parentId){tab.document = params.frame.loaderId; tab.navigatingTo = null; tab.crashed = false;}
+    }
+    else if(method==='Page.frameDetached')tab.frames?.delete(params.frameId);
     else if (method === 'Inspector.targetCrashed') tab.crashed = true;
     // Requests an action sets off (a fetch that swaps the page, a form post) are waited for.
     else if (method === 'Network.requestWillBeSent') { if (['Document', 'XHR', 'Fetch'].includes(params.type)) tab.requests.add(params.requestId); }
@@ -1064,7 +1458,8 @@ export class BrowserLane {
       if (!tab.acting) this.release(tab);
     } else if (method === 'Page.fileChooserOpened') {
       // The input behind a styled upload button is often hidden and absent from the outline.
-      tab.chooser = { multiple: params.mode === 'selectMultiple', ...(params.backendNodeId ? { input: this.idFor(tab, params.backendNodeId) } : {}) };
+      const frame=tab.frames?.get(params.frameId??tab.mainFrameId);
+      tab.chooser = { multiple: params.mode === 'selectMultiple', ...(params.backendNodeId ? { input: this.idFor(tab, frame?this.frames.node(frame,params.backendNodeId):params.backendNodeId) } : {}) };
     }
   }
 
@@ -1072,7 +1467,7 @@ export class BrowserLane {
   // command, so this waits for the dialog to close (onEvent calls it again then).
   async release(tab) {
     if (tab.closed || tab.dialog || !tab.sessionId) return;
-    if (tab.intercepting) { tab.intercepting = false; await this.send(tab, 'Page.setInterceptFileChooserDialog', { enabled: false }, 3000).catch(() => { }); }
+    if (tab.intercepting) { tab.intercepting = false; await this.frames.intercept(tab,false); }
     if (tab.network) { tab.network = false; await this.send(tab, 'Network.disable', {}, 3000).catch(() => { }); }
   }
 
@@ -1080,8 +1475,27 @@ export class BrowserLane {
   // web pages and blank new tabs, not settings or other browser pages.
   async pages(browser) {
     const { targetInfos } = await browser.cdp.send('Target.getTargets');
-    return targetInfos.filter(info => info.type === 'page' && (browser.contextId ? info.browserContextId === browser.contextId : !INTERNAL_PAGE.test(info.url) || BLANK_PAGE.test(info.url)))
+    const listed = targetInfos.filter(info => info.type === 'page' && (browser.contextId ? info.browserContextId === browser.contextId : !INTERNAL_PAGE.test(info.url) || BLANK_PAGE.test(info.url)))
       .map(info => this.tabFor(browser, info));
+    if (browser.source === 'user') this.syncUserTabs();
+    return listed;
+  }
+
+  syncUserTabs() {
+    if (!this.env.WCU_USER_TABS_FILE) return;
+    const tabs = {};
+    for (const tab of this.tabs.values()) {
+      if (tab.browser.source !== 'user' || tab.closed) continue;
+      let origin = '';
+      try { origin = new URL(tab.url).origin; } catch { }
+      tabs[tab.key] = {
+        requiresApproval: !tab.opened,
+        approved: Boolean(tab.opened || tab.userTabApproved),
+        label: `${tab.title || 'Untitled'} (${tab.url || 'about:blank'})`,
+        origin,
+      };
+    }
+    try { writeJsonAtomic(this.env.WCU_USER_TABS_FILE, { tabs }); } catch { }
   }
 
   // Keys come from a stable id (a browser's guid; a tab's target id salted with
@@ -1169,31 +1583,74 @@ export class BrowserLane {
   }
 
   async session(tab) {
+    if(tab.sessionReady)return tab.sessionReady;
     if (tab.sessionId) return tab.sessionId;
+    tab.sessionReady=this.attachSession(tab);
+    try{return await tab.sessionReady;}finally{tab.sessionReady=null;}
+  }
+
+  async attachSession(tab) {
     const { cdp } = tab.browser;
     const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: tab.targetId, flatten: true });
     tab.sessionId = sessionId; this.bySession.set(sessionId, tab);
     const send = (method, params) => cdp.send(method, params, sessionId);
-    await send('Page.enable');
-    const { frameTree } = await send('Page.getFrameTree');
-    tab.mainFrameId = frameTree.frame.id; tab.document ??= frameTree.frame.loaderId;
-    // In the agent browser a file chooser never opens a native dialog; set_value
-    // gives the file input its files instead. A user's tab intercepts only
-    // during lane actions, so the user's own uploads keep working.
-    await Promise.allSettled([send('DOM.enable'), send('Emulation.setFocusEmulationEnabled', { enabled: true }),
-      ...(tab.browser.source === 'agent' ? [send('Page.setInterceptFileChooserDialog', { enabled: true })] : []),
-      ...(tab.browser.userAgent ? [send('Emulation.setUserAgentOverride', { userAgent: tab.browser.userAgent })] : [])]);
-    if (this.showsIndicator(tab)) {
-      await send('Page.addScriptToEvaluateOnNewDocument', { source: INDICATOR_SCRIPT, worldName: INDICATOR_WORLD });
-      await this.updateIndicator(tab);
+    try {
+      await send('Page.enable');
+      const { frameTree } = await send('Page.getFrameTree');
+      tab.mainFrameId = frameTree.frame.id; tab.document ??= frameTree.frame.loaderId;
+      if (tab.browser.source === 'agent') await this.enableFetch(tab, sessionId);
+      // In the agent browser a file chooser never opens a native dialog; set_value
+      // gives the file input its files instead. A user's tab intercepts only
+      // during lane actions, so the user's own uploads keep working.
+      await Promise.allSettled([send('DOM.enable'), send('Emulation.setFocusEmulationEnabled', { enabled: true }),
+        ...(tab.browser.source === 'agent' ? [send('Page.setInterceptFileChooserDialog', { enabled: true })] : []),
+        ...(tab.browser.userAgent ? [send('Emulation.setUserAgentOverride', { userAgent: tab.browser.userAgent })] : [])]);
+      if (this.showsIndicator(tab)) {
+        await send('Page.addScriptToEvaluateOnNewDocument', { source: INDICATOR_SCRIPT, worldName: INDICATOR_WORLD });
+        tab.indicatorScriptAdded = true;
+        await this.updateIndicator(tab);
+      }
+      return sessionId;
+    } catch (error) {
+      tab.sessionId = null;
+      this.bySession.delete(sessionId);
+      await cdp.send('Target.detachFromTarget', { sessionId }).catch(() => { });
+      throw error;
     }
-    return sessionId;
+  }
+
+  async enableFetch(tab, sessionId = tab.sessionId) {
+    if (tab.browser.source !== 'agent' || !sessionId) return;
+    await tab.browser.cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] }, sessionId);
+  }
+
+  onFetchPaused(tab, sessionId, params) {
+    const reqUrl = params?.request?.url ?? '';
+    const isNavigation = Boolean(params?.isNavigationRequest);
+    let blocked = false;
+    let reason = '';
+    try {
+      let allowLocalFile = Boolean(this.env.WCU_ALLOWED_FILE_ROOTS);
+      if (!allowLocalFile && tab.approvedFileUrl && /^file:/i.test(reqUrl)) {
+        allowLocalFile = canonicalizeBrowserUrl(reqUrl).url.href === canonicalizeBrowserUrl(tab.approvedFileUrl).url.href;
+      }
+      ({ blocked, reason } = isBlockedRuntimeRequestUrl(reqUrl, this.env, { isNavigation, allowLocalFile }));
+    } catch {
+      blocked = true;
+      reason = 'WCU_POLICY_DENIED: invalid request URL.';
+    }
+    if (blocked && (isNavigation || params?.resourceType === 'Document')) {
+      tab.lastBlockedReason = reason || 'WCU_POLICY_DENIED: request URL is blocked.';
+    }
+    const method = blocked ? 'Fetch.failRequest' : 'Fetch.continueRequest';
+    const payload = blocked ? { requestId: params.requestId, errorReason: 'BlockedByClient' } : { requestId: params.requestId };
+    tab.browser.cdp.send(method, payload, sessionId, 3000).catch(() => { });
   }
 
   // The visible agent browser badges every tab it works in; a user's browser
-  // only the tabs DSH opened there, so the user's own tabs never change.
+  // badges tabs DSH opened or tabs the user approved for this run.
   showsIndicator(tab) {
-    return tab.browser.source === 'agent' ? !tab.browser.headless : Boolean(tab.opened);
+    return tab.browser.source === 'agent' ? !tab.browser.headless : Boolean(tab.opened || tab.userTabApproved);
   }
 
   // Brings the page now in the tab to the tab's indicator state (a new
@@ -1201,6 +1658,10 @@ export class BrowserLane {
   async updateIndicator(tab, point, extra) {
     if (!this.showsIndicator(tab) || !tab.sessionId || tab.closed || tab.crashed || tab.dialog) return;
     try {
+      if (!tab.indicatorScriptAdded) {
+        await tab.browser.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: INDICATOR_SCRIPT, worldName: INDICATOR_WORLD }, tab.sessionId, 500).catch(() => { });
+        tab.indicatorScriptAdded = true;
+      }
       const { executionContextId } = await tab.browser.cdp.send('Page.createIsolatedWorld', { frameId: tab.mainFrameId, worldName: INDICATOR_WORLD }, tab.sessionId, 500);
       const status = extra ?? `globalThis.__dshStatus(${JSON.stringify(tab.indicator ?? 'idle')}, ${JSON.stringify(point ?? null)});`;
       await tab.browser.cdp.send('Runtime.evaluate', { contextId: executionContextId, expression: `${INDICATOR_SCRIPT}\n${status}` }, tab.sessionId, 500);
@@ -1237,8 +1698,8 @@ export class BrowserLane {
   async centerOf(tab, backendNodeId) {
     try {
       const { quads } = await this.send(tab, 'DOM.getContentQuads', { backendNodeId }, 2000);
-      const quad = quads.find(item => Math.abs((item[2] - item[0]) * (item[5] - item[1])) > 1);
-      return quad ? { x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4, y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4 } : null;
+      const quad = quads.find(item => quadArea(item) > 1);
+      return quad ? await this.frames.rootPoint(tab,backendNodeId,{ x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4, y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4 },{check:false}) : null;
     } catch { return null; }
   }
 
@@ -1249,8 +1710,19 @@ export class BrowserLane {
   idFor(tab, backendNodeId) {
     if (!backendNodeId) return '';
     if (tab.idDocument !== tab.document) { tab.idDocument = tab.document; tab.ids = new Map(); tab.numbers = new Map(); }
-    let number = tab.numbers.get(backendNodeId);
-    if (number === undefined) { number = ++this.lastId; tab.numbers.set(backendNodeId, number); tab.ids.set(number, backendNodeId); }
+    const key=this.frames.key(backendNodeId);
+    let number = tab.numbers.get(key);
+    if (number === undefined) {
+      if (tab.numbers.size >= 20000) {
+        const oldestKey = tab.numbers.keys().next().value;
+        const oldestNum = tab.numbers.get(oldestKey);
+        tab.numbers.delete(oldestKey);
+        tab.ids.delete(oldestNum);
+      }
+      number = ++this.lastId;
+      tab.numbers.set(key, number);
+      tab.ids.set(number, backendNodeId);
+    }
     return `${tab.key}:${number}`;
   }
 
@@ -1260,21 +1732,55 @@ export class BrowserLane {
   }
 
   async send(tab, method, params = {}, timeoutMs) {
-    const sessionId = await this.session(tab);
-    return tab.browser.cdp.send(method, params, sessionId, timeoutMs);
+    await this.session(tab);
+    const route=this.frames.prepare(tab,method,params);
+    return this.frames.wrap(tab,method,await tab.browser.cdp.send(method,route.params,route.sessionId,timeoutMs),route.frame);
   }
 
-  guardPage(tab) {
-    if (/^(?:chrome|edge|brave|about|chrome-extension|extension):/i.test(tab.url || '') && !/^about:blank$/i.test(tab.url))
+  guardPage(tab, request) {
+    if (/^(?:chrome|edge|brave|about|chrome-extension|extension|moz-extension|devtools|view-source):/i.test(tab.url || '') && !/^about:blank$/i.test(tab.url))
       fail('BROWSER_INTERNAL_PAGE', `${this.describeTab(tab).url} is a browser page that the lane does not read or operate; navigate the tab to a web address with set_value ${tab.key}:address`);
+    assertBrowserUrl(tab.url || 'about:blank', { env: this.env, approved: request?.policyApproved === true, approvedFileUrl: tab.approvedFileUrl, grants: request?.approvalGrants });
   }
 
-  async outline(tab, maxLines = 500) {
-    this.guardPage(tab);
-    const { nodes } = await this.send(tab, 'Accessibility.getFullAXTree', {}, 30000);
-    const outline = buildOutline(nodes, id => this.idFor(tab, id), maxLines);
-    if (outline.title) tab.title = outline.title;
+  async redactNodes(tab, nodes) {
+    await Promise.all(nodes.filter(node => node.value && node.backendDOMNodeId).map(async node => {
+      let sensitive = property(node,'protected') === true;
+      try {
+        const {node:dom} = await this.send(tab,'DOM.describeNode',{backendNodeId:node.backendDOMNodeId,depth:0});
+        const attrs=Object.fromEntries(Array.from({length:(dom.attributes??[]).length/2},(_,i)=>[dom.attributes[i*2],dom.attributes[i*2+1]]));
+        sensitive ||= attrs.type?.toLowerCase()==='password' || /(?:^|\s)(?:current-password|new-password|one-time-code|cc-number|cc-csc)(?:\s|$)/i.test(attrs.autocomplete??'');
+      } catch { sensitive = true; }
+      if(sensitive){
+        const raw=String(node.value.value??''),safe='[redacted; length='+raw.length+']';
+        node.value={...node.value,value:safe};
+        if(node.name?.value===raw)node.name={...node.name,value:safe};
+      }
+    }));
+    return nodes;
+  }
+
+  async checkLocation(tab, request) {
     try { tab.url = (await this.send(tab, 'Runtime.evaluate', { expression: 'location.href', returnByValue: true })).result.value ?? tab.url; } catch { }
+    this.guardPage(tab, request);
+    for (const frame of tab.frames?.values() ?? []) {
+      if (frame.parentId && !/^about:(?:blank|srcdoc)$/i.test(frame.url ?? '')) {
+        assertBrowserUrl(frame.url || 'about:blank', { env: this.env, approvedFileUrl: tab.approvedFileUrl });
+      }
+    }
+  }
+
+  async outline(tab, maxLines = 500, request) {
+    this.guardPage(tab, request);
+    const { nodes } = await this.frames.readAX(tab, request);
+    await this.redactNodes(tab, nodes);
+    await this.checkLocation(tab, request);
+    const outline = buildOutline(nodes, id => this.idFor(tab, id), Number.MAX_SAFE_INTEGER);
+    outline.allLines=outline.lines;
+    outline.lines=outline.lines.slice(0,maxLines);
+    outline.truncated=outline.allLines.length>outline.lines.length;
+    outline.maxLines=maxLines;
+    if (outline.title) tab.title = outline.title;
     return outline;
   }
 
@@ -1284,7 +1790,7 @@ export class BrowserLane {
   }
 
   remember(tab, outline) {
-    tab.last = { url: tab.url, lines: new Map(outline.lines.map(line => [line.key, line])) };
+    tab.last = { url: tab.url, lines: new Map((outline.allLines??outline.lines).map(line => [line.key, line])) };
   }
 
   // After an action, return what changed on the page; a navigation or a
@@ -1295,7 +1801,8 @@ export class BrowserLane {
     if (!previous || previous.url !== tab.url) return { mode: 'full', text: `${this.header(tab)}\n${render(outline.lines)}` };
     const added = [], changed = [], removed = [];
     const seen = new Set();
-    for (const line of outline.lines) {
+    const allLines=outline.allLines??outline.lines;
+    for (const line of allLines) {
       seen.add(line.key);
       const before = previous.lines.get(line.key);
       if (!before) added.push(line); else if (before.text !== line.text) changed.push(line);
@@ -1303,11 +1810,12 @@ export class BrowserLane {
     for (const [key, line] of previous.lines) if (!seen.has(key)) removed.push(line);
     const count = added.length + changed.length + removed.length;
     if (count === 0) return { mode: 'unchanged', text: `tab ${tab.key}: the page outline did not change` };
-    if (count > Math.max(40, outline.lines.length * 0.6)) return { mode: 'full', text: `${this.header(tab)}\n${render(outline.lines)}` };
+    if (count > Math.max(40, allLines.length * 0.6)) return { mode: 'full', text: `${this.header(tab)}\n${render(outline.lines)}` };
     const text = [`tab ${tab.key} · "${clip(tab.title || '', 120)}" · ${added.length} added, ${changed.length} changed, ${removed.length} removed`,
       ...added.map(line => `+ ${render([{ ...line, depth: 0 }])}`), ...changed.map(line => `~ ${render([{ ...line, depth: 0 }])}`),
       ...removed.map(line => `- ${line.id ? `[${line.id}] ` : ''}${line.text}`)].join('\n');
-    return { mode: 'diff', text };
+    const budget=outline.maxLines??500,lines=text.split('\n');
+    return { mode: 'diff', text:lines.slice(0,budget+1).join('\n')+(lines.length>budget+1?'\n[changes truncated; read the page or use find for details]':'') };
   }
 
   // After an action: wait for a load the action started (since = the load
@@ -1319,8 +1827,15 @@ export class BrowserLane {
     await sleep(120);
     const stop = () => request?.cancelled || tab.closed || tab.dialog;
     const until = async (done, ms) => {
-      for (const deadline = Date.now() + ms; !done() && Date.now() < deadline && !stop();)
-        await Promise.race([new Promise(resolve => tab.loadWaiters.push(resolve)), sleep(250)]);
+      for (const deadline = Date.now() + ms; !done() && Date.now() < deadline && !stop();) {
+        let waiter;
+        const loaded = new Promise(resolve => { waiter = resolve; tab.loadWaiters.push(resolve); });
+        try { await Promise.race([loaded, sleep(250)]); }
+        finally {
+          const idx = tab.loadWaiters.indexOf(waiter);
+          if (idx >= 0) tab.loadWaiters.splice(idx, 1);
+        }
+      }
     };
     const load = async () => {
       if (tab.loadSeq === since) return;
@@ -1364,6 +1879,7 @@ export class BrowserLane {
     let line = 'element', named = false;
     try {
       const { nodes } = await this.send(tab, 'Accessibility.getPartialAXTree', { backendNodeId, fetchRelatives: false });
+      await this.redactNodes(tab,nodes);
       const node = nodes.find(item => !item.ignored) ?? nodes[0];
       if (node) { const name = squash(node.name?.value); line = nodeLine(node, name); named = Boolean(name); }
     } catch { }
@@ -1384,7 +1900,7 @@ export class BrowserLane {
     let quads;
     try { ({ quads } = await this.send(tab, 'DOM.getContentQuads', { backendNodeId })); }
     catch { fail('BROWSER_ELEMENT_STALE', `element ${this.idFor(tab, backendNodeId)} has no layout box; read the page again`); }
-    const quad = quads.find(item => Math.abs((item[2] - item[0]) * (item[5] - item[1])) > 1);
+    const quad = quads.find(item => quadArea(item) > 1);
     if (!quad) fail('BROWSER_ELEMENT_NOT_VISIBLE', `element ${this.idFor(tab, backendNodeId)} is not visible on the page`);
     const x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4, y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
     let covering = null;
@@ -1392,23 +1908,31 @@ export class BrowserLane {
     // Like a real click it passes through pointer-events:none layers (a page's
     // decoration, DSH's own pointer layer); ignorePointerEventsNone would hit them.
     try {
-      const hit = await this.send(tab, 'DOM.getNodeForLocation', { x: Math.round(x), y: Math.round(y), includeUserAgentShadowDOM: true, ignorePointerEventsNone: false });
-      if (hit.backendNodeId !== backendNodeId) {
-        const target = await this.resolveElement(tab, backendNodeId);
-        const other = (await this.send(tab, 'DOM.resolveNode', { backendNodeId: hit.backendNodeId })).object.objectId;
-        const { result } = await this.send(tab, 'Runtime.callFunctionOn', { objectId: target, functionDeclaration: ON_TARGET, arguments: [{ objectId: other }], returnByValue: true });
-        if (result.value === false) covering = hit.backendNodeId;
+      const hit = await this.frames.hit(tab, backendNodeId, x, y);
+      if (!sameFrameNode(hit.backendNodeId, backendNodeId)) {
+        const sameFrame = hit.backendNodeId?.frameId === backendNodeId?.frameId
+          && hit.backendNodeId?.document === backendNodeId?.document
+          && hit.backendNodeId?.sessionId === backendNodeId?.sessionId;
+        if (!sameFrame) {
+          covering = hit.backendNodeId;
+        } else {
+          const target = await this.resolveElement(tab, backendNodeId);
+          const other = (await this.send(tab, 'DOM.resolveNode', { backendNodeId: hit.backendNodeId })).object.objectId;
+          const { result } = await this.send(tab, 'Runtime.callFunctionOn', { objectId: target, functionDeclaration: ON_TARGET, arguments: [{ objectId: other }], returnByValue: true });
+          if (result.value === false) covering = hit.backendNodeId;
+        }
       }
-    } catch { }
+    } catch(error) { if(backendNodeId?.frameId)throw new Error('BROWSER_HIT_TEST_FAILED: '+error.message); }
     // The covering element's id is offered for the next call.
     if (covering) fail('BROWSER_ELEMENT_COVERED', `element ${this.idFor(tab, backendNodeId)} is covered by ${await this.describeNode(tab, covering)} [${this.idFor(tab, covering)}]; close or scroll past it first`);
-    return { x, y };
+    return this.frames.rootPoint(tab,backendNodeId,{x,y});
   }
 
   // alert/confirm/prompt and beforeunload hold the call that raised them until
   // the dialog closes; stop waiting as soon as one opens (null).
   async untilDialog(tab, pending) {
     pending.catch(() => { });
+    if(tab.dialog)return null;
     let wake;
     const opened = new Promise(resolve => { wake = resolve; tab.dialogWaiters.push(resolve); });
     try { return await Promise.race([pending, opened.then(() => null)]); }
@@ -1466,6 +1990,9 @@ export class BrowserLane {
   }
 
   async key(tab, keys) {
+    for (const raw of keys) {
+      if (/[\x00-\x1f\x7f\uE000-\uF8FF]/.test(String(raw))) fail('INVALID_ARGUMENTS', 'Control and private-use characters are not allowed in key names.');
+    }
     const modifiers = [], names = keys.map(key => String(key).toLowerCase());
     let main = null;
     for (const name of names) { if (MODIFIERS[name]) modifiers.push(MODIFIERS[name]); else main = name; }
@@ -1490,6 +2017,7 @@ export class BrowserLane {
       return { navigated: chord === 'alt+left' ? 'back' : 'forward' };
     }
     if (chord === 'f5' || chord === 'ctrl+r') { await this.send(tab, 'Page.reload'); return { navigated: 'reload' }; }
+    if ((modifiers.some(item=>item[1]==='Control')&&['c','v','x','insert'].includes(main)) || (modifiers.some(item=>item[1]==='Shift')&&['insert','delete'].includes(main))) fail('BROWSER_CLIPBOARD_SHORTCUT', 'Page input must not read or replace the system clipboard; use type_text or set_value.');
     if (BROWSER_SHORTCUTS.has(chord)) fail('BROWSER_UI_SHORTCUT', `${chord} is a browser-window shortcut that page input cannot reach; navigate with set_value ${tab.key}:address, open tabs with set_value new-tab, close with close_window browserTab`);
     const named = KEYS[main];
     const mask = modifiers.reduce((sum, item) => sum | item[0], 0);
@@ -1513,27 +2041,40 @@ export class BrowserLane {
     return {};
   }
 
-  normalizeUrl(value) {
+  normalizeUrl(value, request) {
     const text = String(value ?? '').trim();
-    if (/^(?:https?|file):\/\//i.test(text) || /^about:blank$/i.test(text) || /^data:/i.test(text)) return text;
-    if (/^[\w-]+(\.[\w-]+)+(?::\d+)?(?:[/?#]\S*)?$/.test(text)) return `https://${text}`;
+    const policyOpts = { env: this.env, approved: request?.policyApproved === true, grants: request?.approvalGrants };
+    if (/^(?:https?|file):\/\//i.test(text) || /^about:blank$/i.test(text) || /^data:/i.test(text)) return assertBrowserUrl(text, policyOpts);
+    if (/^[\w-]+(\.[\w-]+)+(?::\d+)?(?:[/?#]\S*)?$/.test(text)) {
+      const candidate = `https://${text}`;
+      assertBrowserUrl(candidate, policyOpts);
+      return candidate;
+    }
     fail('INVALID_ARGUMENTS', `set_value on a tab address needs a web address such as https://example.com, not '${clip(text, 80)}'; for a search, use the site's search URL (for example https://www.bing.com/search?q=…)`);
   }
 
   // A beforeunload prompt holds Page.navigate until it is answered, and a
   // server that has not answered within 15 s leaves the navigation running.
   async navigate(tab, url) {
-    tab.loading = true; tab.crashed = false; tab.navigatingTo = null;
+    tab.loading = true; tab.crashed = false; tab.navigatingTo = null; tab.lastBlockedReason = null;
     const result = await this.untilDialog(tab, Promise.race([this.send(tab, 'Page.navigate', { url }, 120000), sleep(15000).then(() => 'slow')]));
     if (!result) return;
     if (result === 'slow') { tab.navigatingTo = url; return; }
-    if (result.errorText) { tab.loading = false; fail('BROWSER_NAVIGATION_FAILED', `${url}: ${result.errorText}`); }
+    if (result.errorText) {
+      tab.loading = false;
+      if (result.errorText === 'net::ERR_BLOCKED_BY_CLIENT' && tab.lastBlockedReason) {
+        const reason = tab.lastBlockedReason;
+        tab.lastBlockedReason = null;
+        throw new Error(reason);
+      }
+      fail('BROWSER_NAVIGATION_FAILED', `${url}: ${result.errorText}`);
+    }
     // A same-document navigation (a #fragment) has no loader and never stops loading.
     if (!result.loaderId) tab.loading = false;
   }
 
   async openTab(browserKey, value, request, call) {
-    const url = this.normalizeUrl(value);
+    const url = this.normalizeUrl(value, request);
     let browser;
     if (browserKey) {
       browser = [...this.browsers.values()].find(item => item.key === browserKey && item.status === 'connected' && !item.cdp.closed);
@@ -1542,6 +2083,7 @@ export class BrowserLane {
     const firstVisibleWindow = browser.source === 'agent' && !browser.headless && ![...this.tabs.values()].some(tab => tab.browser === browser && !tab.closed);
     const { targetId } = await browser.cdp.send('Target.createTarget', { url: 'about:blank', background: true, ...(firstVisibleWindow ? { newWindow: true } : {}), ...(browser.contextId ? { browserContextId: browser.contextId } : {}) });
     const tab = this.tabFor(browser, { targetId, title: '', url: 'about:blank' });
+    tab.approvedFileUrl = /^file:/i.test(url) ? canonicalizeBrowserUrl(url).url.href : undefined;
     tab.opened = true;
     await this.session(tab);
     if (call) await this.working(tab, call);
@@ -1567,33 +2109,46 @@ export class BrowserLane {
     this.lastUsed = Date.now();
     for (const browser of this.browsers.values()) if (browser.kept && !browser.cdp?.closed) joinProfile(browser);
     const call = { tabs: new Set() };
-    try { return await this.runPage(action, args, request, call); }
+    try { return await this.frames.scope(()=>this.runPage(action, args, request, call)); }
     finally {
       this.lastUsed = Date.now();
-      for (const browser of this.browsers.values()) if (browser.kept && !browser.cdp?.closed) joinProfile(browser);
+      for (const browser of this.browsers.values()) if (browser.kept && !browser.cdp?.closed) try { joinProfile(browser); } catch(error) { process.stderr.write('Browser profile renewal failed: '+error.message+'\n'); }
       for (const tab of call.tabs) this.rest(tab, Boolean(request?.cancelled));
     }
   }
 
   async runPage(action, args, request, call = { tabs: new Set() }) {
     if (this.disabled) fail('BROWSER_LANE_UNAVAILABLE', 'the browser lane is turned off (WCU_BROWSER_LANE=off)');
-    const conflict = ['windowTitle', 'processId', 'nativeWindowHandle', 'x', 'y'].filter(key => args[key] !== undefined);
+    const conflict = ['windowTitle', 'processId', 'nativeWindowHandle'].filter(key => args[key] !== undefined);
     if (conflict.length) fail('INVALID_ARGUMENTS', `browserTab and page element ids target a page; drop ${conflict.join(', ')}`);
+    const coordinates=args.x!==undefined||args.y!==undefined;
+    if(coordinates&&(!args.browserTab||args.elementId||!['click','double_click','move','scroll'].includes(action)||!Number.isInteger(args.x)||!Number.isInteger(args.y)))fail('INVALID_ARGUMENTS','Page coordinates require browserTab, both x and y, and no elementId.');
     if (action === 'invoke' && (args.action ?? 'default') !== 'default') fail('INVALID_ARGUMENTS', `invoke action '${args.action}' is for UI Automation elements; in a page, click the element to open or close it, and scroll its list or the page to bring it into view`);
     const match = typeof args.elementId === 'string' ? ELEMENT_ID.exec(args.elementId) : null;
     const opener = typeof args.elementId === 'string' ? NEW_TAB.exec(args.elementId) : null;
     if (opener) {
       if (action !== 'set_value') fail('INVALID_ARGUMENTS', `${args.elementId} opens a tab only through set_value with a web address`);
       const tab = await this.openTab(opener[1], args.value, request, call);
+      assertBrowserUrl(tab.url || 'about:blank', { env: this.env, approved: request?.policyApproved === true, approvedFileUrl: tab.approvedFileUrl, grants: request?.approvalGrants });
       if (tab.dialog) return { meta: { ok: true, action, channel: 'browser', opened: this.describeTab(tab), background: true, dialog: tab.dialog, verification: 'sent', verificationNote: DIALOG_NOTE } };
       if (tab.navigatingTo) return { meta: { ok: true, action, channel: 'browser', opened: this.describeTab(tab), background: true, ...this.slowNavigation(tab) } };
-      const outline = await this.outline(tab);
+      const outline = await this.outline(tab, undefined, request);
       this.remember(tab, outline);
       return this.page({ ok: true, action, opened: this.describeTab(tab), background: true }, `${this.header(tab)}\n${render(outline.lines)}`, outline);
     }
     const tabKey = match?.[1] ?? args.browserTab;
     if (match && args.browserTab && args.browserTab !== match[1]) fail('INVALID_ARGUMENTS', `elementId ${args.elementId} belongs to tab ${match[1]}, not ${args.browserTab}`);
     const tab = await this.findTab(tabKey, request);
+    if (tab.browser.source === 'user' && !tab.opened && !tab.userTabApproved && (this.env.WCU_APPROVAL_SECRET || this.env.WCU_USER_TABS_FILE)) {
+      if (request?.policyApproved === true || request?.approvalGrants?.userTabs?.has(tab.key)) {
+        tab.userTabApproved = true;
+        this.syncUserTabs();
+        await this.updateIndicator(tab).catch(() => { });
+      } else {
+        throw new Error('WCU_APPROVAL_REQUIRED: accessing this existing browser tab requires approval.');
+      }
+    }
+    if (!/:address$/.test(args.elementId ?? '')) this.guardPage(tab, request);
     await this.working(tab, call);
     // An open alert/confirm/prompt blocks the page: every other call would hang.
     if (tab.dialog) {
@@ -1607,16 +2162,17 @@ export class BrowserLane {
     const address = match?.[2] === 'address';
     if (address && action !== 'set_value') fail('INVALID_ARGUMENTS', `${args.elementId} is the tab address; use set_value with a web address to navigate`);
     if (tab.crashed && !address && action !== 'close_window') fail('BROWSER_TAB_CRASHED', `the page in tab ${tab.key} crashed; set_value ${tab.key}:address with its address loads it again, close_window closes the tab`);
-    if (!match && ['click', 'double_click', 'move', 'focus', 'invoke', 'set_value', 'element_info'].includes(action)) fail('INVALID_ARGUMENTS', `${action} in a browser tab needs a page element id such as ${tab.key}:123`);
+    if (!match && !coordinates && ['click', 'double_click', 'move', 'focus', 'invoke', 'set_value', 'element_info'].includes(action)) fail('INVALID_ARGUMENTS', `${action} in a browser tab needs a page element id such as ${tab.key}:123 or explicit viewport coordinates where supported`);
     // From here on node is the DOM node behind the element id.
     if (node !== null) {
       node = this.nodeFor(tab, node);
       if (node === undefined) fail('BROWSER_ELEMENT_STALE', `element ${args.elementId} was not read from the page now in tab ${tab.key} (the tab navigated since, or the id is older than this server); read the page again with accessibility_tree or find`);
+      await this.frames.validate(tab,node);
     }
     const document = tab.document;
     switch (action) {
       case 'snapshot': case 'tree': {
-        const outline = await this.outline(tab, args.maxNodes);
+        const outline = await this.outline(tab, args.maxNodes, request);
         this.remember(tab, outline);
         const result = this.page({ ok: true, action, tab: this.describeTab(tab), ...(tab.navigatingTo ? { stillLoading: true, navigatingTo: tab.navigatingTo } : {}) }, `${this.header(tab)}\n${render(outline.lines)}`, outline);
         if (action === 'snapshot' && args.includeScreenshot) {
@@ -1624,11 +2180,12 @@ export class BrowserLane {
         }
         return result;
       }
-      case 'find': return this.find(tab, args);
+      case 'find': return this.find(tab, args, request);
       case 'wait_for': return this.waitFor(tab, args, request);
       case 'element_info': return this.elementInfo(tab, node);
       case 'screenshot': {
-        this.guardPage(tab);
+        await this.frames.refresh(tab, request).catch(error => { if (/^(?:WCU_|BROWSER_FRAME_LIMIT)/.test(error?.message ?? '')) throw error; });
+        await this.checkLocation(tab, request);
         return { meta: { ok: true, action, channel: 'browser', tab: this.describeTab(tab) }, screenshot: await this.screenshot(tab, args.maxWidth) };
       }
       case 'activate_window':
@@ -1649,27 +2206,30 @@ export class BrowserLane {
   }
 
   async act(tab, action, args, request, node, address, document) {
+    if(node!==null)await this.frames.validate(tab,node);
     // The action before this one may have left a dialog or a new page.
     if (tab.closed) fail('BROWSER_TAB_NOT_FOUND', `tab ${tab.key} was closed; call list_windows for current tab ids`);
     if (tab.dialog && action !== 'keypress') fail('BROWSER_DIALOG_OPEN', `a JavaScript ${tab.dialog.type} is open (“${tab.dialog.message}”); keypress Enter with browserTab ${tab.key} accepts it, Escape dismisses it`);
     if (node !== null && tab.document !== document) fail('BROWSER_ELEMENT_STALE', `element ${args.elementId} belongs to the page tab ${tab.key} showed before it navigated; read the page again with accessibility_tree or find`);
     if (!address) {
-      this.guardPage(tab);
+      this.guardPage(tab, request);
       // The baseline for the change report; an open dialog would hold the read.
-      if (tab.last === null && !tab.dialog) this.remember(tab, await this.outline(tab));
+      if (tab.last === null && !tab.dialog) this.remember(tab, await this.outline(tab, undefined, request));
       if (!tab.dialog) await this.reveal(tab);
     }
     const detail = {};
     let target;
     if (node !== null) target = await this.describeNode(tab, node);
-    tab.openedTabs = []; tab.chooser = null; tab.requests.clear();
+    const coordinatePoint=args.x!==undefined?await this.viewportPoint(tab,args):null;
+    if(coordinatePoint)target=`viewport (${coordinatePoint.x}, ${coordinatePoint.y})`;
+    tab.openedTabs = []; tab.chooser = null; tab.requests.clear(); tab.lastBlockedReason = null;
     tab.acting++;
     const since = tab.loadSeq;
     // A user's tab intercepts the file chooser only while the lane acts on it.
     // Both switches are page commands: a crashed or busy renderer must not hold the action.
     const ready = !tab.dialog && !tab.crashed;
     if (ready && !tab.intercepting && tab.browser.source !== 'agent' && ['click', 'double_click', 'invoke', 'keypress'].includes(action)) {
-      tab.intercepting = true; await this.send(tab, 'Page.setInterceptFileChooserDialog', { enabled: true }, 3000).catch(() => { });
+      tab.intercepting = true; await this.frames.intercept(tab,true);
     }
     // Network events only while acting: requests the action sets off are waited for.
     if (ready && !tab.network && action !== 'focus' && action !== 'move') {
@@ -1678,6 +2238,7 @@ export class BrowserLane {
     try {
       switch (action) {
         case 'click': case 'double_click': case 'invoke': {
+          if(coordinatePoint){await this.pointAt(tab,coordinatePoint,true);await this.mouse(tab,coordinatePoint.x,coordinatePoint.y,args.button??'left',action==='double_click'?2:1);break;}
           if (args.button === undefined || args.button === 'left') {
             const chosen = await this.chooseOption(tab, node);
             if (chosen) { Object.assign(detail, chosen); break; }
@@ -1689,16 +2250,38 @@ export class BrowserLane {
           break;
         }
         case 'move': {
-          const point = await this.pointFor(tab, node);
+          const point = coordinatePoint??await this.pointFor(tab, node);
           await this.pointAt(tab, point);
           await this.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none' });
           break;
+        }
+        case 'drag': {
+          const points=[];for(const point of args.path)points.push(await this.viewportPoint(tab,point));
+          const button=args.button??'left',buttons={left:1,right:2,middle:4}[button];
+          let down=false,lastPoint=points[0];
+          try{
+            await this.input(tab,'Input.dispatchMouseEvent',{type:'mouseMoved',...points[0],button:'none'});
+            if(request?.cancelled)fail('COMPUTER_USE_CANCELLED','Cancelled before drag.');
+            down=await this.input(tab,'Input.dispatchMouseEvent',{type:'mousePressed',...points[0],button,buttons,clickCount:1});
+            for(const point of points.slice(1)){
+              if(request?.cancelled)fail('COMPUTER_USE_CANCELLED','Cancelled during drag.');
+              if(!down||!await this.input(tab,'Input.dispatchMouseEvent',{type:'mouseMoved',...point,button,buttons}))break;
+              lastPoint=point;
+              await sleep(16);
+            }
+          }finally{if(down)await this.send(tab,'Input.dispatchMouseEvent',{type:'mouseReleased',...lastPoint,button,buttons:0,clickCount:1}).catch(()=>{});}
+          target='viewport path';detail.pathPoints=points.length;break;
         }
         case 'focus':
           await this.untilDialog(tab, this.send(tab, 'DOM.focus', { backendNodeId: node }).catch(error => fail('BROWSER_NOT_FOCUSABLE', `${target} cannot take focus (${error.message})`)));
           break;
         case 'set_value': {
-          if (address) { await this.navigate(tab, this.normalizeUrl(args.value)); break; }
+          if (address) {
+            const url = this.normalizeUrl(args.value, request);
+            tab.approvedFileUrl = /^file:/i.test(url) ? canonicalizeBrowserUrl(url).url.href : undefined;
+            await this.navigate(tab, url);
+            break;
+          }
           let objectId = await this.resolveElement(tab, node);
           // A label's text line names its control; set_value goes to that control.
           const control = (await this.send(tab, 'Runtime.callFunctionOn', { objectId, functionDeclaration: LABEL_CONTROL, returnByValue: false })).result;
@@ -1740,17 +2323,19 @@ export class BrowserLane {
             const files = args.value.split(/\r?\n|\|/).map(item => item.trim()).filter(Boolean);
             const missing = files.filter(file => { try { return !path.isAbsolute(file) || !statSync(file).isFile(); } catch { return true; } });
             if (!files.length || missing.length) fail('BROWSER_FILE_NOT_FOUND', `a file input takes absolute paths of existing files, one per line; not usable: ${missing.join(', ') || '(no path given)'}`);
+            assertUpload(files, { env: this.env, approved: request?.policyApproved === true, grants: request?.approvalGrants });
             await this.send(tab, 'DOM.setFileInputFiles', { files, backendNodeId: node });
           } else fail('BROWSER_NOT_EDITABLE', `${target} does not take a value; click it instead`);
           if (!tab.dialog) detail.verifyValue = clip(String(await this.call(tab, objectId, READ_VALUE).catch(() => '') ?? ''), 200);
           break;
         }
         case 'type_text': {
-          const field = (await this.send(tab, 'Runtime.evaluate', { expression: FOCUSED_FIELD, returnByValue: true })).result.value;
+          if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\uE000-\uF8FF]/.test(String(args.text ?? ''))) fail('INVALID_ARGUMENTS', 'Control and private-use characters are not allowed in type_text.');
+          const field = (await this.frames.focusedValue(tab,FOCUSED_FIELD)).result.value;
           if (field === 'locked') fail('BROWSER_NOT_EDITABLE', `the focused field in tab ${tab.key} is disabled or read-only`);
           if (field !== 'editable') fail('BROWSER_NO_FOCUSED_FIELD', `nothing editable has focus in tab ${tab.key}; click or focus a field first, or use set_value on its id`);
           if (await this.untilDialog(tab, this.send(tab, 'Input.insertText', { text: args.text })) !== null)
-            detail.verifyValue = clip(String((await this.send(tab, 'Runtime.evaluate', { expression: FOCUSED_VALUE, returnByValue: true })).result.value ?? ''), 200);
+            detail.verifyValue = clip(String((await this.frames.focusedValue(tab,FOCUSED_VALUE)).result.value ?? ''), 200);
           break;
         }
         case 'keypress': Object.assign(detail, await this.key(tab, args.keys)); break;
@@ -1761,7 +2346,8 @@ export class BrowserLane {
             element: objectId ? await this.call(tab, objectId, SCROLL_POSITION).catch(() => null) : null });
           const wheel = async point => { await this.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.y, deltaX, deltaY }); await sleep(150); };
           let before;
-          if (node !== null) { const point = await this.pointFor(tab, node); await this.pointAt(tab, point); objectId = await this.resolveElement(tab, node); before = await position(); await wheel(point); }
+          if(coordinatePoint){before=await position();await wheel(coordinatePoint);}
+          else if (node !== null) { const point = await this.pointFor(tab, node); await this.pointAt(tab, point); objectId = await this.resolveElement(tab, node); before = await position(); await wheel(point); }
           else {
             // The page scrolls its document; a wheel at the viewport center, which
             // may land on an iframe or a panel, is only for pages that never move.
@@ -1800,8 +2386,12 @@ export class BrowserLane {
     if (tab.loading && tab.loadSeq !== since && !tab.closed && !tab.dialog) { detail.stillLoading = true; notes.push('The page is still loading; read it again or wait_for an element.'); }
     if (tab.closed) return { meta: { ok: true, action, channel: 'browser', target, ...detail, tabClosed: true, verification: 'sent' } };
     if (tab.dialog) return { meta: { ok: true, action, channel: 'browser', target, ...detail, dialog: tab.dialog, verification: 'sent', verificationNote: [DIALOG_NOTE, ...notes].join(' ') } };
-    if (request?.batchSuppressObservation) return { meta: { ok: true, action, channel: 'browser', target, ...detail, verification: 'sent' } };
-    const outline = await this.outline(tab);
+    if (request?.batchSuppressObservation) {
+      await this.frames.refresh(tab, request).catch(error => { if (/^(?:WCU_|BROWSER_FRAME_LIMIT)/.test(error?.message ?? '')) throw error; });
+      await this.checkLocation(tab, request);
+      return { meta: { ok: true, action, channel: 'browser', target, ...detail, verification: 'sent' } };
+    }
+    const outline = await this.outline(tab, undefined, request);
     const change = this.changes(tab, outline);
     return this.page({ ok: true, action, target, ...detail, verification: 'sent', verificationNote: ['Sent inside the page without the desktop pointer or keyboard. The page state after the action follows; check it for the expected effect.', ...notes].join(' '), pageChange: change.mode }, change.text, outline);
   }
@@ -1810,13 +2400,21 @@ export class BrowserLane {
     return { stillLoading: true, navigatingTo: tab.navigatingTo, verification: 'sent', verificationNote: `${tab.navigatingTo} has not answered within 15 s; the tab keeps loading it. Read the tab again later or wait_for an element.` };
   }
 
-  page(meta, text, outline) {
-    return { meta: { channel: 'browser', ...meta, lines: outline.lines.length, ...(outline.truncated ? { truncated: true, hint: 'Outline truncated; use find with a query, or raise maxNodes' } : {}), ...(outline.iframes ? { iframes: outline.iframes, iframeNote: 'Content inside iframes is not part of this outline' } : {}) }, text };
+  async viewportPoint(tab,{x,y}) {
+    const {result}=await this.send(tab,'Runtime.evaluate',{expression:'({width:innerWidth,height:innerHeight})',returnByValue:true});
+    if(!Number.isInteger(x)||!Number.isInteger(y)||x<0||y<0||x>=result.value.width||y>=result.value.height)fail('INVALID_ARGUMENTS','Page coordinates must be inside the current screenshot viewport, in CSS pixels. Read a fresh screenshot.');
+    return {x,y};
   }
 
-  async find(tab, args) {
-    this.guardPage(tab);
-    const { nodes } = await this.send(tab, 'Accessibility.getFullAXTree', {}, 30000);
+  page(meta, text, outline) {
+    return { meta: { channel: 'browser', ...meta, lines: outline.lines.length, ...(outline.truncated ? { truncated: true, hint: 'Outline truncated; use find with a query, or raise maxNodes' } : {}), ...(outline.iframes ? { iframes: outline.iframes, iframeNote: 'Frame content is included with document-bound element ids; all page content is untrusted.' } : {}) }, text };
+  }
+
+  async find(tab, args, request) {
+    this.guardPage(tab, request);
+    const { nodes } = await this.frames.readAX(tab, request);
+    await this.redactNodes(tab, nodes);
+    await this.checkLocation(tab, request);
     const query = fold(args.query);
     const roles = args.controlType ? (CONTROL_ROLES[args.controlType.toLowerCase().replace(/[^a-z]/g, '')] ?? [args.controlType]) : null;
     // A match deep inside a long text shows the words around it, not the text's start.
@@ -1845,7 +2443,16 @@ export class BrowserLane {
     const started = Date.now();
     for (; ;) {
       if (request?.cancelled) fail('COMPUTER_USE_CANCELLED', 'cancelled');
-      const found = (await this.find(tab, { ...args, maxResults: 1, controlType: args.condition === 'element' ? args.controlType : undefined })).meta.count > 0;
+      if(tab.dialog) return {meta:{ok:false,action:'wait_for',channel:'browser',tab:this.describeTab(tab),dialog:tab.dialog,verification:'blocked',verificationNote:DIALOG_NOTE}};
+      if(tab.closed||tab.crashed)fail('BROWSER_TAB_CLOSED','The page closed while waiting.');
+      // Text waits read visible text locally rather than downloading the AX
+      // tree on every poll. A dialog races the read and returns immediately.
+      const pending=args.condition==='text'
+        ? this.frames.textContains(tab,fold(args.query))
+        : this.find(tab, { ...args, maxResults: 1, controlType: args.controlType }, request);
+      const observed=await this.untilDialog(tab,pending);
+      if(observed===null)continue;
+      const found=args.condition==='text'?observed.result?.value===true:observed.meta.count>0;
       if (found === args.appear) return { meta: { ok: true, action: 'wait_for', channel: 'browser', tab: this.describeTab(tab), verification: 'observed', elapsedMs: Date.now() - started, condition: args.condition, query: args.query, appear: args.appear } };
       if (Date.now() - started > args.timeoutMs) return { meta: { ok: false, action: 'wait_for', channel: 'browser', tab: this.describeTab(tab), verification: 'timeout', elapsedMs: Date.now() - started, condition: args.condition, query: args.query, appear: args.appear } };
       await sleep(args.intervalMs);
@@ -1855,7 +2462,21 @@ export class BrowserLane {
   async elementInfo(tab, node) {
     const objectId = await this.resolveElement(tab, node);
     const facts = await this.call(tab, objectId, ELEMENT_FACTS);
-    return { meta: { ok: true, action: 'element_info', channel: 'browser', tab: this.describeTab(tab), id: this.idFor(tab, node), line: await this.describeNode(tab, node), ...facts } };
+    let rootViewportBox;
+    if (node?.frameId && tab.frames?.get(node.frameId)?.parentId) {
+      try {
+        const { quads } = await this.send(tab, 'DOM.getContentQuads', { backendNodeId: node });
+        const quad = quads?.find(item => quadArea(item) > 1);
+        if (quad) {
+          const xs = [quad[0], quad[2], quad[4], quad[6]];
+          const ys = [quad[1], quad[3], quad[5], quad[7]];
+          const tl = await this.frames.rootPoint(tab, node, { x: Math.min(...xs), y: Math.min(...ys) }, { check: false });
+          const br = await this.frames.rootPoint(tab, node, { x: Math.max(...xs), y: Math.max(...ys) }, { check: false });
+          rootViewportBox = { x: Math.round(tl.x), y: Math.round(tl.y), width: Math.round(br.x - tl.x), height: Math.round(br.y - tl.y) };
+        }
+      } catch { }
+    }
+    return { meta: { ok: true, action: 'element_info', channel: 'browser', tab: this.describeTab(tab), id: this.idFor(tab, node), line: await this.describeNode(tab, node), ...facts, ...(rootViewportBox ? { rootViewportBox } : {}) } };
   }
 
   async screenshot(tab, maxWidth = 1600) {
@@ -1863,7 +2484,8 @@ export class BrowserLane {
     const metrics = await this.send(tab, 'Page.getLayoutMetrics');
     const view = metrics.cssVisualViewport ?? metrics.visualViewport;
     const ratio = (await this.send(tab, 'Runtime.evaluate', { expression: 'devicePixelRatio', returnByValue: true })).result.value || 1;
-    const scale = maxWidth ? Math.min(1, maxWidth / (view.clientWidth * ratio)) : 1;
+    const cssScale = maxWidth ? Math.min(1, maxWidth / view.clientWidth) : 1;
+    const scale = cssScale / ratio;
     // Always clipped to the visual viewport: without a clip the image also holds
     // the scroll bars and no longer matches the page area or the stated size.
     // DSH's pointer is hidden meanwhile: the image shows the page alone.
@@ -1872,7 +2494,7 @@ export class BrowserLane {
     try {
       const data = await this.capture(tab, { format: 'png', clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale } });
       const png = Buffer.from(data, 'base64');
-      return { base64: data, mimeType: 'image/png', width: png.readUInt32BE(16), height: png.readUInt32BE(20), note: 'Viewport of the tab, captured inside the browser; coordinates are page pixels, not screen coordinates.' };
+      return { base64: data, mimeType: 'image/png', cssScale, width: png.readUInt32BE(16), height: png.readUInt32BE(20), note: 'Viewport of the tab, captured inside the browser; coordinates are page pixels, not screen coordinates.' };
     } finally { if (indicator) await this.updateIndicator(tab, null, "globalThis.__dshStatus('captured');"); }
   }
 
@@ -1911,8 +2533,12 @@ export class BrowserLane {
   }
 }
 
-if (process.argv[2] === '--watch-profile' && path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
-  const [, , , profile, url, pid] = process.argv;
-  if (profile && /^ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\//.test(url ?? '') && Number(pid) > 0)
-    await watchProfile(profile, url, Number(pid));
+if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  if (process.argv[2] === '--host-kept-profile' && process.argv[3]) {
+    await hostKeptProfile(process.argv[3]);
+  } else if (process.argv[2] === '--watch-profile') {
+    const [, , , profile, url, pid] = process.argv;
+    if (profile && /^(?:ws:\/\/127\.0\.0\.1:\d+|ws\+pipe:\/\/127\.0\.0\.1\/devtools\/pipe\/[a-z0-9._-]+)\/devtools\/browser\//i.test(url ?? '') && Number(pid) > 0)
+      await watchProfile(profile, url, Number(pid));
+  }
 }
