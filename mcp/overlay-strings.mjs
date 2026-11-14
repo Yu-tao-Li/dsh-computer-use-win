@@ -36,6 +36,7 @@ const zh = {
   image: '（图片）',
   imageNamed: '（图片：{0}）',
   hintUnlocked: '拖标题移动 · 边缘缩放 · 移开后自动锁定',
+  hintPreview: '拖标题移动 · 边缘缩放 · 点 × 完成调整',
   hintAdjust: '拖标题移动 · 边缘缩放 · 滚动查看',
   // Step names: [page, window] for tools that act on either.
   labels: {
@@ -111,6 +112,7 @@ const en = {
   image: '(image)',
   imageNamed: '(image: {0})',
   hintUnlocked: 'Drag title to move · edges to resize · locks on leave',
+  hintPreview: 'Drag title to move · edges to resize · click × when done',
   hintAdjust: 'Drag title to move · edges to resize · scroll to read',
   labels: {
     snapshot: ['Read the page', 'Read the window'], accessibility_tree: ['Read the UI structure'], list_windows: ['Find a browser or window'],
@@ -181,6 +183,7 @@ const ru = {
   image: '(картинка)',
   imageNamed: '(картинка: {0})',
   hintUnlocked: 'Перетащите заголовок · края меняют размер · уберите мышь — окно заблокируется',
+  hintPreview: 'Перетащите заголовок · края — размер · × — готово',
   hintAdjust: 'Тяните заголовок, чтобы сдвинуть · края — размер · колесо — прокрутка',
   labels: {
     snapshot: ['Прочитать страницу', 'Прочитать окно'],
@@ -271,8 +274,15 @@ export function indicatorText(text, locale) {
 export const HELPER_KEYS = Object.freeze(['indicatorDefault', 'stopHint', 'headerWorking', 'headerDone', 'headerDoneOne', 'headerDoneFew', 'headerFailed', 'headerStopped', 'took',
   'statusThinking', 'statusActing', 'statusReplying', 'statusStopped', 'statusWorking', 'stepHeading', 'stepActions', 'listSeparator', 'actionError',
   'summaryResult', 'summaryStep', 'summaryUnavailable', 'summarizingResult', 'summarizing', 'thinkingHeading', 'replyHeading', 'waiting',
-  'image', 'imageNamed', 'hintUnlocked', 'hintAdjust']);
+  'image', 'imageNamed', 'hintUnlocked', 'hintPreview', 'hintAdjust']);
+const cachedHelperStrings = new Map();
 export function helperStrings(locale) {
-  const table = overlayStrings(locale);
-  return Object.fromEntries(HELPER_KEYS.map(key => [key, table[key]]));
+  const key = overlayLocale(locale);
+  let cached = cachedHelperStrings.get(key);
+  if (!cached) {
+    const table = OVERLAY_STRINGS[key];
+    cached = Object.freeze(Object.fromEntries(HELPER_KEYS.map(name => [name, table[name]])));
+    cachedHelperStrings.set(key, cached);
+  }
+  return cached;
 }

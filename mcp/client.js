@@ -315,24 +315,18 @@ window.__ModuleLoader__.load({
     "nav": "电脑操控",
     "title": "电脑操控（Computer Use）",
     "intro": "让 DSH 操作 Windows 桌面程序和网页。",
-    "mode": "工具模式",
     "lite": "精简",
     "full": "全部",
-    "modeHint": "选择启动时加载的工具。",
     "indicator": "屏幕边缘与提示条",
-    "indicatorHint": "屏幕四周发光并显示提示条；空闲 30 秒后自动收起。",
+    "indicatorHint": "操作时屏幕四周发光并亮提示条，空闲 30 秒后收起。",
     "text": "提示文字",
     "position": "提示位置",
     "top": "顶部",
     "bottom": "底部",
     "delay": "操作后保留提示",
     "delayHint": "操作结束后提示再停留多久，200–3000 毫秒。",
-    "corner": "用鼠标停止操作",
-    "cornerHint": "鼠标停在左上角约半秒，拒绝后续输入；移开后可继续。",
     "stop": "停止操作",
-    "stopHint": "按 Esc 立刻停止这一轮操作，下次任务照常可用；后台的网页操作请用 DSH 的停止按钮。",
-    "resume": "恢复桌面控制",
-    "resumed": "已请求恢复桌面控制",
+    "stopHint": "按 Esc 立刻停下当前操作，下轮照常；后台网页请用 DSH 停止按钮。",
     "preview": "预览",
     "previewed": "已请求预览",
     "save": "保存更改",
@@ -343,17 +337,9 @@ window.__ModuleLoader__.load({
     "invalid": "请填写 1–120 字的单行提示文字，并将隐藏延时设为 200–3000 的整数。",
     "persistFailed": "宿主未确认设置已保存，请刷新后重试。",
     "toolsTitle": "工具",
-    "toolsHint": "先选择整体加载方案，需要逐项调整时选择“自定义”。",
     "liteSummary": "只加载常用工具，减少上下文占用",
     "fullSummary": "加载全部桌面工具，默认推荐",
-    "liteCount": "常用工具",
-    "fullCount": "全部工具",
-    "modeAfter": "切换模式会等当前动作结束后生效。",
     "indicatorTitle": "接管提示",
-    "previewHint": "请先保存更改，再预览。",
-    "previewOff": "提示已关闭",
-    "previewOn": "接管时的屏幕示意",
-    "previewNote": "提示不抢焦点，鼠标可以穿透。",
     "appearance": "更多选项",
     "escTitle": "按 Esc 停止",
     "extraStop": "自定义停止方式",
@@ -361,15 +347,13 @@ window.__ModuleLoader__.load({
     "clean": "更改后点击保存",
     "ms": "毫秒",
     "indicatorDefault": "DSH 正在控制电脑",
-    "githubLink": "GitHub · dsh-computer-use-win ↗",
-    "starRequest": "您的 Star 就是我更新的动力，球球了，这对我很重要！",
     "issueBefore": "如有问题，欢迎去",
     "issueLink": "提 Issue",
     "issueAfter": "，您来许愿，我来实现！",
     "starPrefix": "您的 ",
     "starLink": "Star",
-    "starAfter": " 就是我更新的动力，球球了，这对我很重要！",
-    "shortcutHint": "再加一个停止键：点“录制快捷键”后按下想用的键，保存后生效；Esc 始终可用。",
+    "starAfter": " 就是我更新的动力！",
+    "shortcutHint": "再设一个停止键：点“录制快捷键”按下想用的键并保存，Esc 始终有效。",
     "record": "录制快捷键",
     "rerecord": "重新录制",
     "cancelRecord": "取消录制",
@@ -385,18 +369,13 @@ window.__ModuleLoader__.load({
     "fullNote": "展开",
     "compactNoteTitle": "折叠为 dsh-computer-use-win 链接，之后一直保持",
     "fullNoteTitle": "展开完整的 Star 与 Issue 说明",
-    "indicatorIntro": "DSH 操作桌面时，用屏幕边缘、提示条和鼠标标签提醒你。",
-    "stopIntro": "随时中断当前这一轮桌面操作。",
-    "projectLink": "dsh-computer-use-win",
     "projectTitle": "在 GitHub 上打开 dsh-computer-use-win（在新窗口打开）",
     "cursorIndicator": "突出显示鼠标",
-    "cursorIndicatorHint": "给鼠标加上光斑和 DSH 标签，方便看清它点了哪里。",
+    "cursorIndicatorHint": "在鼠标旁加光斑和 DSH 标签，一眼看清点击位置。",
     "customTools": "自定义工具清单",
     "toolsSelected": "已启用",
-    "toolsUnit": "个工具",
     "allTools": "全选",
     "noTools": "全部关闭",
-    "toolAfter": "保存后，会在当前动作结束时更新可用工具。",
     "toolGroup_observe": "屏幕与内容",
     "toolGroup_input": "鼠标与键盘",
     "toolGroup_windows": "窗口与控件",
@@ -455,29 +434,27 @@ window.__ModuleLoader__.load({
     "toolHint_tools": "查看说明并管理已获准的工具",
     "custom": "自定义",
     "customSummary": "自己选择需要加载的工具",
-    "customMemory": "切换方案会保留自定义清单。更改后点击保存。",
     "lazy": "懒启动",
     "lazySummary": "启动只加载管理入口，桌面工具按需加载",
     "lazyCount": "启动 1 项 · 允许全部",
-    "lazyHint": "开始桌面任务时，DSH 先加载所需工具，会多一次调用。",
     "remoteVisible": "远程与录屏可见",
-    "remoteVisibleHint": "请求让录屏、共享和远程桌面看到提示与浮窗；开启时，浮窗里的思考也可能被录入。",
+    "remoteVisibleHint": "允许录屏、共享和远程桌面看到提示与浮窗（含浮窗内的思考）。",
     "pluginDescription": "让 AI 操作 Windows 桌面程序和网页，可设置浏览器操控、接管提示、停止快捷键和工具。",
     "openSettings": "点击进行具体设置 →",
     "notLoaded": "未能读取电脑操控设置。宿主尚未提供此配置，请刷新页面或重新启动 DSH 后重试。",
     "loadingSettings": "正在读取电脑操控设置…",
     "reloadSettings": "刷新页面",
     "browserAttachUser": "连接现有浏览器（实验）",
-    "browserAttachUserHint": "直接操作你正在用的 Chrome 或 Edge，带着你的登录；每次连接都要你点“允许”。",
+    "browserAttachUserHint": "在你的 Chrome 或 Edge 中直接操作，保留登录；每次连接需你点“允许”。",
     "myBrowser": "我的浏览器",
     "attachSetup": "连接前先设置",
-    "attachStep1": "在浏览器里打开下面的地址，勾选“允许远程调试此浏览器实例”。",
-    "attachStep2": "DSH 请求连接时，在浏览器里点“允许”；被拒绝或超时后不会自动重试。",
+    "attachStep1": "在你的浏览器打开下面网址，开启“允许远程调试此浏览器实例”。",
+    "attachStep2": "DSH 发起连接时在浏览器点“允许”；若拒绝或超时，本轮不再重试。",
     "attachRisks": "连接范围与风险",
-    "attachRisk1": "DSH 能以你的身份操作这个浏览器里所有已登录的网站；发送、付款、删除前它被要求先问你，但不能保证。",
-    "attachRisk2": "网页内容可能诱导 DSH 做你没要求的事；开着远程调试时，本机其他程序也能请求控制浏览器。",
+    "attachRisk1": "DSH 会以你的身份操作已登录网站（发消息、下单、删除）；虽会尽量先问你，但不绝对保证。",
+    "attachRisk2": "恶意网页可能诱导 DSH 误操作；开启远程调试期间，本机其他程序也能请求控制该浏览器。",
     "progressOverlay": "显示思考与操作浮窗",
-    "progressOverlayHint": "在屏幕一角显示 DSH 当前的步骤和思考；半透明、不挡点击，一轮结束后再留 20 秒。",
+    "progressOverlayHint": "屏幕一角展示 DSH 进度与思考，半透明不挡点击，结束后停留 20 秒。",
     "progressSettings": "思考与操作浮窗",
     "openProgress": "打开浮窗并调整",
     "progressOpacity": "背景不透明度（%）",
@@ -487,10 +464,10 @@ window.__ModuleLoader__.load({
     "progressX": "X 坐标",
     "progressY": "Y 坐标",
     "progressLocked": "锁定并穿透鼠标",
-    "progressLockedHint": "锁定后浮窗不挡鼠标；要移动或缩放，把鼠标停在浮窗右上角的锁上，会临时解锁。",
+    "progressLockedHint": "锁定后鼠标可穿透；想拖动或调整大小，将鼠标停在右上角锁标上即可。",
     "progressShortcut": "锁定快捷键",
-    "progressShortcutHint": "按一次锁定，再按一次解锁；例如 Ctrl+Alt+P，不能和停止键相同。",
-    "progressSync": "打开浮窗 60 秒，直接拖动和缩放，结果自动保存。",
+    "progressShortcutHint": "按下或输入组合键（如 Ctrl+Alt+P）切换锁定；留空不启用。",
+    "progressSync": "拖放或缩放自动保存，调好点 × 即可。",
     "progress_topRight": "右上角",
     "progress_topLeft": "左上角",
     "progress_bottomRight": "右下角",
@@ -499,37 +476,37 @@ window.__ModuleLoader__.load({
     "progressMode": "浮窗内容",
     "progressModeSource": "原文（默认）",
     "progressModeSummary": "AI 总结（多耗 token）",
-    "progressModeHint": "原文：直接显示 DSH 的思考和回复。AI 总结：改成一两句概括，会多花一点 token。",
+    "progressModeHint": "原文：完整展示 DSH 的思考。AI 总结：精简为一两句，会多耗 token。",
     "moreInfo": "说明",
     "browserTitle": "网页与浏览器",
-    "browserInfo": "DSH 使用独立浏览器，不带你的登录和历史；可选择保留登录，或连接现有浏览器。",
+    "browserInfo": "默认用干净的独立浏览器，不带你的账号与历史；可选记住登录或接管现有浏览器。",
     "browserApp": "浏览器类型",
-    "browserAppHint": "选择浏览器；“默认”优先跟随系统，再选已安装的 Chrome 或 Edge。",
+    "browserAppHint": "选 DSH 启动的浏览器；“默认”优先跟随系统，其次选 Chrome 或 Edge。",
     "browserApp_default": "默认浏览器",
     "browserApp_edge": "Edge",
     "browserApp_chrome": "Chrome",
     "browserApp_firefox": "Firefox 系（实验性）",
-    "firefoxNotice": "Firefox 为实验功能，只能在后台运行，无法手动登录；需要可见窗口时请选择 Chrome 或 Edge。",
+    "firefoxNotice": "Firefox 目前仅实验支持，只能在后台运行、无法手动登录；要看窗口请选 Chrome 或 Edge。",
     "learnMore": "了解更多",
     "browserAppShort": "默认",
     "browserSignIn": "保留网站登录",
-    "browserSignInHint": "在 DSH 浏览器里登录过的网站，下次还是登录状态；和你自己的浏览器互不影响。",
+    "browserSignInHint": "在 DSH 浏览器登录一次后长期记住，与你自己的浏览器互不干扰。",
     "signInSetup": "怎么用",
-    "signInStep1": "在 DSH 浏览器（蓝框窗口）里登录一次，以后都保持登录；你自己的浏览器不用做任何设置。",
-    "signInStep2": "需要登录时 DSH 会请你自己来；密码和验证码由你输入，DSH 不代填。",
-    "signInStepHidden": "现在看不到 DSH 浏览器：请先打开“显示 DSH 浏览器窗口”再登录。",
-    "signInStepEdge": "用 Edge 时会自动登录你的微软账户（必应、Outlook 等）；不想这样请选 Chrome。",
-    "signInStep3": "登录信息保存在下面的文件夹，关掉开关也不会删除；要清除，请退出 DSH 后删掉这个文件夹。",
+    "signInStep1": "在蓝框的 DSH 浏览器里登录一次，之后自动保持；你自己的浏览器无需设置。",
+    "signInStep2": "需要登录时会暂停请你亲自操作，密码和验证码由你输入，DSH 不代填。",
+    "signInStepHidden": "当前窗口已隐藏：首次登录请先开启“显示 DSH 浏览器窗口”，登好后可关回后台。",
+    "signInStepEdge": "选 Edge 会自动登录系统微软账户（必应、Outlook 等）；介意请改选 Chrome。",
+    "signInStep3": "登录数据存于下方文件夹，关掉开关仍会保留；如需清空，请退出 DSH 后删掉它。",
     "signInRisks": "风险",
-    "signInRisk1": "DSH 会以你的身份操作这些网站，可能发消息、下单、删除；它被要求先问你，但不能保证。",
-    "signInRisk2": "网页内容可能诱导 DSH 做你没要求的事。",
-    "signInRisk3": "DSH 浏览器开着时，本机其他程序也能连上它，并使用里面的登录。",
+    "signInRisk1": "DSH 会以你的身份操作已登录网站（发消息、下单、删除）；虽要求先问你，但不绝对。",
+    "signInRisk2": "恶意网页可能诱导 DSH 执行你未下达的操作。",
+    "signInRisk3": "登录保存在本地配置文件夹，同账户下的本机其他程序也能读取使用。",
     "copy": "复制",
     "copied": "已复制",
     "browserFirst": "优先使用网页控件",
-    "browserFirstHint": "优先在后台读写网页，不动你的鼠标；关闭后仍可按需使用网页控件。",
+    "browserFirstHint": "优先用网页通道后台操作，不抢你的鼠标；关闭后需要时仍可用。",
     "browserVisible": "显示 DSH 浏览器窗口",
-    "browserVisibleHint": "显示 DSH 浏览器的窗口；关掉后它在后台运行，看不到窗口。",
+    "browserVisibleHint": "在屏幕上显示 DSH 浏览器窗口；关闭则在后台静默运行。",
     "toolsInfo": "决定 DSH 启动时加载哪些工具；工具越少越省上下文。",
     "indicatorInfo": "DSH 动用你的鼠标和键盘时，在屏幕上提醒你；后台完成的操作不提醒。",
     "escAlways": "始终可用",
@@ -569,35 +546,32 @@ window.__ModuleLoader__.load({
     "seriesCount": "步操作",
     "stepError": "操作失败",
     "and": "，并",
-    "progressInfo": "显示 DSH 当前工作的浮窗，可以移动、缩放或关闭。",
+    "progressInfo": "显示当前步骤的浮窗；点 × 仅关闭本次窗口，不会关掉此功能。",
     "stopInfo": "按 Esc 停止 DSH 对鼠标和键盘的操作。",
-    "previewTitle": "在屏幕上演示接管提示，约 2 秒。",
+    "previewTitle": "保存接管提示设置并在屏幕上预览",
     "clearShortcutTitle": "去掉自定义停止键，只保留 Esc。",
     "browserChange": "保存后，浏览器设置在当前动作结束时生效，并关闭 DSH 浏览器。",
-    "toolsChange": "保存后，工具选择在当前动作结束时生效。"
+    "toolsChange": "保存后，工具选择在当前动作结束时生效。",
+    "instantSave": "即时生效",
+    "shortcutConflict": "锁定快捷键不能与停止快捷键相同。",
+    "invalidOverlay": "请填写有效范围内的浮窗数值与快捷键（Esc 不可用作锁定键）。"
   },
   "en": {
     "nav": "Computer Use",
     "title": "Computer Use",
     "intro": "Let DSH operate Windows desktop apps and web pages.",
-    "mode": "Tool mode",
     "lite": "Lite",
     "full": "All",
-    "modeHint": "Choose tools to load at startup.",
     "indicator": "Screen edges and banner",
-    "indicatorHint": "A glow around the screen and a banner; they hide after 30 idle seconds.",
+    "indicatorHint": "Lights a screen border glow and banner during control; hides after 30 idle seconds.",
     "text": "Banner text",
     "position": "Banner position",
     "top": "Top",
     "bottom": "Bottom",
     "delay": "Keep visible after an action",
     "delayHint": "How long the indicator stays after an action: 200–3000 ms.",
-    "corner": "Stop using the mouse",
-    "cornerHint": "Keep the pointer in the top-left corner for half a second to refuse input. Move it away to continue.",
     "stop": "Stop control",
-    "stopHint": "Esc stops this round at once; the next task works as usual. For background web work, use the stop button in DSH.",
-    "resume": "Resume desktop control",
-    "resumed": "Desktop control resume requested",
+    "stopHint": "Esc stops this round at once; the next task works normally. Use DSH stop button for background web tasks.",
     "preview": "Preview",
     "previewed": "Preview requested",
     "save": "Save changes",
@@ -608,17 +582,9 @@ window.__ModuleLoader__.load({
     "invalid": "Use 1–120 characters on one line and an integer hide delay between 200 and 3000.",
     "persistFailed": "The host did not confirm the saved settings. Refresh and retry.",
     "toolsTitle": "Tools",
-    "toolsHint": "Choose a loading preset. Select Custom to choose individual tools.",
     "liteSummary": "Common tools with less context",
     "fullSummary": "Load every desktop tool; the default",
-    "liteCount": "Common tools",
-    "fullCount": "All tools",
-    "modeAfter": "Mode changes take effect after the current action finishes.",
     "indicatorTitle": "Takeover indicator",
-    "previewHint": "Save changes before previewing.",
-    "previewOff": "Indicator is off",
-    "previewOn": "Screen preview during control",
-    "previewNote": "The indicator keeps focus and lets clicks pass through.",
     "appearance": "More options",
     "escTitle": "Press Esc to stop",
     "extraStop": "Custom stop shortcut",
@@ -626,15 +592,13 @@ window.__ModuleLoader__.load({
     "clean": "Save after making changes",
     "ms": "ms",
     "indicatorDefault": "DSH is controlling your computer",
-    "githubLink": "GitHub · dsh-computer-use-win ↗",
-    "starRequest": "Your Star keeps me motivated to update this project. Please, it means a lot to me!",
     "issueBefore": "Found a problem or have a wish? ",
     "issueLink": "Open an issue",
     "issueAfter": " — you make the wish, I’ll work on it!",
     "starPrefix": "Your ",
     "starLink": "Star",
-    "starAfter": " keeps me motivated to update this project. Please, it means a lot to me! ",
-    "shortcutHint": "Add another stop key: click Record shortcut, press the keys, then save. Esc always works.",
+    "starAfter": " keeps this project moving! ",
+    "shortcutHint": "Add an extra stop key: click Record shortcut, press a key, then save. Esc always works.",
     "record": "Record shortcut",
     "rerecord": "Record again",
     "cancelRecord": "Cancel recording",
@@ -650,18 +614,13 @@ window.__ModuleLoader__.load({
     "fullNote": "Expand",
     "compactNoteTitle": "Collapse to the dsh-computer-use-win link; it stays collapsed",
     "fullNoteTitle": "Expand the full Star and Issue note",
-    "indicatorIntro": "Screen edges, a status pill and a pointer tag show when DSH is using the desktop.",
-    "stopIntro": "Interrupt the current operation series at any time.",
-    "projectLink": "dsh-computer-use-win",
     "projectTitle": "Open dsh-computer-use-win on GitHub (opens in a new window)",
     "cursorIndicator": "Highlight the pointer",
-    "cursorIndicatorHint": "Adds a glow and a DSH tag to the pointer so you can see where it clicks.",
+    "cursorIndicatorHint": "Adds a glow and DSH tag around the pointer so clicks are easy to spot.",
     "customTools": "Custom tool selection",
     "toolsSelected": "Enabled",
-    "toolsUnit": "tools",
     "allTools": "Select all",
     "noTools": "Disable all",
-    "toolAfter": "Saved tool changes take effect after the current action finishes.",
     "toolGroup_observe": "Screen and content",
     "toolGroup_input": "Mouse and keyboard",
     "toolGroup_windows": "Windows and controls",
@@ -720,29 +679,27 @@ window.__ModuleLoader__.load({
     "toolHint_tools": "Describe and manage user-allowed tools",
     "custom": "Custom",
     "customSummary": "Choose exactly which tools to load",
-    "customMemory": "Switching presets keeps your custom selection. Save to apply.",
     "lazy": "Lazy",
     "lazySummary": "Start with management only; load desktop tools on demand",
     "lazyCount": "1 at startup · all allowed",
-    "lazyHint": "DSH loads tools before a desktop task, adding one call.",
     "remoteVisible": "Visible in remote sessions and recordings",
-    "remoteVisibleHint": "Ask Windows to include indicators and overlays in recordings, sharing and remote sessions, including displayed reasoning.",
+    "remoteVisibleHint": "Allow recordings, screen sharing, and remote sessions to capture overlays (including displayed reasoning).",
     "pluginDescription": "Let the agent use Windows apps and web pages, with Browser Use, control indicators, stop shortcuts and tool selection.",
     "openSettings": "Click to configure →",
     "notLoaded": "Computer Use settings could not be read. The host has not exposed this configuration. Refresh or restart DSH.",
     "loadingSettings": "Loading Computer Use settings…",
     "reloadSettings": "Refresh page",
     "browserAttachUser": "Connect browser (experimental)",
-    "browserAttachUserHint": "Let DSH work in the Chrome or Edge you are using, with your sign-ins. You click Allow each time it connects.",
+    "browserAttachUserHint": "Control your active Chrome or Edge with existing sign-ins. Prompts Allow before each connection.",
     "myBrowser": "My browser",
     "attachSetup": "Set up before connecting",
-    "attachStep1": "Open the address below in the browser and turn on “Allow remote debugging for this browser instance”.",
-    "attachStep2": "When DSH asks to connect, click Allow in the browser. A refusal or timeout is not retried automatically.",
+    "attachStep1": "Open the address below in your browser and enable “Allow remote debugging for this browser instance”.",
+    "attachStep2": "Click Allow in the browser when DSH asks to connect. Refusals or timeouts are not retried automatically.",
     "attachRisks": "Access and risks",
-    "attachRisk1": "DSH can act as you on every signed-in site in this browser. It is told to ask before sending, paying or deleting, but that cannot be guaranteed.",
-    "attachRisk2": "Page content can try to mislead DSH. While remote debugging is on, other programs on this computer can also ask to control the browser.",
+    "attachRisk1": "DSH acts as you on every signed-in site here. Told to ask before sending, paying, or deleting, though not guaranteed.",
+    "attachRisk2": "Malicious pages can try to mislead DSH. While remote debugging stays on, other local apps can also request browser control.",
     "progressOverlay": "Show reasoning and progress overlay",
-    "progressOverlayHint": "Shows the current step and reasoning of DSH in a corner of the screen. Translucent and click-through; stays 20 seconds after a turn.",
+    "progressOverlayHint": "Shows DSH current step and reasoning in a screen corner. Translucent, click-through, stays 20s after a turn.",
     "progressSettings": "Reasoning and progress overlay",
     "openProgress": "Open overlay to adjust",
     "progressOpacity": "Background opacity (%)",
@@ -752,10 +709,10 @@ window.__ModuleLoader__.load({
     "progressX": "X coordinate",
     "progressY": "Y coordinate",
     "progressLocked": "Lock and pass through mouse",
-    "progressLockedHint": "Locked: the overlay never blocks your mouse. To move or resize it, rest the pointer on the padlock in its top-right corner.",
+    "progressLockedHint": "When locked, clicks pass right through. Hover the top-right padlock icon briefly to move or resize.",
     "progressShortcut": "Lock shortcut",
-    "progressShortcutHint": "Press once to lock, again to unlock. For example Ctrl+Alt+P; must differ from the stop key.",
-    "progressSync": "Open for 60 seconds to drag and resize; changes save automatically.",
+    "progressShortcutHint": "Press or type a shortcut (e.g. Ctrl+Alt+P) to toggle lock; leave empty for none.",
+    "progressSync": "Drag or resize auto-saves; click × when done.",
     "progress_topRight": "Top right",
     "progress_topLeft": "Top left",
     "progress_bottomRight": "Bottom right",
@@ -764,37 +721,37 @@ window.__ModuleLoader__.load({
     "progressMode": "Overlay content",
     "progressModeSource": "Source (default)",
     "progressModeSummary": "AI summary (extra tokens)",
-    "progressModeHint": "Source: show the reasoning and replies of DSH as they are. AI summary: a sentence or two instead, using a few extra tokens.",
+    "progressModeHint": "Source shows full DSH reasoning. AI summary condenses it to one or two lines using a few extra tokens.",
     "moreInfo": "Details",
     "browserTitle": "Web and browser",
-    "browserInfo": "DSH uses a separate browser without your sign-ins or history. You can keep sign-ins or connect an existing browser.",
+    "browserInfo": "DSH starts a clean browser without your sign-ins or history. You can keep sign-ins or attach to your active browser.",
     "browserApp": "Browser type",
-    "browserAppHint": "Choose the DSH browser. Default prefers your system browser, then an installed Chrome or Edge.",
+    "browserAppHint": "Pick the DSH browser. Default follows your system browser, or falls back to Chrome or Edge.",
     "browserApp_default": "Default browser",
     "browserApp_edge": "Edge",
     "browserApp_chrome": "Chrome",
     "browserApp_firefox": "Firefox (experimental)",
-    "firefoxNotice": "Firefox is experimental and runs without a window or manual sign-in. Choose Chrome or Edge for a visible window.",
+    "firefoxNotice": "Firefox support is experimental and runs headless without manual sign-in. Choose Chrome or Edge for a visible window.",
     "learnMore": "Learn more",
     "browserAppShort": "Default",
     "browserSignIn": "Keep website sign-ins",
-    "browserSignInHint": "Sites you sign in to in the DSH browser stay signed in. Your own browser is not affected.",
+    "browserSignInHint": "Keep website sign-ins across tasks in the DSH browser, separate from your personal browser.",
     "signInSetup": "How it works",
-    "signInStep1": "Sign in once in the DSH browser (the window with the blue frame) and you stay signed in. Nothing to set up in your own browser.",
-    "signInStep2": "When a site needs a sign-in, DSH asks you to do it. You type passwords and codes yourself.",
-    "signInStepHidden": "The DSH browser is hidden now: turn on “Show the DSH browser window” to sign in.",
-    "signInStepEdge": "Edge signs in with your Windows Microsoft account (Bing, Outlook…). Choose Chrome to avoid that.",
-    "signInStep3": "Sign-ins are kept in the folder below, even after you turn this off. To remove them, exit DSH and delete the folder.",
+    "signInStep1": "Sign in once inside the blue-framed DSH browser window to stay logged in; your personal browser stays untouched.",
+    "signInStep2": "When a site asks to log in, DSH pauses for you to enter passwords and codes yourself.",
+    "signInStepHidden": "The DSH browser window is hidden: turn on “Show the DSH browser window” to sign in first, then turn it back off if you prefer.",
+    "signInStepEdge": "Edge signs in automatically with your Windows Microsoft account (Bing, Outlook…). Choose Chrome to avoid this.",
+    "signInStep3": "Sign-ins remain in the folder below even if switched off. To wipe them, exit DSH and delete that folder.",
     "signInRisks": "Risks",
-    "signInRisk1": "DSH acts as you on these sites and can send messages, place orders or delete things. It is told to ask first, but that cannot be guaranteed.",
-    "signInRisk2": "Page content can try to make DSH do things you did not ask for.",
-    "signInRisk3": "While the DSH browser is open, other programs on this computer can connect to it and use these sign-ins.",
+    "signInRisk1": "DSH acts as you on signed-in sites (messaging, orders, deletions); told to ask first, though not guaranteed.",
+    "signInRisk2": "Malicious page content can try to steer DSH into unintended actions.",
+    "signInRisk3": "Sign-ins live in a local profile folder that other programs under your Windows account can also read.",
     "copy": "Copy",
     "copied": "Copied",
     "browserFirst": "Prefer web page controls",
-    "browserFirstHint": "Prefer background page controls without moving your pointer. When off, page controls remain available on request.",
+    "browserFirstHint": "Prefer fast background page controls without moving your pointer; falls back seamlessly when turned off.",
     "browserVisible": "Show the DSH browser window",
-    "browserVisibleHint": "Show the window of the DSH browser. Off: it runs in the background with no window.",
+    "browserVisibleHint": "Show the DSH browser window on screen; when off, it runs silently in the background.",
     "toolsInfo": "Choose which tools DSH loads at startup; fewer tools use less context.",
     "indicatorInfo": "Shows on screen when DSH uses your mouse and keyboard. Background actions show nothing.",
     "escAlways": "Always on",
@@ -834,12 +791,15 @@ window.__ModuleLoader__.load({
     "seriesCount": "steps",
     "stepError": "Action failed",
     "and": ", then ",
-    "progressInfo": "A window showing what DSH is doing. You can move, resize or close it.",
+    "progressInfo": "Floating step view; clicking × closes the current window without turning the feature off.",
     "stopInfo": "Press Esc to stop DSH using your mouse and keyboard.",
-    "previewTitle": "Show the takeover indicator for about 2 seconds.",
+    "previewTitle": "Save indicator settings and preview on screen",
     "clearShortcutTitle": "Remove the custom stop key and keep Esc only.",
     "browserChange": "After saving, browser changes wait for the current action, then close the DSH browser.",
-    "toolsChange": "After saving, tool selection changes wait for the current action."
+    "toolsChange": "After saving, tool selection changes wait for the current action.",
+    "instantSave": "Saves instantly",
+    "shortcutConflict": "Lock shortcut cannot match the stop shortcut.",
+    "invalidOverlay": "Enter valid overlay numbers and a supported lock shortcut (Esc is reserved)."
   }
 };
     const defaultIndicatorTexts = [
@@ -859,6 +819,28 @@ window.__ModuleLoader__.load({
       if(!key&&event.keyCode>=48&&event.keyCode<=57)key=String.fromCharCode(event.keyCode);
       if(!key&&event.keyCode>=112&&event.keyCode<=135)key='F'+(event.keyCode-111);
       return key?[event.ctrlKey&&'Ctrl',event.altKey&&'Alt',event.shiftKey&&'Shift',event.metaKey&&'Win',key].filter(Boolean).join('+'):null;
+    }
+    const SHORTCUT_MODS=['Ctrl','Alt','Shift','Win'];
+    const SHORTCUT_MOD_MAP={ctrl:'Ctrl',control:'Ctrl',alt:'Alt',option:'Alt',shift:'Shift',win:'Win',meta:'Win',super:'Win'};
+    const SHORTCUT_SPECIAL_MAP={space:'Space',enter:'Enter',return:'Enter',tab:'Tab',backspace:'Backspace',delete:'Delete',del:'Delete',insert:'Insert',ins:'Insert',home:'Home',end:'End',pageup:'PageUp',pgup:'PageUp',pagedown:'PageDown',pgdn:'PageDown',up:'Up',arrowup:'Up',down:'Down',arrowdown:'Down',left:'Left',arrowleft:'Left',right:'Right',arrowright:'Right',pause:'Pause',capslock:'CapsLock',numlock:'NumLock',scrolllock:'ScrollLock'};
+    const SHORTCUT_KEY_RE=/^(?:[A-Z0-9]|F(?:[1-9]|1[0-9]|2[0-4])|Space|Enter|Tab|Backspace|Delete|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|Pause|CapsLock|NumLock|ScrollLock)$/;
+    function formatShortcutInput(raw){
+      const text=String(raw??'').trim();if(!text)return '';
+      const parts=text.split('+').map(part=>part.trim());
+      if(parts.some(part=>!part))return text;
+      const lowerKey=parts.pop().toLowerCase(),mods=[];
+      for(const part of parts){const mapped=SHORTCUT_MOD_MAP[part.toLowerCase()];if(!mapped||mods.includes(mapped))return text;mods.push(mapped);}
+      let key='';
+      if(/^[a-z0-9]$/.test(lowerKey))key=lowerKey.toUpperCase();
+      else if(/^f([1-9]|1[0-9]|2[0-4])$/.test(lowerKey))key='F'+lowerKey.slice(1);
+      else if(Object.hasOwn(SHORTCUT_SPECIAL_MAP,lowerKey))key=SHORTCUT_SPECIAL_MAP[lowerKey];
+      else return text;
+      return [...SHORTCUT_MODS.filter(m=>mods.includes(m)),key].join('+');
+    }
+    function isValidShortcut(value){
+      if(!value)return true;
+      const parts=String(value).split('+'),key=parts.pop();
+      return parts.every(p=>SHORTCUT_MODS.includes(p))&&new Set(parts).size===parts.length&&SHORTCUT_KEY_RE.test(key);
     }
     const css=`
       [data-wincu-settings]{--wcu-card:var(--dsw-alias-settings-card-fill,var(--dsw-alias-bg-layer-2,Canvas));--wcu-card-stroke:var(--dsw-alias-settings-card-stroke,var(--dsw-alias-border-l4,rgba(128,128,128,.34)));--wcu-sunken:var(--dsw-alias-bg-module-platform,color-mix(in srgb,var(--wcu-fg) 4%,var(--wcu-card)));--wcu-control:var(--dsw-alias-bg-layer-1,Canvas);--wcu-fg:var(--dsw-alias-label-primary,CanvasText);--wcu-muted:var(--dsw-alias-label-secondary,#61666b);--wcu-subtle:var(--dsw-alias-label-tertiary,#81858c);--wcu-line:var(--dsw-alias-border-l2,rgba(128,128,128,.2));--wcu-line-strong:var(--dsw-alias-border-l3,rgba(128,128,128,.3));--wcu-hover:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.1));--wcu-accent:var(--dsw-alias-state-business-primary,#4176e6);--wcu-primary:var(--dsw-alias-button-primary-fill,#0f1115);--wcu-primary-fg:var(--dsw-alias-label-primary-foreground,#fff);--wcu-selected:var(--dsw-static-neutral-bluish-400,#adb2b8);--wcu-tip-bg:var(--dsw-alias-tooltip-bg,#2b2f36);--wcu-tip-fg:#fff;color:var(--wcu-fg);font:14px/1.55 var(--dsw-font-family,-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif);max-width:720px;list-style:none;box-sizing:border-box;margin:0;padding:0 0 8px}
@@ -974,6 +956,8 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] .wcu-art .a-ghost{fill:none;stroke:var(--wcu-ink-strong);stroke-width:.9;stroke-dasharray:3 2}
       [data-wincu-settings] .wcu-art .a-open{fill:none;stroke:var(--wcu-accent);stroke-width:.9;stroke-dasharray:2 1.6}
       [data-wincu-settings] .wcu-art .a-eye{fill:none;stroke:var(--wcu-ink-strong);stroke-width:1.1;stroke-linecap:round;stroke-linejoin:round}
+      [data-wincu-settings] .wcu-art .a-lock{fill:none;stroke:#fff;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}
+      [data-wincu-settings] .wcu-art .a-lock-open{fill:none;stroke:var(--wcu-ink-strong);stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}
       [data-wincu-settings] .wcu-art .a-spot0{stop-color:var(--wcu-accent);stop-opacity:.42}
       [data-wincu-settings] .wcu-art .a-spot1{stop-color:var(--wcu-accent);stop-opacity:0}
       [data-wincu-settings] .wcu-art .a-tag{fill:#fff;font:700 7px/1 'Segoe UI',sans-serif}
@@ -1120,7 +1104,9 @@ window.__ModuleLoader__.load({
         ...(on?[h('circle',{cx:50,cy:33,r:21,fill:`url(#${id})`})]:[]),arrow(48,25),...(on?[box('a-acc',60,44,26,11,5.5),h('text',{className:'a-tag',x:73,y:51.9,textAnchor:'middle'},'DSH')]:[])),
       // One square per tool: filled loads at startup, dashed loads on demand, faint is off.
       tools:(loaded,allowed)=>drawing(...toolGroups.flatMap(([,entries],row)=>entries.map(([name],col)=>box(loaded.has(name)?'a-acc':allowed.has(name)?'a-open':'a-ink',15.5+col*12,12.5+row*12,9,9,2.2)))),
-      esc:()=>drawing(box('a-ink2',33,19,46,34,7),box('a-win',33,16,46,34,7),box('a-frame',33,16,46,34,7),h('text',{className:'a-cap',x:56,y:37.2,textAnchor:'middle'},'Esc'))
+      esc:()=>drawing(box('a-ink2',33,19,46,34,7),box('a-win',33,16,46,34,7),box('a-frame',33,16,46,34,7),h('text',{className:'a-cap',x:56,y:37.2,textAnchor:'middle'},'Esc')),
+      progress:on=>drawing(...monitor(),box('a-win',16,13,34,24,2.5),box('a-ink',20,20,22,2.2,1.1),box('a-ink',20,25,16,2.2,1.1),box('a-frame',16,13,34,24,2.5),...(on?[box('a-pill',54,10,43,29,3.5),h('circle',{className:'a-dot',cx:59.5,cy:15.5,r:1.7}),box('a-text',63.5,14.6,22,1.8,.9),box('a-text',58,21,33,1.8,.9),box('a-text',58,26.5,27,1.8,.9),box('a-text',58,32,19,1.8,.9)]:[box('a-ghost',54,10,43,29,3.5)])),
+      lock:locked=>drawing(box(locked?'a-win a-edge':'a-win a-frame',18,12,62,45,4.5),box('a-ink',25,23,36,2.6,1.3),box('a-ink',25,30,42,2.6,1.3),box('a-ink',25,37,28,2.6,1.3),box(locked?'a-acc':'a-win',68,9,22,22,5.5),...(!locked?[box('a-frame',68,9,22,22,5.5)]:[]),h('path',{className:locked?'a-lock':'a-lock-open',d:locked?'M76 19.5v-2.2a3 3 0 0 1 6 0v2.2M74.8 19.5h8.4v6.2h-8.4z':'M76 19.5v-2.4a3 3 0 0 1 5.6-1.4M74.8 19.5h8.4v6.2h-8.4z'}),...(locked?[arrow(48,31)]:[]))
     };
 
 
@@ -1144,8 +1130,15 @@ window.__ModuleLoader__.load({
       const [recording,setRecording] = React.useState(false), [recordMessage,setRecordMessage] = React.useState('');
       const [noteView,setNoteView] = React.useState(null), [noteSaving,setNoteSaving] = React.useState(false);
       const savedKey = JSON.stringify(Object.fromEntries(Object.keys(defaults).map(key=>[key,saved[key]])));
-      const visibleBeforeFirefox=React.useRef(null),attachBeforeFirefox=React.useRef(null);
-      React.useEffect(()=>{if(!dirty){setDraft(saved);visibleBeforeFirefox.current=null;attachBeforeFirefox.current=null;}},[savedKey,dirty]);
+      const visibleBeforeFirefox=React.useRef(null),attachBeforeFirefox=React.useRef(null),prevSaved=React.useRef(saved);
+      const liveOverlayKeys=['progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressOverlayLocked','progressOverlayEnabled'];
+      React.useEffect(()=>{
+        const prev=prevSaved.current;prevSaved.current=saved;
+        if(!dirty){setDraft(saved);visibleBeforeFirefox.current=null;attachBeforeFirefox.current=null;return;}
+        const synced={};
+        for(const key of Object.keys(defaults))if(!equal(saved[key],prev[key])&&!equal(draft[key],saved[key])&&(liveOverlayKeys.includes(key)||equal(draft[key],prev[key])))synced[key]=saved[key];
+        if(Object.keys(synced).length){const next={...draft,...synced};setDraft(next);setDirty(Object.keys(defaults).some(key=>!equal(next[key],saved[key])));}
+      },[savedKey,dirty]);
       // The Firefox that DSH starts has no window yet, so choosing Firefox turns
       // the switches off, and choosing another browser turns them back.
       const change = (field,value) => {const next={...draft,[field]:value};
@@ -1176,19 +1169,38 @@ window.__ModuleLoader__.load({
         catch(error){setMessage(t('failed')+': '+String(error.message||error));setTone('error');return false;}
         finally{setSaving(false);}
       };
-      // Persist overlay-only actions without committing unrelated draft fields.
+      // Persist section-scoped actions without committing unrelated draft fields.
       const overlayKeys=Object.keys(defaults).filter(key=>key.startsWith('progress'));
-      const applyOverlayPatch=async patch=>{
+      const indicatorKeys=['indicatorEnabled','cursorIndicatorEnabled','indicatorPosition','indicatorIdleMs','indicatorText','remoteIndicatorVisible'];
+      const validInt=(value,rule)=>Number.isInteger(value)&&value>=rule.min&&value<=rule.max;
+      const validIndicator=d=>Boolean(d.indicatorText.trim())&&d.indicatorText.length<=settingRules.indicatorText.maxLength&&!/[\r\n\x00-\x1f]/.test(d.indicatorText)&&validInt(d.indicatorIdleMs,settingRules.indicatorIdleMs);
+      const validOverlay=(d,lockKey)=>['progressOverlayOpacity','progressOverlayWidth','progressOverlayHeight','progressOverlayX','progressOverlayY'].every(k=>validInt(d[k],settingRules[k]))&&isValidShortcut(lockKey);
+      const applySectionPatch=async(patch,success='saved')=>{
         const next={...draft,...patch};setDraft(next);
-        if(await run(patch,'saved')){
+        if(await run(patch,success)){
           const base={...saved,...patch};setDirty(Object.keys(defaults).some(key=>!equal(next[key],base[key])));
         }else setDirty(true);
       };
-      const applyOverlaySwitch=(field,value)=>applyOverlayPatch({[field]:value});
-      const openProgress=()=>applyOverlayPatch({...Object.fromEntries(overlayKeys.map(key=>[key,draft[key]])),progressOverlayEnabled:true,progressPreviewToken:Date.now()});
+      const applyOverlaySwitch=(field,value)=>applySectionPatch({[field]:value});
+      const openProgress=()=>{
+        const lockKey=formatShortcutInput(draft.progressLockShortcut);
+        if(!validOverlay(draft,lockKey)){setMessage(t('invalidOverlay'));setTone('error');return;}
+        if(lockKey&&lockKey===(draft.stopShortcut||saved.stopShortcut)){setMessage(t('shortcutConflict'));setTone('error');return;}
+        return applySectionPatch({...Object.fromEntries(overlayKeys.map(key=>[key,draft[key]])),progressLockShortcut:lockKey,progressOverlayEnabled:true,progressPreviewToken:Date.now()});
+      };
+      const previewIndicator=()=>{
+        if(!validIndicator(draft)){setMessage(t('invalid'));setTone('error');return;}
+        return applySectionPatch({...Object.fromEntries(indicatorKeys.map(key=>[key,draft[key]])),previewToken:Date.now()},'previewed');
+      };
       const save = async () => {
-        if(!draft.indicatorText.trim()||draft.indicatorText.length>settingRules.indicatorText.maxLength||/[\r\n\x00-\x1f]/.test(draft.indicatorText)||!Number.isInteger(draft.indicatorIdleMs)||draft.indicatorIdleMs<settingRules.indicatorIdleMs.min||draft.indicatorIdleMs>settingRules.indicatorIdleMs.max){setMessage(t('invalid'));setTone('error');return;}
-        const patch=Object.fromEntries(Object.keys(defaults).filter(key=>!equal(draft[key],saved[key])).map(key=>[key,draft[key]]));
+        const lockKey=formatShortcutInput(draft.progressLockShortcut);
+        const normalized=lockKey===draft.progressLockShortcut?draft:{...draft,progressLockShortcut:lockKey};
+        if(normalized!==draft)setDraft(normalized);
+        if(!validIndicator(normalized)){setMessage(t('invalid'));setTone('error');return;}
+        if(!validOverlay(normalized,lockKey)){setMessage(t('invalidOverlay'));setTone('error');return;}
+        if(lockKey&&lockKey===normalized.stopShortcut){setMessage(t('shortcutConflict'));setTone('error');return;}
+        const patch=Object.fromEntries(Object.keys(defaults).filter(key=>!equal(normalized[key],saved[key])).map(key=>[key,normalized[key]]));
+        if(Object.keys(patch).length===0){setDirty(false);setMessage(t('saved'));setTone('success');return;}
         if(await run(patch,'saved'))setDirty(false);
       };
       // The support note is a display choice. Save it at once, outside the draft,
@@ -1221,6 +1233,7 @@ window.__ModuleLoader__.load({
       const toggle=(field,label,locked)=>h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch','aria-label':t(label),checked:draft[field],disabled:disabled||locked,onChange:e=>['progressOverlayEnabled','progressOverlayLocked'].includes(field)?applyOverlaySwitch(field,e.target.checked):change(field,e.target.checked)});
       const switchItem=(field,label,hint,art,locked)=>item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-'+field,'aria-hidden':true},art),title(t(label),hint,{htmlFor:idPrefix+'-'+field}),toggle(field,label,locked));
       const field=(label,control)=>h('div',{className:'wcu-field'},label,control);
+      const numProps=key=>({value:draft[key],onChange:e=>change(key,e.target.value===''?'':Number(e.target.value)),onBlur:()=>{if(draft[key]===''||Number.isNaN(draft[key]))change(key,saved[key]);}});
       const allowedTools=['full','lazy'].includes(draft.toolPreset)?allToolNames:activeTools;
       const keycap=(key,label)=>h('kbd',{className:'wcu-key',key},label);
       const shortcutKeys=recording?[h('span',{key:'listen'},t('listening')),h('small',{key:'cancel'},t('listeningCancel'))]
@@ -1271,27 +1284,27 @@ window.__ModuleLoader__.load({
                 h('legend',null,h('label',{className:'wcu-tool-group-label'},h('input',{type:'checkbox',id:idPrefix+'-tool-group-'+group,checked:count===names.length,'aria-checked':count&&count<names.length?'mixed':count===names.length,ref:input=>{if(input)input.indeterminate=count>0&&count<names.length;},onChange:e=>selectTools(names,e.target.checked)}),t('toolGroup_'+group),h('span',{className:'wcu-tool-count'},count+' / '+names.length))),
                 h('div',{className:'wcu-tool-grid'},...entries.map(([name])=>h('label',{className:'wcu-tool-item',key:name,title:'windows_computer_use_'+name},h('input',{type:'checkbox',id:idPrefix+'-tool-'+name,'data-wincu-tool':name,checked:draft.enabledTools.includes(name),disabled:customDisabled,onChange:e=>selectTools([name],e.target.checked)}),h('span',null,h('strong',null,t('tool_'+name)),h('small',null,t('toolHint_'+name)))))));})))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-indicator-title'},
-          head(idPrefix+'-indicator-title','indicatorTitle','indicatorInfo',button('preview',{className:'wcu-small',disabled:disabled||dirty||(!draft.indicatorEnabled&&!draft.cursorIndicatorEnabled),onClick:()=>run({previewToken:Date.now()},'previewed'),title:t(dirty?'previewHint':'previewTitle')})),
+          head(idPrefix+'-indicator-title','indicatorTitle','indicatorInfo',button('preview',{className:'wcu-small',disabled:disabled||(!draft.indicatorEnabled&&!draft.cursorIndicatorEnabled),onClick:previewIndicator,title:t('previewTitle')})),
           h('div',{className:'wcu-grid'},
             switchItem('indicatorEnabled','indicator','indicatorHint',arts.indicator(draft.indicatorEnabled,draft.indicatorPosition==='bottom')),
             switchItem('cursorIndicatorEnabled','cursorIndicator','cursorIndicatorHint',arts.cursor(draft.cursorIndicatorEnabled,idPrefix+'-spot'))),
           h('details',{className:'wcu-detail'},h('summary',null,t('appearance')),
             h('div',{className:'wcu-fields'},
               field(title(t('position'),null,{id:idPrefix+'-position-label'}),h('div',{className:'wcu-segment',role:'radiogroup','aria-labelledby':idPrefix+'-position-label'},radio('indicatorPosition','top',t('top')),radio('indicatorPosition','bottom',t('bottom')))),
-              field(title(t('delay'),'delayHint',{htmlFor:idPrefix+'-delay'}),h('div',{className:'wcu-number'},h('input',{className:'wcu-control',id:idPrefix+'-delay',type:'number',min:settingRules.indicatorIdleMs.min,max:settingRules.indicatorIdleMs.max,step:100,value:draft.indicatorIdleMs,disabled:indicatorDisabled,onChange:e=>change('indicatorIdleMs',Number(e.target.value))}),h('span',null,t('ms')))),
+              field(title(t('delay'),'delayHint',{htmlFor:idPrefix+'-delay'}),h('div',{className:'wcu-number'},h('input',{className:'wcu-control',id:idPrefix+'-delay',type:'number',min:settingRules.indicatorIdleMs.min,max:settingRules.indicatorIdleMs.max,step:100,disabled:indicatorDisabled,...numProps('indicatorIdleMs')}),h('span',null,t('ms')))),
               field(title(t('text'),null,{htmlFor:idPrefix+'-text'}),h('input',{className:'wcu-control wcu-text',id:idPrefix+'-text',type:'text',maxLength:settingRules.indicatorText.maxLength,value:isDefaultIndicatorText(draft.indicatorText)&&draft.indicatorText.trim()?t('indicatorDefault'):draft.indicatorText,disabled:indicatorDisabled,onChange:e=>change('indicatorText',e.target.value)})),
               field(title(t('remoteVisible'),'remoteVisibleHint',{htmlFor:idPrefix+'-remoteIndicatorVisible'}),toggle('remoteIndicatorVisible','remoteVisible'))))),
         h('section',{className:'wcu-section','data-wincu-progress-settings':true,'aria-labelledby':idPrefix+'-progress-title'},
-          head(idPrefix+'-progress-title','progressSettings','progressInfo',button('openProgress',{'data-wincu-open-progress':true,title:t('progressSync'),className:'wcu-small',disabled,onClick:openProgress})),
-          h('div',{className:'wcu-grid'},switchItem('progressOverlayEnabled','progressOverlay','progressOverlayHint',arts.indicator(draft.progressOverlayEnabled,false)),switchItem('progressOverlayLocked','progressLocked','progressLockedHint',arts.indicator(draft.progressOverlayLocked,false))),
+          head(idPrefix+'-progress-title','progressSettings','progressInfo',h('span',{className:'wcu-caption'},t('instantSave')),button('openProgress',{'data-wincu-open-progress':true,title:t('progressSync'),className:'wcu-small',disabled,onClick:openProgress})),
+          h('div',{className:'wcu-grid'},switchItem('progressOverlayEnabled','progressOverlay','progressOverlayHint',arts.progress(draft.progressOverlayEnabled)),switchItem('progressOverlayLocked','progressLocked','progressLockedHint',arts.lock(draft.progressOverlayLocked))),
           h('details',{className:'wcu-detail','data-wincu-progress-details':true},h('summary',null,t('appearance')),
           h('p',{className:'wcu-hint'},t('progressSync')),
           h('div',{className:'wcu-fields'},
             field(title(t('progressMode'),'progressModeHint',{htmlFor:idPrefix+'-progressOverlayMode'}),h('select',{className:'wcu-control',id:idPrefix+'-progressOverlayMode',value:draft.progressOverlayMode,disabled,onChange:e=>change('progressOverlayMode',e.target.value)},h('option',{value:'source'},t('progressModeSource')),h('option',{value:'summary'},t('progressModeSummary')))),
-            ...[['progressOverlayOpacity','progressOpacity'],['progressOverlayWidth','progressWidth'],['progressOverlayHeight','progressHeight']].map(([key,label])=>field(title(t(label),null,{htmlFor:idPrefix+'-'+key}),h('input',{className:'wcu-control',id:idPrefix+'-'+key,type:'number',min:settingRules[key].min,max:settingRules[key].max,value:draft[key],disabled,onChange:e=>change(key,Number(e.target.value))}))),
+            ...[['progressOverlayOpacity','progressOpacity'],['progressOverlayWidth','progressWidth'],['progressOverlayHeight','progressHeight']].map(([key,label])=>field(title(t(label),null,{htmlFor:idPrefix+'-'+key}),h('input',{className:'wcu-control',id:idPrefix+'-'+key,type:'number',min:settingRules[key].min,max:settingRules[key].max,disabled,...numProps(key)}))),
             field(title(t('progressPosition'),null,{htmlFor:idPrefix+'-progressOverlayPosition'}),h('select',{className:'wcu-control',id:idPrefix+'-progressOverlayPosition',value:draft.progressOverlayPosition,disabled,onChange:e=>change('progressOverlayPosition',e.target.value)},...['top-right','top-left','bottom-right','bottom-left','custom'].map((key,index)=>h('option',{key,value:key},t(['progress_topRight','progress_topLeft','progress_bottomRight','progress_bottomLeft','progress_custom'][index]))))),
-            ...[['progressOverlayX','progressX'],['progressOverlayY','progressY']].map(([key,label])=>field(title(t(label),null,{htmlFor:idPrefix+'-'+key}),h('input',{className:'wcu-control',id:idPrefix+'-'+key,type:'number',min:settingRules[key].min,max:settingRules[key].max,value:draft[key],disabled:disabled||draft.progressOverlayPosition!=='custom',onChange:e=>change(key,Number(e.target.value))}))),
-            field(title(t('progressShortcut'),'progressShortcutHint',{htmlFor:idPrefix+'-progressLockShortcut'}),h('input',{className:'wcu-control wcu-text',id:idPrefix+'-progressLockShortcut',value:draft.progressLockShortcut,placeholder:'Ctrl+Alt+P',maxLength:50,disabled,onChange:e=>change('progressLockShortcut',e.target.value)}))))),
+            ...[['progressOverlayX','progressX'],['progressOverlayY','progressY']].map(([key,label])=>field(title(t(label),null,{htmlFor:idPrefix+'-'+key}),h('input',{className:'wcu-control',id:idPrefix+'-'+key,type:'number',min:settingRules[key].min,max:settingRules[key].max,disabled:disabled||draft.progressOverlayPosition!=='custom',...numProps(key)}))),
+            field(title(t('progressShortcut'),'progressShortcutHint',{htmlFor:idPrefix+'-progressLockShortcut'}),h('input',{className:'wcu-control wcu-text',id:idPrefix+'-progressLockShortcut',value:draft.progressLockShortcut,placeholder:'Ctrl+Alt+P',maxLength:50,disabled,onChange:e=>change('progressLockShortcut',e.target.value),onKeyDown:e=>{if(e.isComposing||e.repeat||['Control','Alt','Shift','Meta','OS','Escape','Tab'].includes(e.key))return;if(e.altKey||e.metaKey||(e.ctrlKey&&e.shiftKey)||/^F(?:[1-9]|1[0-9]|2[0-4])$/.test(e.code||'')){const s=shortcutFromEvent(e);if(s){e.preventDefault();e.stopPropagation();change('progressLockShortcut',s);}}},onBlur:e=>{const s=formatShortcutInput(e.target.value);if(s!==draft.progressLockShortcut)change('progressLockShortcut',s);}}))))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-stop-title'},
           head(idPrefix+'-stop-title','stop','stopInfo',button('clearShortcut',{title:t('clearShortcutTitle'),className:'wcu-small',disabled:disabled||!draft.stopShortcut,onClick:()=>{change('stopShortcut','');setRecordMessage('');}})),
           h('div',{className:'wcu-grid'},

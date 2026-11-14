@@ -1,7 +1,8 @@
 // Backend latency benchmark: time N consecutive backend actions.
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const BACKEND = "E:/PythonFiles/dsh-computer-use-win/scripts/windows-uia.ps1";
+const BACKEND = fileURLToPath(new URL("../scripts/windows-uia.ps1", import.meta.url));
 const N = process.argv[2] ? Number(process.argv[2]) : 5;
 
 const actions = [

@@ -104,15 +104,27 @@ function classifyHost(rawHost) {
   return {host, local, metadata};
 }
 
+let cachedHostPortFile;
+
 function readHostPorts(env = process.env) {
   const ports = list(env.WCU_HOST_PORTS);
   let pending = false;
-  if (env.WCU_HOST_PORT_FILE) {
-    let state;
-    try { state = JSON.parse(readFileSync(env.WCU_HOST_PORT_FILE, 'utf8')); }
+  const portFile = env.WCU_HOST_PORT_FILE;
+  if (portFile) {
+    let stat;
+    try { stat = statSync(portFile, {bigint: true}); }
     catch { throw Error('WCU_POLICY_UNAVAILABLE: host address policy could not be read.'); }
-    if (Array.isArray(state?.ports)) ports.push(...state.ports.map(String));
+    if (cachedHostPortFile && cachedHostPortFile.file === portFile && cachedHostPortFile.mtimeNs === stat.mtimeNs && cachedHostPortFile.size === stat.size) {
+      if (cachedHostPortFile.ports.length) ports.push(...cachedHostPortFile.ports);
+      return {ports, pending: false};
+    }
+    let state;
+    try { state = JSON.parse(readFileSync(portFile, 'utf8')); }
+    catch { throw Error('WCU_POLICY_UNAVAILABLE: host address policy could not be read.'); }
+    const filePorts = Array.isArray(state?.ports) ? state.ports.map(String) : [];
     pending = Boolean(state?.pending);
+    cachedHostPortFile = pending ? undefined : {file: portFile, mtimeNs: stat.mtimeNs, size: stat.size, ports: filePorts};
+    if (filePorts.length) ports.push(...filePorts);
   }
   return {ports, pending};
 }
@@ -165,9 +177,11 @@ export function isBlockedRuntimeRequestUrl(value, env = process.env, {isNavigati
     return {blocked: true, reason: `WCU_POLICY_DENIED: ${scheme} URLs are blocked.`};
   }
   if (metadata) return {blocked: true, reason: 'WCU_POLICY_DENIED: cloud metadata addresses are blocked.'};
-  const {ports, pending} = readHostPorts(env);
-  if (local && pending) throw Error('WCU_POLICY_UNAVAILABLE: host address policy is starting.');
-  if (local && ports.includes(effectivePort)) return {blocked: true, reason: 'WCU_POLICY_DENIED: this address belongs to the DSH host.'};
+  if (local) {
+    const {ports, pending} = readHostPorts(env);
+    if (pending) throw Error('WCU_POLICY_UNAVAILABLE: host address policy is starting.');
+    if (ports.includes(effectivePort)) return {blocked: true, reason: 'WCU_POLICY_DENIED: this address belongs to the DSH host.'};
+  }
   return {blocked: false};
 }
 
@@ -239,7 +253,10 @@ export function classifyOperation(name, args = {}, env = process.env, locale = e
       const prompt = argText
         ? formatText(strings.approveLaunchArgs, String(args.target ?? ''), argText)
         : formatText(strings.approveLaunch, String(args.target ?? ''));
-      return verdict('ask', 'WCU_APPROVAL_REQUIRED: launching an application with arguments requires approval.', prompt);
+      const reason = argText
+        ? 'WCU_APPROVAL_REQUIRED: launching an application with arguments requires approval.'
+        : 'WCU_APPROVAL_REQUIRED: launching a shortcut (.lnk) requires approval.';
+      return verdict('ask', reason, prompt);
     }
   }
   if (action === 'set_value') {
@@ -270,9 +287,11 @@ function classifyUrl(value, env = process.env, locale = env?.WCU_LOCALE || syste
     return verdict('deny', 'WCU_POLICY_DENIED: internal browser about URLs are blocked.');
   }
   if (metadata) return verdict('deny', 'WCU_POLICY_DENIED: cloud metadata addresses are blocked.');
-  const {ports, pending} = readHostPorts(env);
-  if (local && pending) throw Error('WCU_POLICY_UNAVAILABLE: host address policy is starting.');
-  if (local && ports.includes(effectivePort)) return verdict('deny', 'WCU_POLICY_DENIED: this address belongs to the DSH host.');
+  if (local) {
+    const {ports, pending} = readHostPorts(env);
+    if (pending) throw Error('WCU_POLICY_UNAVAILABLE: host address policy is starting.');
+    if (ports.includes(effectivePort)) return verdict('deny', 'WCU_POLICY_DENIED: this address belongs to the DSH host.');
+  }
   if (scheme === 'file:') {
     if (host && host !== 'localhost') return verdict('deny', 'WCU_POLICY_DENIED: network file URLs are blocked.');
     if (process.platform === 'win32') {
@@ -360,21 +379,25 @@ export function assertUpload(files, {env = process.env, approved = false, grants
   }
 }
 
-export function assertOperation(name, args, {env = process.env, approved = false, grants} = {}) {
+function assertTabApproved(tabKey, userTabs, approved, grants) {
+  if (!tabKey) return;
+  const entry = userTabs[tabKey];
+  if (entry?.requiresApproval && !entry.approved && !approved && !grants?.userTabs?.has(tabKey)) {
+    throw Error('WCU_APPROVAL_REQUIRED: accessing this existing browser tab requires approval.');
+  }
+}
+
+export function assertOperation(name, args, {env = process.env, approved = false, grants, _userTabs} = {}) {
   const action = short(name);
+  const getUserTabs = () => _userTabs ?? (_userTabs = readUserTabs(env));
   if (action === 'batch') {
     const top = classifyOperation('batch', args, env);
     if (top.kind === 'deny') throw Error(top.reason);
     const topTab = targetTabKey(args);
-    if (topTab) {
-      const entry = readUserTabs(env)[topTab];
-      if (entry?.requiresApproval && !entry.approved && !approved && !grants?.userTabs?.has(topTab)) {
-        throw Error('WCU_APPROVAL_REQUIRED: accessing this existing browser tab requires approval.');
-      }
-    }
+    if (topTab) assertTabApproved(topTab, getUserTabs(), approved, grants);
     for (const step of Array.isArray(args?.steps) ? args.steps : []) {
       if (!step || typeof step !== 'object') continue;
-      assertOperation(step.action, {...args, ...(step.arguments && typeof step.arguments === 'object' ? step.arguments : {}), steps: undefined}, {env, approved, grants});
+      assertOperation(step.action, {...args, ...(step.arguments && typeof step.arguments === 'object' ? step.arguments : {}), steps: undefined}, {env, approved, grants, _userTabs});
     }
     return;
   }
@@ -382,10 +405,7 @@ export function assertOperation(name, args, {env = process.env, approved = false
   if (decision.kind === 'deny') throw Error(decision.reason);
   if (decision.kind === 'ask' && !approved) {
     const tabKey = targetTabKey(args);
-    const tabEntry = tabKey ? readUserTabs(env)[tabKey] : null;
-    if (tabEntry?.requiresApproval && !tabEntry.approved && !grants?.userTabs?.has(tabKey)) {
-      throw Error('WCU_APPROVAL_REQUIRED: accessing this existing browser tab requires approval.');
-    }
+    if (tabKey) assertTabApproved(tabKey, getUserTabs(), false, grants);
     if (action === 'launch_app') {
       if (grants?.launches?.has(launchKey(args)) || env.WCU_ALLOW_LAUNCH_ARGUMENTS === '1' || list(env.WCU_ALLOWED_LAUNCH_PROGRAMS).some(p => p.toLowerCase() === String(args.target).toLowerCase())) return;
       throw Error(decision.reason);
@@ -444,8 +464,9 @@ export function consumeGrant(token, name, args, secret, used, now = Date.now(), 
     const got = Buffer.from(signature, 'base64url');
     if (got.length !== want.length || !timingSafeEqual(want, got)) return false;
     const body = JSON.parse(Buffer.from(payload, 'base64url'));
+    if (!Number.isFinite(body.expires) || typeof body.nonce !== 'string' || !body.nonce || body.expires < now || body.expires > now + 125000 || body.name !== short(name)) return false;
     for (const [nonce, expires] of used) if (expires < now) used.delete(nonce);
-    if (!Number.isFinite(body.expires) || typeof body.nonce !== 'string' || !body.nonce || body.expires < now || body.expires > now + 125000 || used.has(body.nonce) || body.name !== short(name) || stable(body.args) !== stable(args)) return false;
+    if (used.has(body.nonce) || stable(body.args) !== stable(args)) return false;
     if (registryFile && !reserveNonce(registryFile, body.nonce, body.expires, now)) return false;
     used.set(body.nonce, body.expires);
     return true;

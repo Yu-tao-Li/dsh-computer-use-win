@@ -1,7 +1,7 @@
 // DSH owns MCP transport/cancellation. Display changes do not kill input.
 import z from '@deepseek-ai/schemastery';
 import { fileURLToPath } from 'node:url';
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_SETTINGS, normalizeSettings, enabledToolsForSettings, toolSelectionKey, repairStaleSettings } from './settings.mjs';
@@ -127,20 +127,17 @@ export async function apply(ctx, config) {
   const runtime = { configFile: path.join(root,'settings.json'), stateFile: path.join(root,'state.json'), activityFile:path.join(root,'activity.json'), layoutFile:path.join(root,'overlay-layout.json'), userTabsFile:path.join(root,'user-tabs.json'), getLocale: () => getLocale() };
   runtime.approvalSecret = randomBytes(32).toString('base64url');
   runtime.approvalLedger=path.join(root,'approval-grants.json');
-  try {
-    const lock = runtime.approvalLedger + '.lock';
-    const owner = JSON.parse(readFileSync(lock, 'utf8'));
-    if (owner?.marker === 'wcu-approval' && Number.isInteger(owner.pid) && owner.pid > 0 && owner.pid !== process.pid && !processAlive(owner.pid)) rmSync(lock, { force: true });
-  } catch { }
   runtime.hostPorts = [];
   runtime.hostPortFile=path.join(root,'host-ports.json');atomicJson(runtime.hostPortFile,{ports:[],pending:true});let webServerSeen=false,hostPortsDisposed=false;const settleNoWebServer=setTimeout(()=>{if(!webServerSeen&&!hostPortsDisposed)atomicJsonAsync(runtime.hostPortFile,{ports:[]}).catch(()=>{});},1500);settleNoWebServer.unref?.();ctx.effect(()=>()=>{hostPortsDisposed=true;clearTimeout(settleNoWebServer);});
   ctx.inject(['webServer'], owner => {
     webServerSeen=true;clearTimeout(settleNoWebServer);if(!owner.webServer.port)atomicJson(runtime.hostPortFile,{ports:[],pending:true});
+    let timer;
     const update=async()=>{
       const port=owner.webServer.port;
+      if(port){clearInterval(timer);timer=undefined;}
       if(port && !runtime.hostPorts.includes(String(port))){runtime.hostPorts=[String(port)];await atomicJsonAsync(runtime.hostPortFile,{ports:runtime.hostPorts});}
     };
-    void update().catch(error=>owner.logger.warn(error));owner.effect(()=>{const timer=setInterval(()=>{void update().catch(error=>owner.logger.warn(error));},250);timer.unref();return ()=>clearInterval(timer);});
+    void update().catch(error=>owner.logger.warn(error));owner.effect(()=>{timer=setInterval(()=>{void update().catch(error=>owner.logger.warn(error));},250);timer.unref();return ()=>clearInterval(timer);});
   });
   installHostPolicy(ctx, runtime);
   // The MCP server polls these files until DSH has closed its connection, which
@@ -151,8 +148,8 @@ export async function apply(ctx, config) {
   setTimeout(() => { try { sweepControlDirs({ keep: root }); } catch {} }, 3000).unref();
   const logError = limitedErrorLog(ctx.logger);
   const support=bridgeSupport();
-  if(!support.tested){runtime.notices={hostBridgeUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: bridge %s has not completed this candidate\'s runtime validation; approval-required operations fail closed if approval is unavailable.',support.version);}
-  if(support.legacyApprovalUiUnverified){runtime.notices={...runtime.notices,legacyApprovalUiUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: interactive web approval UI for legacy bridge %s has not been validated; runtime approval and settings tests use isolated fixtures.',support.version);}
+  if(!support.tested){runtime.notices={hostBridgeUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: bridge %s is unverified for this release; actions requiring approval fail closed if approval is unavailable.',support.version);}
+  if(support.legacyApprovalUiUnverified){runtime.notices={...runtime.notices,legacyApprovalUiUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: legacy bridge %s does not support interactive web approval prompts; actions requiring approval will be blocked.',support.version);}
   // Reset settings go to the DSH log and, through the server, into the health
   // and tools results the agent reads. Which duplicate's tools DSH keeps is
   // up to the host, so a duplicate entry is reported in the log only.
@@ -163,7 +160,13 @@ export async function apply(ctx, config) {
   }
   liveAdapters.add(self); ctx.effect(() => () => { liveAdapters.delete(self); });
   if (liveAdapters.size > 1) ctx.logger.warn('dsh-computer-use-win: %d entries of this plugin run in one profile, and DSH keeps only one set of mcp__wincu tools. Remove the extra entry from dsh.profile.bundles in the profile package.json or from its cordis.patch.yml.', liveAdapters.size);
-  let desired = normalizeSettings(config), runningSelection, connection, stopped = false;
+  let desired = normalizeSettings(config), desiredJson = JSON.stringify(desired), desiredKey = toolSelectionKey(desired), lastWrittenConfigJson = desiredJson;
+  let runningSelection, connection, stopped = false;
+  const writeConfigIfChanged = (settings, json = JSON.stringify(settings)) => {
+    if (json === lastWrittenConfigJson) return;
+    atomicJson(runtime.configFile, settings);
+    lastWrittenConfigJson = json;
+  };
   // Read only when the overlay asks, at most every 5 s and again after DSH's
   // change notice: the locale entry may start after this plugin, and an idle
   // plugin never calls describe(), which announces every entry the first time.
@@ -185,24 +188,29 @@ export async function apply(ctx, config) {
   };
   ctx.effect(() => () => { clearTimeout(localeRefresh); localeRefresh = undefined; });
   let updates = Promise.resolve();
-  let saveOverlayPatch, settingsSource = 'entry', namespaceScope, layoutId, layoutSaving = false, layoutRetry = { id: undefined, at: 0, delay: 0 };
+  let saveOverlayPatch, settingsSource = 'entry', namespaceScope, layoutId, layoutStatKey = '', layoutSaving = false, layoutRetry = { id: undefined, at: 0, delay: 0 };
   let selectionPending=0,selectionRetry={at:0,delay:0};
   atomicJson(runtime.configFile, desired);
   ctx.effect(() => () => { stopped = true; });
-  const applySettings = next => {
-    const nextSettings = normalizeSettings(next);
+  const applySettings = (next, nextJson) => {
+    const nextSettings = next === desired ? desired : normalizeSettings(next);
+    const json = next === desired ? desiredJson : (nextJson ?? JSON.stringify(nextSettings));
     // A preview shows the DSH language of this moment. It goes into the
     // activity file before the server reads the new preview token.
     if (nextSettings.previewToken !== desired.previewToken || nextSettings.progressPreviewToken !== desired.progressPreviewToken) { localeReadAt = 0; activity.refresh(); }
-    atomicJson(runtime.configFile, nextSettings);
+    writeConfigIfChanged(nextSettings, json);
     // Windows readers can briefly deny replacement. Keep desired unchanged
     // on a failed write so the next poll retries the pending settings.
-    desired = nextSettings;
+    if (nextSettings !== desired) {
+      desired = nextSettings;
+      desiredJson = json;
+      desiredKey = toolSelectionKey(desired);
+    }
     selectionPending++;
     const pending = updates.then(async () => {try{
       if (!connection || stopped) return;
       await connection.await();
-      const nextSelection=toolSelectionKey(desired);
+      const nextSelection = desiredKey;
       if (stopped || runningSelection === nextSelection) return;
       const deadline = Date.now() + 65000;
       for (;;) {
@@ -214,7 +222,7 @@ export async function apply(ctx, config) {
         await new Promise(resolve => setTimeout(resolve,100));
       }
       if (stopped) return;
-      const latest={...desired},latestSelection=toolSelectionKey(latest);
+      const latest={...desired},latestSelection=desiredKey;
       await connection.update(bridgeConfig({ ...config, ...latest }, runtime), true);
       await connection.await(); runningSelection = latestSelection;selectionRetry={at:0,delay:0};
     }catch(error){
@@ -229,23 +237,28 @@ export async function apply(ctx, config) {
   ctx.effect(() => {
     const timer = setInterval(()=>{
       if(saveOverlayPatch&&!layoutSaving)try{
-        const layout=JSON.parse(readFileSync(runtime.layoutFile,'utf8'));
-        // A failed save is retried with backoff (0.5 s, doubling up to 60 s) and
-        // a newer layout at once. A patch that cannot apply is dropped.
-        if(layout.id!==layoutId&&!(layout.id===layoutRetry.id&&Date.now()<layoutRetry.at)){
-          const allowed=['progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressOverlayLocked','progressOverlayEnabled'];
-          let usable=false;
-          try{
-            if(!layout.patch||typeof layout.patch!=='object'||Object.keys(layout.patch).some(key=>!allowed.includes(key)))throw Error('Invalid overlay layout patch');
-            normalizeSettings({...desired,...layout.patch});
-            usable=!(layout.base&&Object.entries(layout.base).some(([key,value])=>!allowed.includes(key)||desired[key]!==value));
-          }finally{if(!usable)layoutId=layout.id;}
-          if(usable){
-            layoutSaving=true;
-            Promise.resolve().then(()=>saveOverlayPatch(layout.patch)).then(()=>{layoutId=layout.id;layoutRetry={id:undefined,at:0,delay:0};},error=>{
-              const delay=layoutRetry.id===layout.id?Math.min(layoutRetry.delay*2,60000):500;
-              layoutRetry={id:layout.id,at:Date.now()+delay,delay};logError(error);
-            }).finally(()=>{layoutSaving=false;});
+        const st = statSync(runtime.layoutFile, { bigint: true, throwIfNoEntry: false });
+        const statKey = st ? `${st.mtimeNs}:${st.size}` : '';
+        if (st && statKey !== layoutStatKey) {
+          layoutStatKey = statKey;
+          const layout=JSON.parse(readFileSync(runtime.layoutFile,'utf8'));
+          // A failed save is retried with backoff (0.5 s, doubling up to 60 s) and
+          // a newer layout at once. A patch that cannot apply is dropped.
+          if(layout.id!==layoutId&&!(layout.id===layoutRetry.id&&Date.now()<layoutRetry.at)){
+            const allowed=['progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressOverlayLocked'];
+            let usable=false;
+            try{
+              if(!layout.patch||typeof layout.patch!=='object'||Object.keys(layout.patch).some(key=>!allowed.includes(key)))throw Error('Invalid overlay layout patch');
+              normalizeSettings({...desired,...layout.patch});
+              usable=!(layout.base&&Object.entries(layout.base).some(([key,value])=>!allowed.includes(key)||desired[key]!==value));
+            }finally{if(!usable)layoutId=layout.id;}
+            if(usable){
+              layoutSaving=true;
+              Promise.resolve().then(()=>saveOverlayPatch(layout.patch)).then(()=>{layoutId=layout.id;layoutRetry={id:undefined,at:0,delay:0};},error=>{
+                const delay=layoutRetry.id===layout.id?Math.min(layoutRetry.delay*2,60000):500;
+                layoutRetry={id:layout.id,at:Date.now()+delay,delay};layoutStatKey='';logError(error);
+              }).finally(()=>{layoutSaving=false;});
+            }
           }
         }
       }catch(error){if(error.code!=='ENOENT')logError(error);}
@@ -254,8 +267,8 @@ export async function apply(ctx, config) {
       // The raw entry still holds any value the validator reset; reset it here too.
       try {
         const raw=settingsSource==='namespace'?namespaceScope?.get():{...config,...repairStaleSettings(ctx.fiber.entry?.options?.config).value};
-        if(raw){const next=normalizeSettings(raw);if(JSON.stringify(next)!==JSON.stringify(desired))applySettings(next).catch(logError);}
-        if(connection&&runningSelection!==toolSelectionKey(desired)&&selectionPending===0&&Date.now()>=selectionRetry.at)applySettings(desired).catch(logError);
+        if(raw){const next=normalizeSettings(raw);const nextJson=JSON.stringify(next);if(nextJson!==desiredJson)applySettings(next,nextJson).catch(logError);}
+        if(connection&&runningSelection!==desiredKey&&selectionPending===0&&Date.now()>=selectionRetry.at)applySettings(desired,desiredJson).catch(logError);
       }
       catch(error){logError(error);}
     },250);
@@ -273,7 +286,7 @@ export async function apply(ctx, config) {
         saveOverlayPatch=patch=>{
           const entries=owner.configEditor.entries();
           const entry=findOwnEntry(entries,ctx.fiber);
-          if(!entry)throw Error('DSH lists no editable profile entry for this plugin (is it listed twice, or inside another entry?), so overlay moves and resizes are not saved.');
+          if(!entry)throw Error('DSH has no editable profile entry for this plugin (check if it is duplicated or nested inside another entry), so overlay position and size changes cannot be saved.');
           return owner.settings.update(entry.options.id,patch);
         };
         return ()=>{saveOverlayPatch=undefined;};
@@ -289,12 +302,12 @@ export async function apply(ctx, config) {
     namespaceScope=scope;
     settingsContext.effect(() => () => { settingsSource = 'entry';namespaceScope=undefined; });
     saveOverlayPatch=patch=>scope.update(patch);
-    desired = normalizeSettings(scope.get()); atomicJson(runtime.configFile, desired);
+    desired = normalizeSettings(scope.get()); desiredJson = JSON.stringify(desired); desiredKey = toolSelectionKey(desired); writeConfigIfChanged(desired, desiredJson);
     settingsContext.effect(() => scope.watch(applySettings));
-    if (connection) return applySettings(desired);
+    if (connection) return applySettings(desired, desiredJson);
   });
-  runningSelection = toolSelectionKey(desired);
+  runningSelection = desiredKey;
   connection = ctx.plugin(bridge, bridgeConfig({ ...config, ...desired }, runtime));
   await connection;
-  await applySettings(desired);
+  if (desiredKey !== runningSelection) await applySettings(desired, desiredJson);
 }

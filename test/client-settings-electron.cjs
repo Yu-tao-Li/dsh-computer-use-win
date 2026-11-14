@@ -441,6 +441,38 @@ app.whenReady().then(async()=>{
   await evaluate("document.querySelector('[data-wincu-progress-settings]').scrollIntoView({block:'start'});window.scrollBy(0,-12)");
   await new Promise(r=>setTimeout(r,100));
   await savePicture('settings-progress-expanded.png');
+  // Live external overlay geometry updates while draft edits are pending must
+  // merge into the form instead of being overwritten on Save.
+  await evaluate("document.getElementById('wincu-page-browserFirst').click()");
+  await until("document.getElementById('wincu-page-browserFirst').checked");
+  await evaluate("window.snapshot={...window.snapshot,value:{...window.snapshot.value,progressOverlayX:321,progressOverlayWidth:612,progressOverlayPosition:'custom'},revision:window.snapshot.revision+1};for(const fn of window.listeners)fn()");
+  await until("document.getElementById('wincu-page-progressOverlayX').value==='321'&&document.getElementById('wincu-page-progressOverlayWidth').value==='612'");
+  await evaluate("window.clickButton('保存更改')");
+  await until("window.snapshot.value.browserFirst===true&&window.snapshot.value.progressOverlayX===321&&window.snapshot.value.progressOverlayWidth===612");
+  // Indicator Preview applies only indicator fields directly even while unrelated draft edits remain unsaved.
+  await evaluate("document.getElementById('wincu-page-browserFirst').click();window.choosePosition('top')");
+  await until("!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='预览').disabled");
+  const prevPreview=await evaluate("window.snapshot.value.previewToken||0");
+  await evaluate("window.clickButton('预览')");
+  await until("window.snapshot.value.previewToken>"+prevPreview+"&&window.snapshot.value.indicatorPosition==='top'");
+  assert.equal(await evaluate("window.snapshot.value.browserFirst"),true,'Preview must not commit unrelated browser draft edits');
+  assert.equal(await evaluate("document.getElementById('wincu-page-browserFirst').checked"),false,'Unrelated browser draft remains visible');
+  await evaluate("window.clickButton('放弃更改')");
+  await until("document.getElementById('wincu-page-browserFirst').checked===true");
+  // Typed lock shortcuts normalize case/whitespace on Save and detect stop-shortcut collisions clearly.
+  await evaluate("window.setOverlayInput('progressLockShortcut','ctrl + shift + l');window.clickButton('保存更改')");
+  await until("window.snapshot.value.progressLockShortcut==='Ctrl+Shift+L'");
+  await evaluate("window.clickButton('录制快捷键')");
+  await until("!!document.querySelector('[data-recording=true]')");
+  await evaluate("window.key({key:'L',code:'KeyL',ctrlKey:true,shiftKey:true})");
+  await until("!document.querySelector('[data-recording=true]')");
+  await evaluate("window.clickButton('保存更改')");
+  await until("document.body.textContent.includes('锁定快捷键不能与停止快捷键相同')");
+  assert.equal(await evaluate("window.snapshot.value.stopShortcut"),'','Conflicting shortcut must not be sent to host');
+  await evaluate("window.clickButton('放弃更改')");
+  await until("document.querySelector('.wcu-shortcut-value').textContent==='Esc（默认）'");
+  await evaluate("window.setOverlayInput('progressLockShortcut','Ctrl+Alt+P');window.clickButton('保存更改')");
+  await until("window.snapshot.value.progressLockShortcut==='Ctrl+Alt+P'");
   await evaluate("window.renderPage('en')");
   await until("document.body.textContent.includes('Press Esc to stop')");
   await evaluate("window.snapshot={...window.snapshot,writable:false};for(const fn of window.listeners)fn()");

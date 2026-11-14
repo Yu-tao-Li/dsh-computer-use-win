@@ -40,7 +40,7 @@ public sealed class WcuClipboardLease : IDisposable {
   readonly bool restore;
   readonly uint expectedProcessId;
   readonly ManualResetEvent ready=new ManualResetEvent(false),finished=new ManualResetEvent(false);
-  Owner owner;
+  volatile Owner owner;
   Exception failure;
   volatile bool read,closing,pasteSent,pasteBarrierDone;
   IntPtr pasteTarget;
@@ -59,15 +59,16 @@ public sealed class WcuClipboardLease : IDisposable {
   public void MarkPasteSent(IntPtr targetWindowHandle){
     pasteTarget=targetWindowHandle;
     pasteSent=true;
+    var form=owner;if(form!=null&&read)form.Poke();
   }
   public bool Complete(int timeoutMs){
     if(!finished.WaitOne(timeoutMs))return false;
     if(failure!=null)throw new InvalidOperationException("Clipboard paste failed",failure);
     return read;
   }
-  public void Dispose(){closing=true;}
+  public void Dispose(){closing=true;var form=owner;if(form!=null)form.Poke();}
   void Run(){
-    try{using(owner=new Owner(this))Application.Run(owner);}
+    try{using(var form=new Owner(this))Application.Run(form);}
     catch(Exception error){failure=error;ready.Set();finished.Set();}
   }
   sealed class Owner:Form {
@@ -115,7 +116,7 @@ public sealed class WcuClipboardLease : IDisposable {
         SetPrivacyFormat("CanUploadToCloudClipboard",0);
       }finally{CloseClipboard();}
       expires=DateTime.UtcNow.AddSeconds(2);timer.Interval=10;timer.Tick+=Tick;timer.Start();
-      lease.ready.Set();
+      lease.owner=this;lease.ready.Set();
     }
     static void SetPrivacyFormat(string name,int dwordValue){
       uint format=RegisterClipboardFormat(name);
@@ -131,7 +132,7 @@ public sealed class WcuClipboardLease : IDisposable {
     protected override bool ShowWithoutActivation{get{return true;}}
     protected override void SetVisibleCore(bool value){base.SetVisibleCore(false);}
     protected override void OnFormClosed(FormClosedEventArgs e){
-      lease.finished.Set();
+      if(lease.owner==this)lease.owner=null;lease.finished.Set();
       base.OnFormClosed(e);
     }
     void Render(){
@@ -156,10 +157,12 @@ public sealed class WcuClipboardLease : IDisposable {
         // If the requester cannot be identified as the target, keep this
         // text instead of restoring unrelated old data on that signal.
         lease.read=reader!=0&&reader==lease.expectedProcessId;
+        if(lease.read&&lease.pasteSent)Poke();
         message.Result=IntPtr.Zero;return;
       }
       base.WndProc(ref message);
     }
+    internal void Poke(){if(IsHandleCreated&&!IsDisposed)try{BeginInvoke((Action)(()=>Tick(this,EventArgs.Empty)));}catch(InvalidOperationException){}}
     void Tick(object sender,EventArgs e){
       try{
         bool own=GetClipboardOwner()==Handle;

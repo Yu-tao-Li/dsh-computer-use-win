@@ -68,8 +68,8 @@ export function actionLabel(name,args={},locale='zh'){
 export function readableAbort(exec,result){
   if(!result?.isError||!exec.signal?.aborted||result.error?.message!=='[object Object]')return result;
   const message=exec.signal.reason?.kind==='user'
-    ?'COMPUTER_USE_STOPPED_IN_DSH: The user stopped this call with the DSH stop button. Do not retry it in this turn. A new user turn, including a request to continue, can use the desktop again.'
-    :'COMPUTER_USE_CANCELLED: DSH cancelled this call before it finished.';
+    ?'COMPUTER_USE_STOPPED_IN_DSH: Stopped with the DSH stop button. Do not retry in this turn; a new user turn or continue request can use the desktop again.'
+    :'COMPUTER_USE_CANCELLED: DSH cancelled this call before completion.';
   return {...result,content:[{type:'text',text:'Error: '+message}],error:{...result.error,message}};
 }
 
@@ -260,7 +260,10 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     }
     if(step!==undefined&&step!==progress.step){progress.step=step;progress.reasoning='';progress.reply='';}
     const entry=stepEntry(progress,progress.step||1);
-    progress[field]=lastText(progress[field]+text,CURRENT_TEXT);entry[field]=lastText(entry[field]+text,CURRENT_TEXT);
+    const prev = progress[field];
+    const next = lastText(prev + text, CURRENT_TEXT);
+    progress[field] = next;
+    entry[field] = entry[field] === prev ? next : lastText(entry[field] + text, CURRENT_TEXT);
     if(field==='reply'){
       const start=replyStarts.get(entry)??{text:'',length:0};
       if(start.text.length<CURRENT_TEXT)start.text=headText(start.text+text,CURRENT_TEXT);

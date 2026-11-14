@@ -26,6 +26,28 @@ window.__ModuleLoader__.load({
       if(!key&&event.keyCode>=112&&event.keyCode<=135)key='F'+(event.keyCode-111);
       return key?[event.ctrlKey&&'Ctrl',event.altKey&&'Alt',event.shiftKey&&'Shift',event.metaKey&&'Win',key].filter(Boolean).join('+'):null;
     }
+    const SHORTCUT_MODS=['Ctrl','Alt','Shift','Win'];
+    const SHORTCUT_MOD_MAP={ctrl:'Ctrl',control:'Ctrl',alt:'Alt',option:'Alt',shift:'Shift',win:'Win',meta:'Win',super:'Win'};
+    const SHORTCUT_SPECIAL_MAP={space:'Space',enter:'Enter',return:'Enter',tab:'Tab',backspace:'Backspace',delete:'Delete',del:'Delete',insert:'Insert',ins:'Insert',home:'Home',end:'End',pageup:'PageUp',pgup:'PageUp',pagedown:'PageDown',pgdn:'PageDown',up:'Up',arrowup:'Up',down:'Down',arrowdown:'Down',left:'Left',arrowleft:'Left',right:'Right',arrowright:'Right',pause:'Pause',capslock:'CapsLock',numlock:'NumLock',scrolllock:'ScrollLock'};
+    const SHORTCUT_KEY_RE=/^(?:[A-Z0-9]|F(?:[1-9]|1[0-9]|2[0-4])|Space|Enter|Tab|Backspace|Delete|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|Pause|CapsLock|NumLock|ScrollLock)$/;
+    function formatShortcutInput(raw){
+      const text=String(raw??'').trim();if(!text)return '';
+      const parts=text.split('+').map(part=>part.trim());
+      if(parts.some(part=>!part))return text;
+      const lowerKey=parts.pop().toLowerCase(),mods=[];
+      for(const part of parts){const mapped=SHORTCUT_MOD_MAP[part.toLowerCase()];if(!mapped||mods.includes(mapped))return text;mods.push(mapped);}
+      let key='';
+      if(/^[a-z0-9]$/.test(lowerKey))key=lowerKey.toUpperCase();
+      else if(/^f([1-9]|1[0-9]|2[0-4])$/.test(lowerKey))key='F'+lowerKey.slice(1);
+      else if(Object.hasOwn(SHORTCUT_SPECIAL_MAP,lowerKey))key=SHORTCUT_SPECIAL_MAP[lowerKey];
+      else return text;
+      return [...SHORTCUT_MODS.filter(m=>mods.includes(m)),key].join('+');
+    }
+    function isValidShortcut(value){
+      if(!value)return true;
+      const parts=String(value).split('+'),key=parts.pop();
+      return parts.every(p=>SHORTCUT_MODS.includes(p))&&new Set(parts).size===parts.length&&SHORTCUT_KEY_RE.test(key);
+    }
     const css=`
       [data-wincu-settings]{--wcu-card:var(--dsw-alias-settings-card-fill,var(--dsw-alias-bg-layer-2,Canvas));--wcu-card-stroke:var(--dsw-alias-settings-card-stroke,var(--dsw-alias-border-l4,rgba(128,128,128,.34)));--wcu-sunken:var(--dsw-alias-bg-module-platform,color-mix(in srgb,var(--wcu-fg) 4%,var(--wcu-card)));--wcu-control:var(--dsw-alias-bg-layer-1,Canvas);--wcu-fg:var(--dsw-alias-label-primary,CanvasText);--wcu-muted:var(--dsw-alias-label-secondary,#61666b);--wcu-subtle:var(--dsw-alias-label-tertiary,#81858c);--wcu-line:var(--dsw-alias-border-l2,rgba(128,128,128,.2));--wcu-line-strong:var(--dsw-alias-border-l3,rgba(128,128,128,.3));--wcu-hover:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.1));--wcu-accent:var(--dsw-alias-state-business-primary,#4176e6);--wcu-primary:var(--dsw-alias-button-primary-fill,#0f1115);--wcu-primary-fg:var(--dsw-alias-label-primary-foreground,#fff);--wcu-selected:var(--dsw-static-neutral-bluish-400,#adb2b8);--wcu-tip-bg:var(--dsw-alias-tooltip-bg,#2b2f36);--wcu-tip-fg:#fff;color:var(--wcu-fg);font:14px/1.55 var(--dsw-font-family,-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif);max-width:720px;list-style:none;box-sizing:border-box;margin:0;padding:0 0 8px}
       [data-wincu-settings] *{box-sizing:border-box}
@@ -140,6 +162,8 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] .wcu-art .a-ghost{fill:none;stroke:var(--wcu-ink-strong);stroke-width:.9;stroke-dasharray:3 2}
       [data-wincu-settings] .wcu-art .a-open{fill:none;stroke:var(--wcu-accent);stroke-width:.9;stroke-dasharray:2 1.6}
       [data-wincu-settings] .wcu-art .a-eye{fill:none;stroke:var(--wcu-ink-strong);stroke-width:1.1;stroke-linecap:round;stroke-linejoin:round}
+      [data-wincu-settings] .wcu-art .a-lock{fill:none;stroke:#fff;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}
+      [data-wincu-settings] .wcu-art .a-lock-open{fill:none;stroke:var(--wcu-ink-strong);stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}
       [data-wincu-settings] .wcu-art .a-spot0{stop-color:var(--wcu-accent);stop-opacity:.42}
       [data-wincu-settings] .wcu-art .a-spot1{stop-color:var(--wcu-accent);stop-opacity:0}
       [data-wincu-settings] .wcu-art .a-tag{fill:#fff;font:700 7px/1 'Segoe UI',sans-serif}
@@ -286,7 +310,9 @@ window.__ModuleLoader__.load({
         ...(on?[h('circle',{cx:50,cy:33,r:21,fill:`url(#${id})`})]:[]),arrow(48,25),...(on?[box('a-acc',60,44,26,11,5.5),h('text',{className:'a-tag',x:73,y:51.9,textAnchor:'middle'},'DSH')]:[])),
       // One square per tool: filled loads at startup, dashed loads on demand, faint is off.
       tools:(loaded,allowed)=>drawing(...toolGroups.flatMap(([,entries],row)=>entries.map(([name],col)=>box(loaded.has(name)?'a-acc':allowed.has(name)?'a-open':'a-ink',15.5+col*12,12.5+row*12,9,9,2.2)))),
-      esc:()=>drawing(box('a-ink2',33,19,46,34,7),box('a-win',33,16,46,34,7),box('a-frame',33,16,46,34,7),h('text',{className:'a-cap',x:56,y:37.2,textAnchor:'middle'},'Esc'))
+      esc:()=>drawing(box('a-ink2',33,19,46,34,7),box('a-win',33,16,46,34,7),box('a-frame',33,16,46,34,7),h('text',{className:'a-cap',x:56,y:37.2,textAnchor:'middle'},'Esc')),
+      progress:on=>drawing(...monitor(),box('a-win',16,13,34,24,2.5),box('a-ink',20,20,22,2.2,1.1),box('a-ink',20,25,16,2.2,1.1),box('a-frame',16,13,34,24,2.5),...(on?[box('a-pill',54,10,43,29,3.5),h('circle',{className:'a-dot',cx:59.5,cy:15.5,r:1.7}),box('a-text',63.5,14.6,22,1.8,.9),box('a-text',58,21,33,1.8,.9),box('a-text',58,26.5,27,1.8,.9),box('a-text',58,32,19,1.8,.9)]:[box('a-ghost',54,10,43,29,3.5)])),
+      lock:locked=>drawing(box(locked?'a-win a-edge':'a-win a-frame',18,12,62,45,4.5),box('a-ink',25,23,36,2.6,1.3),box('a-ink',25,30,42,2.6,1.3),box('a-ink',25,37,28,2.6,1.3),box(locked?'a-acc':'a-win',68,9,22,22,5.5),...(!locked?[box('a-frame',68,9,22,22,5.5)]:[]),h('path',{className:locked?'a-lock':'a-lock-open',d:locked?'M76 19.5v-2.2a3 3 0 0 1 6 0v2.2M74.8 19.5h8.4v6.2h-8.4z':'M76 19.5v-2.4a3 3 0 0 1 5.6-1.4M74.8 19.5h8.4v6.2h-8.4z'}),...(locked?[arrow(48,31)]:[]))
     };
 
 
@@ -310,8 +336,15 @@ window.__ModuleLoader__.load({
       const [recording,setRecording] = React.useState(false), [recordMessage,setRecordMessage] = React.useState('');
       const [noteView,setNoteView] = React.useState(null), [noteSaving,setNoteSaving] = React.useState(false);
       const savedKey = JSON.stringify(Object.fromEntries(Object.keys(defaults).map(key=>[key,saved[key]])));
-      const visibleBeforeFirefox=React.useRef(null),attachBeforeFirefox=React.useRef(null);
-      React.useEffect(()=>{if(!dirty){setDraft(saved);visibleBeforeFirefox.current=null;attachBeforeFirefox.current=null;}},[savedKey,dirty]);
+      const visibleBeforeFirefox=React.useRef(null),attachBeforeFirefox=React.useRef(null),prevSaved=React.useRef(saved);
+      const liveOverlayKeys=['progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressOverlayLocked','progressOverlayEnabled'];
+      React.useEffect(()=>{
+        const prev=prevSaved.current;prevSaved.current=saved;
+        if(!dirty){setDraft(saved);visibleBeforeFirefox.current=null;attachBeforeFirefox.current=null;return;}
+        const synced={};
+        for(const key of Object.keys(defaults))if(!equal(saved[key],prev[key])&&!equal(draft[key],saved[key])&&(liveOverlayKeys.includes(key)||equal(draft[key],prev[key])))synced[key]=saved[key];
+        if(Object.keys(synced).length){const next={...draft,...synced};setDraft(next);setDirty(Object.keys(defaults).some(key=>!equal(next[key],saved[key])));}
+      },[savedKey,dirty]);
       // The Firefox that DSH starts has no window yet, so choosing Firefox turns
       // the switches off, and choosing another browser turns them back.
       const change = (field,value) => {const next={...draft,[field]:value};
@@ -342,19 +375,38 @@ window.__ModuleLoader__.load({
         catch(error){setMessage(t('failed')+': '+String(error.message||error));setTone('error');return false;}
         finally{setSaving(false);}
       };
-      // Persist overlay-only actions without committing unrelated draft fields.
+      // Persist section-scoped actions without committing unrelated draft fields.
       const overlayKeys=Object.keys(defaults).filter(key=>key.startsWith('progress'));
-      const applyOverlayPatch=async patch=>{
+      const indicatorKeys=['indicatorEnabled','cursorIndicatorEnabled','indicatorPosition','indicatorIdleMs','indicatorText','remoteIndicatorVisible'];
+      const validInt=(value,rule)=>Number.isInteger(value)&&value>=rule.min&&value<=rule.max;
+      const validIndicator=d=>Boolean(d.indicatorText.trim())&&d.indicatorText.length<=settingRules.indicatorText.maxLength&&!/[\r\n\x00-\x1f]/.test(d.indicatorText)&&validInt(d.indicatorIdleMs,settingRules.indicatorIdleMs);
+      const validOverlay=(d,lockKey)=>['progressOverlayOpacity','progressOverlayWidth','progressOverlayHeight','progressOverlayX','progressOverlayY'].every(k=>validInt(d[k],settingRules[k]))&&isValidShortcut(lockKey);
+      const applySectionPatch=async(patch,success='saved')=>{
         const next={...draft,...patch};setDraft(next);
-        if(await run(patch,'saved')){
+        if(await run(patch,success)){
           const base={...saved,...patch};setDirty(Object.keys(defaults).some(key=>!equal(next[key],base[key])));
         }else setDirty(true);
       };
-      const applyOverlaySwitch=(field,value)=>applyOverlayPatch({[field]:value});
-      const openProgress=()=>applyOverlayPatch({...Object.fromEntries(overlayKeys.map(key=>[key,draft[key]])),progressOverlayEnabled:true,progressPreviewToken:Date.now()});
+      const applyOverlaySwitch=(field,value)=>applySectionPatch({[field]:value});
+      const openProgress=()=>{
+        const lockKey=formatShortcutInput(draft.progressLockShortcut);
+        if(!validOverlay(draft,lockKey)){setMessage(t('invalidOverlay'));setTone('error');return;}
+        if(lockKey&&lockKey===(draft.stopShortcut||saved.stopShortcut)){setMessage(t('shortcutConflict'));setTone('error');return;}
+        return applySectionPatch({...Object.fromEntries(overlayKeys.map(key=>[key,draft[key]])),progressLockShortcut:lockKey,progressOverlayEnabled:true,progressPreviewToken:Date.now()});
+      };
+      const previewIndicator=()=>{
+        if(!validIndicator(draft)){setMessage(t('invalid'));setTone('error');return;}
+        return applySectionPatch({...Object.fromEntries(indicatorKeys.map(key=>[key,draft[key]])),previewToken:Date.now()},'previewed');
+      };
       const save = async () => {
-        if(!draft.indicatorText.trim()||draft.indicatorText.length>settingRules.indicatorText.maxLength||/[\r\n\x00-\x1f]/.test(draft.indicatorText)||!Number.isInteger(draft.indicatorIdleMs)||draft.indicatorIdleMs<settingRules.indicatorIdleMs.min||draft.indicatorIdleMs>settingRules.indicatorIdleMs.max){setMessage(t('invalid'));setTone('error');return;}
-        const patch=Object.fromEntries(Object.keys(defaults).filter(key=>!equal(draft[key],saved[key])).map(key=>[key,draft[key]]));
+        const lockKey=formatShortcutInput(draft.progressLockShortcut);
+        const normalized=lockKey===draft.progressLockShortcut?draft:{...draft,progressLockShortcut:lockKey};
+        if(normalized!==draft)setDraft(normalized);
+        if(!validIndicator(normalized)){setMessage(t('invalid'));setTone('error');return;}
+        if(!validOverlay(normalized,lockKey)){setMessage(t('invalidOverlay'));setTone('error');return;}
+        if(lockKey&&lockKey===normalized.stopShortcut){setMessage(t('shortcutConflict'));setTone('error');return;}
+        const patch=Object.fromEntries(Object.keys(defaults).filter(key=>!equal(normalized[key],saved[key])).map(key=>[key,normalized[key]]));
+        if(Object.keys(patch).length===0){setDirty(false);setMessage(t('saved'));setTone('success');return;}
         if(await run(patch,'saved'))setDirty(false);
       };
       // The support note is a display choice. Save it at once, outside the draft,
@@ -387,6 +439,7 @@ window.__ModuleLoader__.load({
       const toggle=(field,label,locked)=>h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch','aria-label':t(label),checked:draft[field],disabled:disabled||locked,onChange:e=>['progressOverlayEnabled','progressOverlayLocked'].includes(field)?applyOverlaySwitch(field,e.target.checked):change(field,e.target.checked)});
       const switchItem=(field,label,hint,art,locked)=>item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-'+field,'aria-hidden':true},art),title(t(label),hint,{htmlFor:idPrefix+'-'+field}),toggle(field,label,locked));
       const field=(label,control)=>h('div',{className:'wcu-field'},label,control);
+      const numProps=key=>({value:draft[key],onChange:e=>change(key,e.target.value===''?'':Number(e.target.value)),onBlur:()=>{if(draft[key]===''||Number.isNaN(draft[key]))change(key,saved[key]);}});
       const allowedTools=['full','lazy'].includes(draft.toolPreset)?allToolNames:activeTools;
       const keycap=(key,label)=>h('kbd',{className:'wcu-key',key},label);
       const shortcutKeys=recording?[h('span',{key:'listen'},t('listening')),h('small',{key:'cancel'},t('listeningCancel'))]
@@ -437,27 +490,27 @@ window.__ModuleLoader__.load({
                 h('legend',null,h('label',{className:'wcu-tool-group-label'},h('input',{type:'checkbox',id:idPrefix+'-tool-group-'+group,checked:count===names.length,'aria-checked':count&&count<names.length?'mixed':count===names.length,ref:input=>{if(input)input.indeterminate=count>0&&count<names.length;},onChange:e=>selectTools(names,e.target.checked)}),t('toolGroup_'+group),h('span',{className:'wcu-tool-count'},count+' / '+names.length))),
                 h('div',{className:'wcu-tool-grid'},...entries.map(([name])=>h('label',{className:'wcu-tool-item',key:name,title:'windows_computer_use_'+name},h('input',{type:'checkbox',id:idPrefix+'-tool-'+name,'data-wincu-tool':name,checked:draft.enabledTools.includes(name),disabled:customDisabled,onChange:e=>selectTools([name],e.target.checked)}),h('span',null,h('strong',null,t('tool_'+name)),h('small',null,t('toolHint_'+name)))))));})))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-indicator-title'},
-          head(idPrefix+'-indicator-title','indicatorTitle','indicatorInfo',button('preview',{className:'wcu-small',disabled:disabled||dirty||(!draft.indicatorEnabled&&!draft.cursorIndicatorEnabled),onClick:()=>run({previewToken:Date.now()},'previewed'),title:t(dirty?'previewHint':'previewTitle')})),
+          head(idPrefix+'-indicator-title','indicatorTitle','indicatorInfo',button('preview',{className:'wcu-small',disabled:disabled||(!draft.indicatorEnabled&&!draft.cursorIndicatorEnabled),onClick:previewIndicator,title:t('previewTitle')})),
           h('div',{className:'wcu-grid'},
             switchItem('indicatorEnabled','indicator','indicatorHint',arts.indicator(draft.indicatorEnabled,draft.indicatorPosition==='bottom')),
             switchItem('cursorIndicatorEnabled','cursorIndicator','cursorIndicatorHint',arts.cursor(draft.cursorIndicatorEnabled,idPrefix+'-spot'))),
           h('details',{className:'wcu-detail'},h('summary',null,t('appearance')),
             h('div',{className:'wcu-fields'},
               field(title(t('position'),null,{id:idPrefix+'-position-label'}),h('div',{className:'wcu-segment',role:'radiogroup','aria-labelledby':idPrefix+'-position-label'},radio('indicatorPosition','top',t('top')),radio('indicatorPosition','bottom',t('bottom')))),
-              field(title(t('delay'),'delayHint',{htmlFor:idPrefix+'-delay'}),h('div',{className:'wcu-number'},h('input',{className:'wcu-control',id:idPrefix+'-delay',type:'number',min:settingRules.indicatorIdleMs.min,max:settingRules.indicatorIdleMs.max,step:100,value:draft.indicatorIdleMs,disabled:indicatorDisabled,onChange:e=>change('indicatorIdleMs',Number(e.target.value))}),h('span',null,t('ms')))),
+              field(title(t('delay'),'delayHint',{htmlFor:idPrefix+'-delay'}),h('div',{className:'wcu-number'},h('input',{className:'wcu-control',id:idPrefix+'-delay',type:'number',min:settingRules.indicatorIdleMs.min,max:settingRules.indicatorIdleMs.max,step:100,disabled:indicatorDisabled,...numProps('indicatorIdleMs')}),h('span',null,t('ms')))),
               field(title(t('text'),null,{htmlFor:idPrefix+'-text'}),h('input',{className:'wcu-control wcu-text',id:idPrefix+'-text',type:'text',maxLength:settingRules.indicatorText.maxLength,value:isDefaultIndicatorText(draft.indicatorText)&&draft.indicatorText.trim()?t('indicatorDefault'):draft.indicatorText,disabled:indicatorDisabled,onChange:e=>change('indicatorText',e.target.value)})),
               field(title(t('remoteVisible'),'remoteVisibleHint',{htmlFor:idPrefix+'-remoteIndicatorVisible'}),toggle('remoteIndicatorVisible','remoteVisible'))))),
         h('section',{className:'wcu-section','data-wincu-progress-settings':true,'aria-labelledby':idPrefix+'-progress-title'},
-          head(idPrefix+'-progress-title','progressSettings','progressInfo',button('openProgress',{'data-wincu-open-progress':true,title:t('progressSync'),className:'wcu-small',disabled,onClick:openProgress})),
-          h('div',{className:'wcu-grid'},switchItem('progressOverlayEnabled','progressOverlay','progressOverlayHint',arts.indicator(draft.progressOverlayEnabled,false)),switchItem('progressOverlayLocked','progressLocked','progressLockedHint',arts.indicator(draft.progressOverlayLocked,false))),
+          head(idPrefix+'-progress-title','progressSettings','progressInfo',h('span',{className:'wcu-caption'},t('instantSave')),button('openProgress',{'data-wincu-open-progress':true,title:t('progressSync'),className:'wcu-small',disabled,onClick:openProgress})),
+          h('div',{className:'wcu-grid'},switchItem('progressOverlayEnabled','progressOverlay','progressOverlayHint',arts.progress(draft.progressOverlayEnabled)),switchItem('progressOverlayLocked','progressLocked','progressLockedHint',arts.lock(draft.progressOverlayLocked))),
           h('details',{className:'wcu-detail','data-wincu-progress-details':true},h('summary',null,t('appearance')),
           h('p',{className:'wcu-hint'},t('progressSync')),
           h('div',{className:'wcu-fields'},
             field(title(t('progressMode'),'progressModeHint',{htmlFor:idPrefix+'-progressOverlayMode'}),h('select',{className:'wcu-control',id:idPrefix+'-progressOverlayMode',value:draft.progressOverlayMode,disabled,onChange:e=>change('progressOverlayMode',e.target.value)},h('option',{value:'source'},t('progressModeSource')),h('option',{value:'summary'},t('progressModeSummary')))),
-            ...[['progressOverlayOpacity','progressOpacity'],['progressOverlayWidth','progressWidth'],['progressOverlayHeight','progressHeight']].map(([key,label])=>field(title(t(label),null,{htmlFor:idPrefix+'-'+key}),h('input',{className:'wcu-control',id:idPrefix+'-'+key,type:'number',min:settingRules[key].min,max:settingRules[key].max,value:draft[key],disabled,onChange:e=>change(key,Number(e.target.value))}))),
+            ...[['progressOverlayOpacity','progressOpacity'],['progressOverlayWidth','progressWidth'],['progressOverlayHeight','progressHeight']].map(([key,label])=>field(title(t(label),null,{htmlFor:idPrefix+'-'+key}),h('input',{className:'wcu-control',id:idPrefix+'-'+key,type:'number',min:settingRules[key].min,max:settingRules[key].max,disabled,...numProps(key)}))),
             field(title(t('progressPosition'),null,{htmlFor:idPrefix+'-progressOverlayPosition'}),h('select',{className:'wcu-control',id:idPrefix+'-progressOverlayPosition',value:draft.progressOverlayPosition,disabled,onChange:e=>change('progressOverlayPosition',e.target.value)},...['top-right','top-left','bottom-right','bottom-left','custom'].map((key,index)=>h('option',{key,value:key},t(['progress_topRight','progress_topLeft','progress_bottomRight','progress_bottomLeft','progress_custom'][index]))))),
-            ...[['progressOverlayX','progressX'],['progressOverlayY','progressY']].map(([key,label])=>field(title(t(label),null,{htmlFor:idPrefix+'-'+key}),h('input',{className:'wcu-control',id:idPrefix+'-'+key,type:'number',min:settingRules[key].min,max:settingRules[key].max,value:draft[key],disabled:disabled||draft.progressOverlayPosition!=='custom',onChange:e=>change(key,Number(e.target.value))}))),
-            field(title(t('progressShortcut'),'progressShortcutHint',{htmlFor:idPrefix+'-progressLockShortcut'}),h('input',{className:'wcu-control wcu-text',id:idPrefix+'-progressLockShortcut',value:draft.progressLockShortcut,placeholder:'Ctrl+Alt+P',maxLength:50,disabled,onChange:e=>change('progressLockShortcut',e.target.value)}))))),
+            ...[['progressOverlayX','progressX'],['progressOverlayY','progressY']].map(([key,label])=>field(title(t(label),null,{htmlFor:idPrefix+'-'+key}),h('input',{className:'wcu-control',id:idPrefix+'-'+key,type:'number',min:settingRules[key].min,max:settingRules[key].max,disabled:disabled||draft.progressOverlayPosition!=='custom',...numProps(key)}))),
+            field(title(t('progressShortcut'),'progressShortcutHint',{htmlFor:idPrefix+'-progressLockShortcut'}),h('input',{className:'wcu-control wcu-text',id:idPrefix+'-progressLockShortcut',value:draft.progressLockShortcut,placeholder:'Ctrl+Alt+P',maxLength:50,disabled,onChange:e=>change('progressLockShortcut',e.target.value),onKeyDown:e=>{if(e.isComposing||e.repeat||['Control','Alt','Shift','Meta','OS','Escape','Tab'].includes(e.key))return;if(e.altKey||e.metaKey||(e.ctrlKey&&e.shiftKey)||/^F(?:[1-9]|1[0-9]|2[0-4])$/.test(e.code||'')){const s=shortcutFromEvent(e);if(s){e.preventDefault();e.stopPropagation();change('progressLockShortcut',s);}}},onBlur:e=>{const s=formatShortcutInput(e.target.value);if(s!==draft.progressLockShortcut)change('progressLockShortcut',s);}}))))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-stop-title'},
           head(idPrefix+'-stop-title','stop','stopInfo',button('clearShortcut',{title:t('clearShortcutTitle'),className:'wcu-small',disabled:disabled||!draft.stopShortcut,onClick:()=>{change('stopShortcut','');setRecordMessage('');}})),
           h('div',{className:'wcu-grid'},

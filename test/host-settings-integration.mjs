@@ -96,9 +96,12 @@ try {
   await until(()=>settings.describe().find(item=>item.ns===entry.options.id).value.progressOverlayWidth===520);
   await until(async()=>JSON.parse(await readFile(liveFile,'utf8')).progressOverlayX===120);
   assert.equal(JSON.parse(await readFile(editor.documentPath,'utf8')).progressOverlayHeight,400);
-  atomicJson(layoutFile,{id:'close-fixture',patch:{progressOverlayEnabled:false}});
-  await until(()=>settings.describe().find(item=>item.ns===entry.options.id).value.progressOverlayEnabled===false);
-  await settings.update(entry.options.id,{progressOverlayEnabled:true,progressOverlayOpacity:72,progressLockShortcut:'Ctrl+Alt+P'});
+  atomicJson(layoutFile,{id:'lock-fixture',patch:{progressOverlayLocked:false}});
+  await until(()=>settings.describe().find(item=>item.ns===entry.options.id).value.progressOverlayLocked===false);
+  atomicJson(layoutFile,{id:'disallowed-enable-fixture',patch:{progressOverlayEnabled:false}});
+  await new Promise(resolve=>setTimeout(resolve,700));
+  assert.equal(settings.describe().find(item=>item.ns===entry.options.id).value.progressOverlayEnabled,true,'Native layout patches cannot disable progressOverlayEnabled');
+  await settings.update(entry.options.id,{progressOverlayEnabled:true,progressOverlayOpacity:72,progressOverlayLocked:true,progressLockShortcut:'Ctrl+Alt+P'});
   await until(async()=>JSON.parse(await readFile(liveFile,'utf8')).progressOverlayOpacity===72);
   atomicJson(layoutFile,{id:'stale-fixture',base:{progressOverlayWidth:440},patch:{progressOverlayWidth:900}});
   await new Promise(resolve=>setTimeout(resolve,700));

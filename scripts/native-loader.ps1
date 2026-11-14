@@ -6,13 +6,20 @@ function Get-NativeSourceHash {
   try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Source))).Replace('-', '').Substring(0,16)).ToLowerInvariant() }
   finally { $sha.Dispose() }
 }
+$script:CachedNativeManifestKey = $null
+$script:CachedNativeManifest = $null
 function Import-PackagedHelper {
   param([string]$Name, [string]$Source, [string]$Root = $PSScriptRoot)
   if ($PSVersionTable.PSEdition -eq 'Core' -or $env:WCU_DISABLE_PRECOMPILED -eq '1') { return $false }
   try {
     $manifestPath = Join-Path $Root 'native/manifest.json'
     if (-not [IO.File]::Exists($manifestPath)) { return $false }
-    $manifest = [IO.File]::ReadAllText($manifestPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    $manifestKey = "$manifestPath|$(([IO.File]::GetLastWriteTimeUtc($manifestPath)).Ticks)"
+    if ($script:CachedNativeManifestKey -cne $manifestKey -or $null -eq $script:CachedNativeManifest) {
+      $script:CachedNativeManifest = [IO.File]::ReadAllText($manifestPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+      $script:CachedNativeManifestKey = $manifestKey
+    }
+    $manifest = $script:CachedNativeManifest
     if ($manifest.runtime -ne 'netfx-clr4') { throw 'Unsupported native runtime.' }
     $entry = $manifest.helpers.$Name
     if ($null -eq $entry -or $entry.sourceHash -cne (Get-NativeSourceHash $Source)) { throw 'Helper source changed; rebuild native artifacts.' }

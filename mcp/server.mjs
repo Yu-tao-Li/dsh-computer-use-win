@@ -544,45 +544,45 @@ for (const tool of tools) tool.annotations = toolAnnotations(tool.name);
 // Keep execution/validation schemas intact; only the model-facing prose is
 // shortened. The discovery tool returns the original definition on demand.
 const conciseDescriptions = {
-  batch: 'Execute up to 20 planned actions on one explicit target; stop on error/navigation/dialog/new window, then observe once. Each step respects disabled tools and stop guards.',
-  launch_app: 'Launch an executable, shortcut or installed app through the desktop Shell; survives tool/server exit. Verify the intended window afterward; apps may activate themselves. Arguments and shortcuts require explicit approval.',
-  health: 'Check Windows backend availability.',
-  snapshot: 'Screenshot and UIA tree. Partial trees report truncation; use OCR for sparse UIA. browserTab: page outline and viewport.',
-  accessibility_tree: 'Read a bounded UIA tree; partial output does not establish absence. browserTab: page outline with element ids.',
-  list_windows: 'List native top-level windows, HWND/PID and responsiveness; the result field browserLane lists browser tabs for browserTab.',
-  find: 'Find UIA controls; empty sparse searches add OCR. OCR hits use SCREEN coordinates, not element IDs.',
-  element_info: 'Inspect a UIA element ID, page element ID or physical SCREEN point.',
-  click: 'Click elementId (in the background) or physical SCREEN x/y (real click; the foreground and pointer go back). background delivery is unverified. Page ids (t1a2b:57) act inside the page.',
-  double_click: 'Double-click elementId or physical SCREEN x/y; background delivery is unverified.',
-  move: 'Move pointer to elementId or physical SCREEN x/y.',
-  drag: 'Drag a path of physical SCREEN coordinates; the target comes forward for it.',
-  scroll: 'Scroll elementId (in the background first) or physical SCREEN x/y; positive deltaY scrolls down.',
-  type_text: 'Type into the focus. auto: Win32 edits in the background, else a paste with the window borrowed; restores the clipboard. background (WM_CHAR to the focused control) is checked on Win32 edits only.',
-  keypress: 'Send key/chord, e.g. ["ctrl","a"]. Windows key blocked; background supports one printable character only.',
+  batch: 'Run up to 20 actions on one target; stops on error, navigation, dialog, or new window, then observes once.',
+  launch_app: 'Launch an executable, shortcut (.lnk), or installed app via Shell (persists after exit). Args and shortcuts need approval.',
+  health: 'Check Windows backend and browser lane status.',
+  snapshot: 'Screenshot and bounded UIA tree (use OCR if UIA is sparse). browserTab: page outline and viewport.',
+  accessibility_tree: 'Read bounded UIA tree (partial tree does not prove absence). browserTab: page outline with element IDs.',
+  list_windows: 'List native top-level windows (HWND/PID/responsiveness) and browserLane tabs.',
+  find: 'Find UIA controls; sparse misses fall back to OCR (OCR hits use SCREEN x/y, not elementId).',
+  element_info: 'Inspect a UIA elementId, page elementId, or SCREEN x/y.',
+  click: 'Click elementId (background) or SCREEN x/y (real pointer, then restores). Page IDs act inside the page.',
+  double_click: 'Double-click elementId or SCREEN x/y (background delivery unverified).',
+  move: 'Move pointer to elementId or SCREEN x/y.',
+  drag: 'Drag across SCREEN points (brings target forward).',
+  scroll: 'Scroll elementId or SCREEN x/y (positive deltaY scrolls down).',
+  type_text: 'Type into focus (Win32 background or clipboard-preserving paste).',
+  keypress: 'Send key/chord (e.g. ["ctrl","a"]); Win key blocked; background supports 1 printable char only.',
   focus: 'Focus a UIA element.',
-  invoke: 'Invoke/toggle/select/expand a UIA element in the background, with optional click fallback; action expands, collapses or scrolls it into view.',
-  set_value: 'Set a value in the background, with optional focus/type fallback. Page ids fill fields; <tab>:address navigates; new-tab opens a URL in a background tab.',
-  activate_window: 'Activate target window; activation cannot be suppressed.',
-  wait: 'Pause briefly before observing again.',
-  ocr: 'Read visible text without UIA, best effort (prefer UIA text when exposed). Literal query; inspect lines on misses. Click word.x/y in SCREEN coordinates.',
-  screenshot: 'Capture without UIA. SCREEN = bounds origin + image pixel / imageScale. Inspect resulting state to verify actions. browserTab: page pixels.',
-  wait_for: 'Wait for window/UIA element/literal OCR text. observed means condition met; partial UIA absence is inconclusive.',
-  close_window: 'Post WM_CLOSE in background; application may close or show a save dialog.',
-  move_window: 'Move window to physical SCREEN x/y; updates coordinate homing.'
+  invoke: 'Invoke/toggle/select/expand a UIA element in background (optional click fallback).',
+  set_value: 'Set value in background (page IDs fill fields; <tab>:address navigates; new-tab opens background tab).',
+  activate_window: 'Bring target window to foreground.',
+  wait: 'Pause briefly before next observation.',
+  ocr: 'Read visible text via OCR; literal query; word x/y are SCREEN coordinates.',
+  screenshot: 'Capture window/screen; SCREEN = origin + px / imageScale. browserTab: viewport pixels.',
+  wait_for: 'Wait for window, UIA element, or literal OCR text.',
+  close_window: 'Post WM_CLOSE in background.',
+  move_window: 'Move window to SCREEN x/y; updates coordinate homing.'
 };
 const concisePropertyDescriptions = {
-  windowTitle: 'Target title substring.', processId: 'Target PID.', nativeWindowHandle: 'Target HWND.',
-  activate: 'Bring forward and keep in front.',
-  viewMode: 'UIA view; runtime IDs bypass view filtering.',
-  includeOffscreen: 'Include offscreen UIA nodes.', detailLevel: 'compact omits heavy/empty node metadata.',
-  treeTimeoutMs: 'Budget between UIA calls; a provider call may overrun.',
-  captureWindow: 'Crop target window; bounds/imageScale map SCREEN coordinates.',
-  ocrFallback: 'Add OCR after empty sparse/incomplete UIA search.',
-  focusMode: 'preserve keeps clicked focus; main chooses largest text control.',
-  query: 'Literal text; OCR ignores case/whitespace.',
-  language: 'Installed OCR language (e.g. zh-Hans, en-US); default: Windows languages.',
-  resolveControl: 'Optional UIA hit-test; may block or return a whole document.',
-  browserTab: 'Browser tab id from list_windows; background page access.'
+  windowTitle: 'Title substring.', processId: 'Target PID.', nativeWindowHandle: 'Target HWND.',
+  activate: 'Bring forward and keep on top.',
+  viewMode: 'UIA view (runtime IDs bypass filter).',
+  includeOffscreen: 'Include offscreen nodes.', detailLevel: 'compact omits empty/heavy fields.',
+  treeTimeoutMs: 'UIA budget ms.',
+  captureWindow: 'Crop to window; bounds/imageScale map SCREEN coordinates.',
+  ocrFallback: 'Run OCR on sparse/empty UIA find.',
+  focusMode: 'preserve keeps focus; main picks largest text control.',
+  query: 'Literal text (OCR ignores case/spaces).',
+  language: 'OCR language (e.g. zh-Hans, en-US).',
+  resolveControl: 'Optional UIA hit-test (may block on documents).',
+  browserTab: 'Tab ID from list_windows.'
 };
 function compactSchema(schema, key) {
   const result = {};
@@ -596,6 +596,13 @@ function compactSchema(schema, key) {
   }
   return result;
 }
+const toolByName = new Map(tools.map(tool => [tool.name, tool]));
+const compactedToolByName = new Map(tools.map(tool => [tool.name, {
+  name: tool.name,
+  annotations: tool.annotations,
+  description: conciseDescriptions[tool.name.slice('windows_computer_use_'.length)],
+  inputSchema: compactSchema(tool.inputSchema),
+}]));
 const toolMode = process.env.WCU_TOOL_MODE || 'full';
 if (!['lite', 'full', 'lazy'].includes(toolMode)) throw new Error('WCU_TOOL_MODE must be lite, full or lazy');
 const prefix = 'windows_computer_use_';
@@ -612,7 +619,7 @@ const enabledTools = new Set(initialNames);
 // advertises the management entry alone, so no capability name is left to infer
 // from. MCP instructions are the channel for that statement: DSH publishes them
 // as a system-prompt section attributed to this server.
-const capabilityInstructions = 'Windows Computer Use reads and operates real Windows applications on this machine: it lists windows, reads UI Automation trees, takes screenshots, recognizes on-screen text with OCR, clicks, types, sends keys and manages windows. The current tool-loading preset starts without those desktop tools, so call windows_computer_use_tools with operation "enable" and the names a task needs (or ["*"] for all allowed tools) before using them; "describe" returns one tool\'s full arguments. Prefer UI Automation elements over screen coordinates, and observe again to verify that an action took effect. Web pages in Chromium browsers can also be read and operated in the background through the browser lane: list_windows shows its tabs.';
+const capabilityInstructions = 'Windows Computer Use reads and operates Windows apps (window lists, UI Automation, screenshots, OCR, input, window management). Tools start unloaded: call windows_computer_use_tools with operation "enable" and needed names (or ["*"] for all allowed tools), or "describe" for full arguments. Prefer UIA elements over screen coordinates, then observe again to verify. Chromium browser pages also run in background via browserTab (listed under browserLane in list_windows).';
 // A Custom checklist that allows no desktop tool must not claim the capability:
 // enabling one is refused, and saying otherwise contradicts the user's setting.
 const managementOnly = initialNames.length === 1 && initialNames[0] === discoveryName
@@ -637,12 +644,10 @@ const discoveryTool = {
   } }
 };
 function advertisedTools() {
-  return [...tools.filter(tool => enabledTools.has(tool.name)).map(tool => ({
-    name: tool.name,
-    annotations: tool.annotations,
-    description: conciseDescriptions[tool.name.slice(prefix.length)],
-    inputSchema: compactSchema(tool.inputSchema)
-  })), ...(enabledTools.has(discoveryName)?[discoveryTool]:[])];
+  const list = [];
+  for (const tool of tools) if (enabledTools.has(tool.name)) list.push(compactedToolByName.get(tool.name));
+  if (enabledTools.has(discoveryName)) list.push(discoveryTool);
+  return list;
 }
 function manageTools(args) {
   args = validateArguments(discoveryTool.inputSchema, args);
@@ -652,7 +657,7 @@ function manageTools(args) {
   // Resolve every name before mutation, so one typo cannot partially change
   // the client's advertised list. Management is available only if selected.
   const definitions = names.map(name => {
-    const tool = tools.find(tool => tool.name === name);
+    const tool = toolByName.get(name);
     if (!tool) throw new Error(`Unknown tool: ${name}`);
     return tool;
   });
@@ -682,6 +687,13 @@ function safeJson(value) {
   return JSON.stringify(value);
 }
 
+const compiledPatterns = new Map();
+const patternFor = source => {
+  let re = compiledPatterns.get(source);
+  if (!re) { re = new RegExp(source, "u"); compiledPatterns.set(source, re); }
+  return re;
+};
+
 // Validate and apply defaults from the same schemas advertised to MCP clients.
 // Never coerce strings/booleans into input coordinates or other action arguments.
 function validateArguments(schema, value, location = "arguments") {
@@ -708,7 +720,7 @@ function validateArguments(schema, value, location = "arguments") {
   if (schema.enum && !schema.enum.includes(value)) fail(`must be one of ${schema.enum.join(", ")}`);
   if (typeof value === 'string' && schema.minLength !== undefined && [...value].length < schema.minLength) fail(`must contain at least ${schema.minLength} characters`);
   if (typeof value === 'string' && schema.maxLength !== undefined && [...value].length > schema.maxLength) fail(`must contain at most ${schema.maxLength} characters`);
-  if (schema.pattern && !new RegExp(schema.pattern, "u").test(value)) fail(`must match ${schema.pattern}`);
+  if (schema.pattern && !patternFor(schema.pattern).test(value)) fail(`must match ${schema.pattern}`);
   if (schema.minimum !== undefined && value < schema.minimum) fail(`must be >= ${schema.minimum}`);
   if (schema.maximum !== undefined && value > schema.maximum) fail(`must be <= ${schema.maximum}`);
   return value;
@@ -717,6 +729,10 @@ function validateArguments(schema, value, location = "arguments") {
 // DSH hosts can retain/serialize raw MCP image blocks even when their text
 // preview says "content discarded". Its adapter requests file mode so no
 // binary payload reaches the tool result. Standalone MCP keeps inline images.
+const BROWSER_SHOT_DIR = path.join(os.tmpdir(), 'dsh-wcu-browser-screenshots');
+const UUID_PNG_RE = /^[a-f0-9-]{36}\.png$/;
+let browserShotDirReady = false;
+
 async function screenshotOutput(screenshot, includeImage = true) {
   if (!screenshot) return { metadata: screenshot, content: [] };
   const { base64, ...metadata } = screenshot;
@@ -726,21 +742,22 @@ async function screenshotOutput(screenshot, includeImage = true) {
   if (process.env.WCU_IMAGE_MODE === 'file') {
     if (includeImage && !metadata.path) {
       // Desktop capture already saves a PNG. Browser captures need a file too.
-      const directory = path.join(os.tmpdir(), 'dsh-wcu-browser-screenshots');
-      await mkdir(directory, { recursive: true });
+      if (!browserShotDirReady) { await mkdir(BROWSER_SHOT_DIR, { recursive: true }); browserShotDirReady = true; }
+      const cutoff = Date.now() - 30 * 60 * 1000;
       // Same 30-minute retention as desktop screenshots. Only owned UUID PNGs
       // in this directory qualify; unrelated files and links are left alone.
-      for (const entry of await readdir(directory, { withFileTypes: true })) {
-        if (!entry.isFile() || !/^[a-f0-9-]{36}\.png$/.test(entry.name)) continue;
-        const file = path.join(directory, entry.name);
-        try { if (Date.now() - (await stat(file)).mtimeMs > 30 * 60 * 1000) await unlink(file); } catch {}
-      }
+      const entries = await readdir(BROWSER_SHOT_DIR, { withFileTypes: true }).catch(() => []);
+      await Promise.all(entries.map(async entry => {
+        if (!entry.isFile() || !UUID_PNG_RE.test(entry.name)) return;
+        const file = path.join(BROWSER_SHOT_DIR, entry.name);
+        try { if ((await stat(file)).mtimeMs < cutoff) await unlink(file); } catch {}
+      }));
       const bytes = Buffer.from(base64, 'base64');
-      metadata.path = path.join(directory, randomUUID() + '.png');
+      metadata.path = path.join(BROWSER_SHOT_DIR, randomUUID() + '.png');
       await writeFile(metadata.path, bytes, { flag: 'wx' });
       metadata.bytes = bytes.length;
     }
-    return { metadata: { ...metadata, delivery: 'file', readHint: 'Use an image-viewing tool to inspect path; to send it over IM, attach that file with the IM tool. Do not read the PNG as text or base64.' }, content: [] };
+    return { metadata: { ...metadata, delivery: 'file', readHint: 'Inspect path with an image-viewing tool (attach path to send over IM; do not read as text/base64).' }, content: [] };
   }
   if (!base64) return {metadata,content:[]};
   return { metadata: { ...metadata, base64: `<${base64.length} base64 chars omitted>` },
@@ -1063,9 +1080,9 @@ async function callTool(name, args, request) {
   if (batchOwner && batchOwner !== request) throw new Error('COMPUTER_USE_BUSY: A batch is in progress; wait for its result.');
   if (!allowedTools.has(name) && TOOL_NAMES.includes(name.slice(prefix.length))) throw new Error('TOOL_DISABLED_IN_SETTINGS: This tool is disabled by the user in Settings > Computer Use (设置 > 电脑操控 in the Chinese interface).');
   if (name === discoveryName) return manageTools(args);
-  const definition = tools.find(tool => tool.name === name);
+  const definition = toolByName.get(name);
   if (!definition) throw new Error(`Unknown tool: ${name}`);
-  if (!args || typeof args !== "object" || Array.isArray(args)) args = validateArguments(definition.inputSchema, args);
+  if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error('INVALID_ARGUMENTS: arguments must be an object');
   const suppliedApproval = args._wcuApproval;
   if (suppliedApproval !== undefined) {
     const {_wcuApproval, ...plain} = args;
@@ -1075,7 +1092,7 @@ async function callTool(name, args, request) {
     if (request) request.approvalGrants = collectApprovalRequirements(name, args, process.env);
   }
   assertOperation(name, args, { env: process.env, grants: request?.approvalGrants });
-  args = validateArguments(definition.inputSchema, args);
+  if (!batchPrevalidated.has(args)) args = validateArguments(definition.inputSchema, args);
   if (name === 'windows_computer_use_batch') return runBatch(args, request);
   const actionName = name.replace("windows_computer_use_", "");
   const browser = isBrowserCall(args);
@@ -1203,6 +1220,7 @@ async function observationText(action, args, request) {
 }
 
 let batchOwner = null;
+const batchPrevalidated = new WeakSet();
 // Editors mark unsaved changes in the title ("*name - Notepad", "● name - Code"),
 // so typing that adds or clears such a mark is not navigation.
 const withoutUnsavedMark = title => String(title ?? '').replace(/^\s*[*●•]+\s*|\s*[*●•]+\s*$/g, '').replace(/\s[*●•](?=\s)/g, '');
@@ -1221,7 +1239,7 @@ async function runBatch(args, request) {
     if (/^(?:new-tab|b[0-9a-z]+:(?:new-tab|connect))$/.test(step.arguments.elementId ?? '')) throw new Error('INVALID_ARGUMENTS: open or connect a browser before batching.');
     if (target.browserTab && step.arguments.elementId && !step.arguments.elementId.startsWith(target.browserTab + ':')) throw new Error('INVALID_ARGUMENTS: batch element belongs to another tab.');
     if (!target.browserTab && isBrowserCall(step.arguments)) throw new Error('INVALID_ARGUMENTS: a desktop batch cannot contain page elements.');
-    const definition = tools.find(tool => tool.name === name);
+    const definition = toolByName.get(name);
     // wait has no target properties, and never borrows the foreground.
     const inherited = Object.fromEntries(Object.entries(target).filter(([key]) => Object.hasOwn(definition.inputSchema.properties,key)));
     const combined = step.action === 'wait' ? { ...step.arguments } : { ...inherited, ...step.arguments };
@@ -1229,6 +1247,7 @@ async function runBatch(args, request) {
     if (target.browserTab && step.action !== 'wait' && !isBrowserCall(combined)) throw new Error('INVALID_ARGUMENTS: this browser batch action needs a page element ID; page coordinates cannot become desktop input.');
     const validated = validateArguments(definition.inputSchema, combined);
     validateActionArguments(step.action, validated);
+    if (target.browserTab || step.action === 'wait') batchPrevalidated.add(validated);
     return { name, action: step.action, args: validated };
   });
   const envBudget = Number(process.env.WCU_BATCH_BUDGET_MS);

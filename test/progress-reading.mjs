@@ -228,9 +228,12 @@ try{
  status=await control.command('status');assert.equal(status.progressLocked,true,'A real run after the preview is locked again');
  assert.equal(status.progressClickThrough,true);
  await control.command('progress',{enabled:true,preview:true,settings,progress:data});
+ const layoutBeforeClose=await readFile(control.layoutFile,'utf8').catch(()=>'');
  await control.command('test_progress_close_click');
  status=await control.command('status');assert.equal(status.progressVisible,false);
- assert.equal(JSON.parse(await readFile(control.layoutFile,'utf8')).patch.progressOverlayEnabled,false);
+ assert.equal(await readFile(control.layoutFile,'utf8').catch(()=>''),layoutBeforeClose,'Closing the preview must not disable progressOverlayEnabled');
+ await control.command('progress',{enabled:true,settings,progress:{...data,startedAt:Date.now()+1000}});
+ status=await control.command('status');assert.equal(status.progressVisible,true,'A real turn shows the overlay normally after closing preview');
  console.log(JSON.stringify({passed:true,root,scrollbar:true,wheel:true,preservesReadingPosition:true,followsOnlyAtBottom:true,
    captionOnlyDrag:true,edgeResize:true,legacyTrailPixels:legacy.strayHeaderPixels,fixedTrailPixels:fixed.strayHeaderPixels,
    stressResizeChanges:76,minMaxSize:true,lockClickThrough:true,wholeLines:true,stepHistory:true,finishedHeader:true,compactSpacing:true,noRecentLabels:true,presetSurvivesUnlock:true,previewUnlockNotSaved:true,

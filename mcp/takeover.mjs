@@ -1,13 +1,13 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, statSync } from 'node:fs';
 import { mkdir, writeFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_SETTINGS, normalizeSettings } from './settings.mjs';
 import { helperStrings, indicatorText, overlayLocale, overlayStrings, systemLocale } from './overlay-strings.mjs';
 
-export const STOPPED = 'COMPUTER_USE_STOPPED_BY_USER: The user stopped this operation series with Esc or their custom shortcut. Do not retry desktop input in this turn. A new user turn, including a request to continue, can use the desktop automatically; no settings change is required.';
+export const STOPPED = 'COMPUTER_USE_STOPPED_BY_USER: Stopped by user (Esc or custom shortcut). Do not retry desktop input in this turn; the next user turn resumes automatically with no settings change needed.';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function readControl(file) {
   for (let attempt = 0; ; attempt++) {
@@ -85,16 +85,26 @@ function replaceFile(from, to) {
   }
 }
 
+const ensuredDirs = new Set();
+const wellFormedReplacer = (_key, item) => typeof item === 'string' ? item.toWellFormed() : item;
+const serializeJsonLine = value => JSON.stringify(value, wellFormedReplacer) + '\n';
+const statVersionKey = file => {
+  const st = statSync(file, { bigint: true, throwIfNoEntry: false });
+  return st ? `${st.mtimeNs}:${st.size}` : '';
+};
+
 export function atomicJson(file, value) {
   if (!file) return;
-  mkdirSync(path.dirname(file), { recursive: true });
+  const dir = path.dirname(file);
+  if (!ensuredDirs.has(dir)) { mkdirSync(dir, { recursive: true }); ensuredDirs.add(dir); }
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
     // A stream may temporarily end with half an emoji. Keep its original
     // buffer in memory, but send well-formed strings to the .NET JSON reader.
-    writeFileSync(temporary, JSON.stringify(value, (_key,item)=>typeof item==='string'?item.toWellFormed():item) + '\n', 'utf8');
+    writeFileSync(temporary, serializeJsonLine(value), 'utf8');
     replaceFile(temporary, file);
   } catch (error) {
+    ensuredDirs.delete(dir);
     // This temporary file belongs to this failed write and has no further use.
     try { unlinkSync(temporary); } catch { }
     throw error;
@@ -113,12 +123,14 @@ async function replaceFileAsync(from, to) {
 
 export async function atomicJsonAsync(file, value) {
   if (!file) return;
-  await mkdir(path.dirname(file), { recursive: true });
+  const dir = path.dirname(file);
+  if (!ensuredDirs.has(dir)) { await mkdir(dir, { recursive: true }); ensuredDirs.add(dir); }
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, JSON.stringify(value, (_key, item) => typeof item === 'string' ? item.toWellFormed() : item) + '\n', 'utf8');
+    await writeFile(temporary, serializeJsonLine(value), 'utf8');
     await replaceFileAsync(temporary, file);
   } catch (error) {
+    ensuredDirs.delete(dir);
     try { await unlink(temporary); } catch { }
     throw error;
   }
@@ -135,6 +147,7 @@ export class TakeoverControl {
     this.layoutFile=process.env.WCU_LAYOUT_FILE;
     this.layoutWrite=Promise.resolve();
     this.progressPreviewToken=this.config.progressPreviewToken;
+    this.suppressedLingerKey=null;
     this.activityFile=activityFile;this.seriesHeld=false;this.seriesIndicator=false;this.seriesKey=null;this.stoppedSeriesKey=null;this.blockedSeries=new Map();
     this.eventName = `Local\\DSH-WCU-${randomUUID()}`; this.waiters = new Map(); this.nextId = 0;
     this.resumeToken = this.config.resumeToken; this.previewToken = this.config.previewToken; this.pauseMessage = STOPPED;
@@ -155,9 +168,20 @@ export class TakeoverControl {
     }
   }
   persist(reason) {
-    try { atomicJson(this.stateFile, { paused: this.paused, active: this.active, seriesActive:this.seriesHeld,reason: reason ?? null,
-      stoppedAt:this.stoppedAt??0,stopReported:this.stopReported===true,stoppedSeriesKey:this.stoppedSeriesKey,blockedSeries:Object.fromEntries(this.blockedSeries),pauseMessage: this.paused ? this.pauseMessage : null, updatedAt: new Date().toISOString() }); }
-    catch (error) { this.presentationError(error); }
+    const body = {
+      paused: this.paused, active: this.active, seriesActive: this.seriesHeld, reason: reason ?? null,
+      stoppedAt: this.stoppedAt ?? 0, stopReported: this.stopReported === true, stoppedSeriesKey: this.stoppedSeriesKey,
+      blockedSeries: Object.fromEntries(this.blockedSeries), pauseMessage: this.paused ? this.pauseMessage : null,
+    };
+    const key = JSON.stringify(body);
+    if (this.lastStateKey === key) return;
+    try {
+      atomicJson(this.stateFile, { ...body, updatedAt: new Date().toISOString() });
+      this.lastStateKey = key;
+    } catch (error) {
+      this.lastStateKey = undefined;
+      this.presentationError(error);
+    }
   }
   presentationError(error) {
     if (Date.now() - (this.lastPresentationWarning ?? 0) < 10000) return;
@@ -181,11 +205,23 @@ export class TakeoverControl {
     // One synchronous read each: an async read keeps the file open across
     // event-loop turns, and a writer in the same process (tests run the host's
     // publisher here) retrying its replace synchronously would wait it out.
-    if (this.configFile) this.config = normalizeSettings(await readControl(this.configFile));
+    if (this.configFile) {
+      const configKey = statVersionKey(this.configFile);
+      if (!configKey || configKey !== this.configStatKey) {
+        this.config = normalizeSettings(await readControl(this.configFile));
+        this.configStatKey = configKey;
+      }
+    }
     if(this.activityFile){
-      const activity=await readControl(this.activityFile);
+      const activityKey = statVersionKey(this.activityFile);
+      if (!activityKey || activityKey !== this.activityStatKey) {
+        this.cachedActivity = await readControl(this.activityFile);
+        this.activityStatKey = activityKey;
+      }
+      const activity = this.cachedActivity;
       if(this.fixedLocale===undefined&&typeof activity.locale==='string')this.locale=overlayLocale(activity.locale);
-      const held=activity.active===true&&Number.isFinite(activity.expiresAt)&&activity.expiresAt>Date.now();
+      const now = Date.now();
+      const held=activity.active===true&&Number.isFinite(activity.expiresAt)&&activity.expiresAt>now;
       const key=held?JSON.stringify([activity.sessionId,activity.turn]):this.seriesKey;
       // A failure while this read is still under way belongs to this series:
       // blocking the previous one would let the next read resume and retry.
@@ -195,12 +231,16 @@ export class TakeoverControl {
       const indicator=held&&activity.indicator!==false;
       // After the turn ends the overlay keeps showing its final state for a
       // short time; that holds no series, indicator or stop key.
-      const lingering=!held&&!!activity.progress&&Number.isFinite(activity.lingerUntil)&&activity.lingerUntil>Date.now();
-      const progress=JSON.stringify({enabled:this.config.progressOverlayEnabled&&(held||lingering),remoteIndicatorVisible:this.config.remoteIndicatorVisible,locale:this.locale,settings:this.config,progress:{...activity.progress,status:this.paused&&held?'stopped':activity.progress?.status??'waiting'}});
+      const turnKey=`${activity.sessionId??''}:${activity.turn??''}:${activity.progress?.startedAt??0}`;
+      const rawLingering=!held&&!!activity.progress&&Number.isFinite(activity.lingerUntil)&&activity.lingerUntil>now;
+      if(this.config.progressPreviewToken!==this.progressPreviewToken&&this.config.progressPreviewToken>0&&rawLingering)this.suppressedLingerKey=turnKey;
+      const lingering=rawLingering&&turnKey!==this.suppressedLingerKey;
+      const progressPayload={enabled:this.config.progressOverlayEnabled&&(held||lingering),turnKey,remoteIndicatorVisible:this.config.remoteIndicatorVisible,locale:this.locale,settings:this.config,progress:{...activity.progress,status:this.paused&&held?'stopped':activity.progress?.status??'waiting'}};
+      const progress=JSON.stringify(progressPayload);
       // After the helper failed, the overlay does not start it again in this
       // series: the poll would launch PowerShell four times a second.
       if(!this.disabledForTest&&this.sentProgress!==progress&&(this.child||(!this.helperFailed&&this.config.progressOverlayEnabled&&(held||lingering)))){
-        try { await this.command('progress',JSON.parse(progress));this.sentProgress=progress; }
+        try { await this.command('progress',progressPayload);this.sentProgress=progress; }
         catch (error) { this.presentationError(error); }
       }
       if(held&&!this.blockedSeries.has(key)&&this.paused&&this.active===0)await this.resumeOperation();
@@ -270,7 +310,7 @@ export class TakeoverControl {
     if(error?.message === STOPPED){this.stoppedAt=Date.now();this.stopReported=false;}
     const key=this.syncKey??this.seriesKey;
     this.stoppedSeriesKey=key;
-    this.pauseMessage = error?.message === STOPPED ? STOPPED : `COMPUTER_USE_PAUSED: ${error?.message ?? error}. Desktop input is paused for this operation series; reading the screen and browser-lane calls still work. Do not retry desktop input in this turn; a new user turn retries the desktop connection.`;
+    this.pauseMessage = error?.message === STOPPED ? STOPPED : `COMPUTER_USE_PAUSED: ${error?.message ?? error}. Desktop input is paused for this series (reading the screen and browser-lane calls still work). Do not retry desktop input in this turn; the next user turn reconnects automatically.`;
     if(key!==null)this.blockedSeries.set(key,this.pauseMessage);
     this.persist(String(error?.message ?? error));
     // This also covers a control-file or presentation failure while input runs.

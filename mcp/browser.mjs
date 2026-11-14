@@ -77,7 +77,10 @@ function otherClients(browser, activeAfter = -Infinity) {
   return live;
 }
 
-function joinProfile(browser) {
+function joinProfile(browser, force = false) {
+  const now = Date.now();
+  if (!force && now - (browser._lastLeaseAt ?? 0) < 5000) return;
+  browser._lastLeaseAt = now;
   const target = path.join(browser.kept, LEASE_PREFIX + process.pid), pending = `${target}-${randomBytes(6).toString('hex')}.pending`;
   writeFileSync(pending, browser.url);
   renameSync(pending, target);
@@ -503,6 +506,12 @@ export const NEW_TAB_ID = 'new-tab';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
 const fail = (code, message) => { throw new Error(`${code}: ${message}`); };
+function validateViewportPoint({ x, y }, view) {
+  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= view.width || y >= view.height) {
+    fail('INVALID_ARGUMENTS', 'Page coordinates must be inside the current screenshot viewport, in CSS pixels. Read a fresh screenshot.');
+  }
+  return { x, y };
+}
 const clip = (text, max) => text.length > max ? text.slice(0, max - 1) + '…' : text;
 const squash = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 const fold = value => squash(value).toLowerCase().replace(/\s+/g, '');
@@ -775,9 +784,9 @@ const BROWSER_SHORTCUTS = new Set(['ctrl+l', 'alt+d', 'f6', 'ctrl+t', 'ctrl+n', 
 
 const QUIET_SCRIPT = `new Promise(resolve => {
   let timer; const done = () => { observer.disconnect(); clearTimeout(timer); resolve(true); };
-  const observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, 250); });
+  const observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, 100); });
   observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
-  timer = setTimeout(done, 250); setTimeout(done, 1500);
+  timer = setTimeout(done, 100); setTimeout(done, 1000);
 })`;
 // A disabled or read-only control is refused before anything is written: the
 // value setter would change it anyway, and a typed edit would vanish silently.
@@ -1441,7 +1450,7 @@ export class BrowserLane {
       this.updateIndicator(tab).catch(() => {});
     } else if (method === 'Page.frameNavigated') {
       this.frames.invalidate(tab,params.frame);
-      if(!params.frame.parentId){tab.document = params.frame.loaderId; tab.navigatingTo = null; tab.crashed = false;}
+      if(!params.frame.parentId){tab.document = params.frame.loaderId; tab.navigatingTo = null; tab.crashed = false; tab.statusContextId = null;}
     }
     else if(method==='Page.frameDetached')tab.frames?.delete(params.frameId);
     else if (method === 'Inspector.targetCrashed') tab.crashed = true;
@@ -1495,7 +1504,9 @@ export class BrowserLane {
         origin,
       };
     }
-    try { writeJsonAtomic(this.env.WCU_USER_TABS_FILE, { tabs }); } catch { }
+    const json = JSON.stringify({ tabs });
+    if (this._lastUserTabsJson === json) return;
+    try { writeJsonAtomic(this.env.WCU_USER_TABS_FILE, { tabs }); this._lastUserTabsJson = json; } catch { }
   }
 
   // Keys come from a stable id (a browser's guid; a tab's target id salted with
@@ -1662,10 +1673,21 @@ export class BrowserLane {
         await tab.browser.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: INDICATOR_SCRIPT, worldName: INDICATOR_WORLD }, tab.sessionId, 500).catch(() => { });
         tab.indicatorScriptAdded = true;
       }
-      const { executionContextId } = await tab.browser.cdp.send('Page.createIsolatedWorld', { frameId: tab.mainFrameId, worldName: INDICATOR_WORLD }, tab.sessionId, 500);
       const status = extra ?? `globalThis.__dshStatus(${JSON.stringify(tab.indicator ?? 'idle')}, ${JSON.stringify(point ?? null)});`;
+      if (tab.statusContextId && tab.statusDocument === tab.document) {
+        const res = await tab.browser.cdp.send('Runtime.evaluate', {
+          contextId: tab.statusContextId,
+          expression: `typeof globalThis.__dshStatus === 'function' ? ((${status}), true) : false`,
+          returnByValue: true,
+        }, tab.sessionId, 500).catch(() => null);
+        if (res && !res.exceptionDetails && res.result?.value === true) return;
+        tab.statusContextId = null;
+      }
+      const { executionContextId } = await tab.browser.cdp.send('Page.createIsolatedWorld', { frameId: tab.mainFrameId, worldName: INDICATOR_WORLD }, tab.sessionId, 500);
+      tab.statusContextId = executionContextId;
+      tab.statusDocument = tab.document;
       await tab.browser.cdp.send('Runtime.evaluate', { contextId: executionContextId, expression: `${INDICATOR_SCRIPT}\n${status}` }, tab.sessionId, 500);
-    } catch { /* Navigation or an open modal may temporarily prevent page script. */ }
+    } catch { tab.statusContextId = null; /* Navigation or an open modal may temporarily prevent page script. */ }
   }
 
   // A call works in a tab: the tab shows the badge from its first command
@@ -1744,13 +1766,22 @@ export class BrowserLane {
   }
 
   async redactNodes(tab, nodes) {
-    await Promise.all(nodes.filter(node => node.value && node.backendDOMNodeId).map(async node => {
+    await Promise.all(nodes.filter(node => node.value?.value && node.backendDOMNodeId).map(async node => {
       let sensitive = property(node,'protected') === true;
-      try {
-        const {node:dom} = await this.send(tab,'DOM.describeNode',{backendNodeId:node.backendDOMNodeId,depth:0});
-        const attrs=Object.fromEntries(Array.from({length:(dom.attributes??[]).length/2},(_,i)=>[dom.attributes[i*2],dom.attributes[i*2+1]]));
-        sensitive ||= attrs.type?.toLowerCase()==='password' || /(?:^|\s)(?:current-password|new-password|one-time-code|cc-number|cc-csc)(?:\s|$)/i.test(attrs.autocomplete??'');
-      } catch { sensitive = true; }
+      if (!sensitive) {
+        try {
+          const {node:dom} = await this.send(tab,'DOM.describeNode',{backendNodeId:node.backendDOMNodeId,depth:0});
+          const rawAttrs = dom.attributes ?? [];
+          for (let i = 0; i + 1 < rawAttrs.length; i += 2) {
+            const attrName = rawAttrs[i], attrVal = rawAttrs[i + 1];
+            if ((attrName === 'type' && attrVal?.toLowerCase() === 'password') ||
+                (attrName === 'autocomplete' && /(?:^|\s)(?:current-password|new-password|one-time-code|cc-number|cc-csc)(?:\s|$)/i.test(attrVal ?? ''))) {
+              sensitive = true;
+              break;
+            }
+          }
+        } catch { sensitive = true; }
+      }
       if(sensitive){
         const raw=String(node.value.value??''),safe='[redacted; length='+raw.length+']';
         node.value={...node.value,value:safe};
@@ -1824,7 +1855,7 @@ export class BrowserLane {
   // for the load event, so a page whose last resources never arrive still answers.
   async settle(tab, request, since = tab.loadSeq) {
     if (tab.navigatingTo) return;
-    await sleep(120);
+    await sleep(40);
     const stop = () => request?.cancelled || tab.closed || tab.dialog;
     const until = async (done, ms) => {
       for (const deadline = Date.now() + ms; !done() && Date.now() < deadline && !stop();) {
@@ -1894,8 +1925,8 @@ export class BrowserLane {
 
   // Scroll the element into view, take the center of its first visible box and
   // make sure the element, or what it is part of, is what receives a click there.
-  async pointFor(tab, backendNodeId) {
-    await this.resolveElement(tab, backendNodeId);
+  async pointFor(tab, backendNodeId, resolvedObjectId) {
+    const targetObj = resolvedObjectId ?? await this.resolveElement(tab, backendNodeId);
     try { await this.send(tab, 'DOM.scrollIntoViewIfNeeded', { backendNodeId }); } catch { }
     let quads;
     try { ({ quads } = await this.send(tab, 'DOM.getContentQuads', { backendNodeId })); }
@@ -1916,9 +1947,8 @@ export class BrowserLane {
         if (!sameFrame) {
           covering = hit.backendNodeId;
         } else {
-          const target = await this.resolveElement(tab, backendNodeId);
           const other = (await this.send(tab, 'DOM.resolveNode', { backendNodeId: hit.backendNodeId })).object.objectId;
-          const { result } = await this.send(tab, 'Runtime.callFunctionOn', { objectId: target, functionDeclaration: ON_TARGET, arguments: [{ objectId: other }], returnByValue: true });
+          const { result } = await this.send(tab, 'Runtime.callFunctionOn', { objectId: targetObj, functionDeclaration: ON_TARGET, arguments: [{ objectId: other }], returnByValue: true });
           if (result.value === false) covering = hit.backendNodeId;
         }
       }
@@ -1954,8 +1984,8 @@ export class BrowserLane {
 
   // null when the element is not an option of a drop-down; otherwise it is
   // chosen, and a list the select had opened closes as it does after a choice.
-  async chooseOption(tab, node) {
-    const objectId = await this.resolveElement(tab, node);
+  async chooseOption(tab, node, resolvedObjectId) {
+    const objectId = resolvedObjectId ?? await this.resolveElement(tab, node);
     const picked = await this.untilDialog(tab, this.call(tab, objectId, OPTION_PICK));
     // A change handler raised a dialog; the action reports it.
     if (tab.dialog) return {};
@@ -1969,8 +1999,8 @@ export class BrowserLane {
     return { chose: picked.chose };
   }
 
-  async refuseDisabled(tab, node, target) {
-    const disabled = await this.call(tab, await this.resolveElement(tab, node), DISABLED).catch(() => false);
+  async refuseDisabled(tab, node, target, resolvedObjectId) {
+    const disabled = await this.call(tab, resolvedObjectId ?? await this.resolveElement(tab, node), DISABLED).catch(() => false);
     if (disabled) fail('BROWSER_ELEMENT_DISABLED', `${target} is disabled; it does not respond to clicks`);
   }
 
@@ -2167,7 +2197,6 @@ export class BrowserLane {
     if (node !== null) {
       node = this.nodeFor(tab, node);
       if (node === undefined) fail('BROWSER_ELEMENT_STALE', `element ${args.elementId} was not read from the page now in tab ${tab.key} (the tab navigated since, or the id is older than this server); read the page again with accessibility_tree or find`);
-      await this.frames.validate(tab,node);
     }
     const document = tab.document;
     switch (action) {
@@ -2182,7 +2211,10 @@ export class BrowserLane {
       }
       case 'find': return this.find(tab, args, request);
       case 'wait_for': return this.waitFor(tab, args, request);
-      case 'element_info': return this.elementInfo(tab, node);
+      case 'element_info': {
+        await this.frames.validate(tab, node);
+        return this.elementInfo(tab, node);
+      }
       case 'screenshot': {
         await this.frames.refresh(tab, request).catch(error => { if (/^(?:WCU_|BROWSER_FRAME_LIMIT)/.test(error?.message ?? '')) throw error; });
         await this.checkLocation(tab, request);
@@ -2222,6 +2254,8 @@ export class BrowserLane {
     if (node !== null) target = await this.describeNode(tab, node);
     const coordinatePoint=args.x!==undefined?await this.viewportPoint(tab,args):null;
     if(coordinatePoint)target=`viewport (${coordinatePoint.x}, ${coordinatePoint.y})`;
+    const needsResolvedObj = node !== null && !address && !coordinatePoint && ['click', 'double_click', 'invoke', 'move', 'set_value', 'scroll'].includes(action);
+    let resolvedObj = needsResolvedObj ? await this.resolveElement(tab, node) : null;
     tab.openedTabs = []; tab.chooser = null; tab.requests.clear(); tab.lastBlockedReason = null;
     tab.acting++;
     const since = tab.loadSeq;
@@ -2240,23 +2274,24 @@ export class BrowserLane {
         case 'click': case 'double_click': case 'invoke': {
           if(coordinatePoint){await this.pointAt(tab,coordinatePoint,true);await this.mouse(tab,coordinatePoint.x,coordinatePoint.y,args.button??'left',action==='double_click'?2:1);break;}
           if (args.button === undefined || args.button === 'left') {
-            const chosen = await this.chooseOption(tab, node);
+            const chosen = await this.chooseOption(tab, node, resolvedObj);
             if (chosen) { Object.assign(detail, chosen); break; }
           }
-          await this.refuseDisabled(tab, node, target);
-          const point = await this.pointFor(tab, node);
+          await this.refuseDisabled(tab, node, target, resolvedObj);
+          const point = await this.pointFor(tab, node, resolvedObj);
           await this.pointAt(tab, point, true);
           await this.mouse(tab, point.x, point.y, action === 'invoke' ? 'left' : args.button, action === 'double_click' ? 2 : 1);
           break;
         }
         case 'move': {
-          const point = coordinatePoint??await this.pointFor(tab, node);
+          const point = coordinatePoint??await this.pointFor(tab, node, resolvedObj);
           await this.pointAt(tab, point);
           await this.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none' });
           break;
         }
         case 'drag': {
-          const points=[];for(const point of args.path)points.push(await this.viewportPoint(tab,point));
+          const view = await this.viewportSize(tab);
+          const points = args.path.map(point => validateViewportPoint(point, view));
           const button=args.button??'left',buttons={left:1,right:2,middle:4}[button];
           let down=false,lastPoint=points[0];
           try{
@@ -2282,7 +2317,7 @@ export class BrowserLane {
             await this.navigate(tab, url);
             break;
           }
-          let objectId = await this.resolveElement(tab, node);
+          let objectId = resolvedObj;
           // A label's text line names its control; set_value goes to that control.
           const control = (await this.send(tab, 'Runtime.callFunctionOn', { objectId, functionDeclaration: LABEL_CONTROL, returnByValue: false })).result;
           if (control?.objectId) {
@@ -2344,10 +2379,10 @@ export class BrowserLane {
           let objectId = null;
           const position = async () => ({ page: (await this.send(tab, 'Runtime.evaluate', { expression: '[scrollX, scrollY]', returnByValue: true })).result.value,
             element: objectId ? await this.call(tab, objectId, SCROLL_POSITION).catch(() => null) : null });
-          const wheel = async point => { await this.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.y, deltaX, deltaY }); await sleep(150); };
+          const wheel = async point => { await this.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.y, deltaX, deltaY }); await sleep(80); };
           let before;
           if(coordinatePoint){before=await position();await wheel(coordinatePoint);}
-          else if (node !== null) { const point = await this.pointFor(tab, node); await this.pointAt(tab, point); objectId = await this.resolveElement(tab, node); before = await position(); await wheel(point); }
+          else if (node !== null) { const point = await this.pointFor(tab, node, resolvedObj); await this.pointAt(tab, point); objectId = resolvedObj; before = await position(); await wheel(point); }
           else {
             // The page scrolls its document; a wheel at the viewport center, which
             // may land on an iframe or a panel, is only for pages that never move.
@@ -2400,10 +2435,12 @@ export class BrowserLane {
     return { stillLoading: true, navigatingTo: tab.navigatingTo, verification: 'sent', verificationNote: `${tab.navigatingTo} has not answered within 15 s; the tab keeps loading it. Read the tab again later or wait_for an element.` };
   }
 
-  async viewportPoint(tab,{x,y}) {
-    const {result}=await this.send(tab,'Runtime.evaluate',{expression:'({width:innerWidth,height:innerHeight})',returnByValue:true});
-    if(!Number.isInteger(x)||!Number.isInteger(y)||x<0||y<0||x>=result.value.width||y>=result.value.height)fail('INVALID_ARGUMENTS','Page coordinates must be inside the current screenshot viewport, in CSS pixels. Read a fresh screenshot.');
-    return {x,y};
+  async viewportSize(tab) {
+    return (await this.send(tab, 'Runtime.evaluate', { expression: '({width:innerWidth,height:innerHeight})', returnByValue: true })).result.value;
+  }
+
+  async viewportPoint(tab, point) {
+    return validateViewportPoint(point, await this.viewportSize(tab));
   }
 
   page(meta, text, outline) {
@@ -2470,8 +2507,10 @@ export class BrowserLane {
         if (quad) {
           const xs = [quad[0], quad[2], quad[4], quad[6]];
           const ys = [quad[1], quad[3], quad[5], quad[7]];
-          const tl = await this.frames.rootPoint(tab, node, { x: Math.min(...xs), y: Math.min(...ys) }, { check: false });
-          const br = await this.frames.rootPoint(tab, node, { x: Math.max(...xs), y: Math.max(...ys) }, { check: false });
+          const [tl, br] = await Promise.all([
+            this.frames.rootPoint(tab, node, { x: Math.min(...xs), y: Math.min(...ys) }, { check: false }),
+            this.frames.rootPoint(tab, node, { x: Math.max(...xs), y: Math.max(...ys) }, { check: false }),
+          ]);
           rootViewportBox = { x: Math.round(tl.x), y: Math.round(tl.y), width: Math.round(br.x - tl.x), height: Math.round(br.y - tl.y) };
         }
       } catch { }
@@ -2481,16 +2520,19 @@ export class BrowserLane {
 
   async screenshot(tab, maxWidth = 1600) {
     await this.reveal(tab);
-    const metrics = await this.send(tab, 'Page.getLayoutMetrics');
+    const indicator = this.showsIndicator(tab);
+    const [metrics, dpr] = await Promise.all([
+      this.send(tab, 'Page.getLayoutMetrics'),
+      this.send(tab, 'Runtime.evaluate', { expression: 'devicePixelRatio', returnByValue: true }),
+      indicator ? this.updateIndicator(tab, null, "globalThis.__dshStatus('capture');") : Promise.resolve(),
+    ]);
     const view = metrics.cssVisualViewport ?? metrics.visualViewport;
-    const ratio = (await this.send(tab, 'Runtime.evaluate', { expression: 'devicePixelRatio', returnByValue: true })).result.value || 1;
+    const ratio = dpr.result.value || 1;
     const cssScale = maxWidth ? Math.min(1, maxWidth / view.clientWidth) : 1;
     const scale = cssScale / ratio;
     // Always clipped to the visual viewport: without a clip the image also holds
     // the scroll bars and no longer matches the page area or the stated size.
     // DSH's pointer is hidden meanwhile: the image shows the page alone.
-    const indicator = this.showsIndicator(tab);
-    if (indicator) await this.updateIndicator(tab, null, "globalThis.__dshStatus('capture');");
     try {
       const data = await this.capture(tab, { format: 'png', clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale } });
       const png = Buffer.from(data, 'base64');

@@ -14,6 +14,21 @@ export const GECKO_APP_ID = '{ec8030f7-c20a-464f-9b0e-13a3a9e97384}';
 const fail = (code, detail) => { throw new Error(`${code}: ${detail}`); };
 const check = request => { if (request?.cancelled) fail('COMPUTER_USE_CANCELLED', 'cancelled'); };
 const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
+const READ_SAFE_SRC = readSafeValue.toString();
+const wrappedBidiFns = new WeakMap();
+function wrappedBidiFn(fn) {
+  let src = wrappedBidiFns.get(fn);
+  if (!src) {
+    src = `function (...args) { const readSafeValue = ${READ_SAFE_SRC}; return (${fn.toString()}).apply(this, args); }`;
+    wrappedBidiFns.set(fn, src);
+  }
+  return src;
+}
+function scrollPageBy(x, y) {
+  const before = [scrollX, scrollY];
+  scrollBy({ left: x, top: y, behavior: 'instant' });
+  return { before, after: [scrollX, scrollY] };
+}
 
 // reg.exe prints in the OEM code page (GBK on Chinese Windows), so a browser
 // installed under a Chinese folder came back garbled when read as UTF-8.
@@ -328,7 +343,8 @@ export class BidiBrowserLane {
   }
   async call(tab, fn, args = [], sharedId, request) {
     assertBrowserUrl(tab.url || 'about:blank', {env:this.env, approvedFileUrl:tab.approvedFileUrl, grants:request?.approvalGrants, approved:request?.policyApproved===true});
-    const result = await this.connection.send('script.callFunction', { functionDeclaration: `function (...args) { const readSafeValue = ${readSafeValue.toString()}; return (${fn.toString()}).apply(this, args); }`, target: { context: tab.context, sandbox: 'dsh-bidi' },
+    const declaration = wrappedBidiFn(fn);
+    const result = await this.connection.send('script.callFunction', { functionDeclaration: declaration, target: { context: tab.context, sandbox: 'dsh-bidi' },
       awaitPromise: false, arguments: args.map(localValue), ...(sharedId ? { this: { sharedId } } : {}), serializationOptions: { maxObjectDepth: 8, maxDomDepth: 0 } });
     if (result.type === 'exception') {
       const message = result.exceptionDetails?.text || 'script exception';
@@ -448,7 +464,7 @@ export class BidiBrowserLane {
           const dx = args.deltaX ?? 0, dy = args.deltaY ?? 480;
           if (![dx, dy].every(Number.isFinite)) fail('INVALID_ARGUMENTS', 'scroll deltas must be finite');
           if (sharedId) detail.elementScroll = await this.call(tab, domElement, ['scroll', [dx, dy]], sharedId, request);
-          else detail.pageScroll = await this.call(tab, function (x, y) { const before = [scrollX, scrollY]; scrollBy({ left: x, top: y, behavior: 'instant' }); return { before, after: [scrollX, scrollY] }; }, [dx, dy], undefined, request);
+          else detail.pageScroll = await this.call(tab, scrollPageBy, [dx, dy], undefined, request);
           detail.inputMethod = 'DOM scrollBy';
         } else fail('BROWSER_BIDI_UNSUPPORTED', action + ' is not supported by this prototype');
       });
@@ -456,7 +472,8 @@ export class BidiBrowserLane {
     if (tab.dialog) return this.dialogResult(tab, action, detail);
     check(request);
     // Bound settling, never infer task success from a successfully sent action.
-    await this.untilPrompt(tab, () => delay(80)); if (tab.dialog) return this.dialogResult(tab, action, detail);
+    if (!request?.batchSuppressObservation) await this.untilPrompt(tab, () => delay(80));
+    if (tab.dialog) return this.dialogResult(tab, action, detail);
     if (request?.batchSuppressObservation) {
       await this.checkLocation(tab, request);
       if (detail.opened) detail.opened = this.describe(tab);

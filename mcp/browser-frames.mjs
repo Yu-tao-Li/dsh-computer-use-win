@@ -153,18 +153,26 @@ export class BrowserFrames {
   }
   async readAX(tab,request){
     const frames=await this.refresh(tab,request),merged=[],byFrame=new Map();
-    for(const frame of frames){
+    const frameTrees=await Promise.all(frames.map(async frame=>{
       const {nodes}=await this.raw(tab,frame.sessionId,'Accessibility.getFullAXTree',{frameId:frame.id},15000);
+      return [frame,nodes];
+    }));
+    for(const [frame,nodes] of frameTrees){
       const decorated=nodes.map(node=>({...node,nodeId:`${frame.id}|${node.nodeId}`,childIds:node.childIds?.map(id=>`${frame.id}|${id}`),...(node.backendDOMNodeId?{backendDOMNodeId:this.node(frame,node.backendDOMNodeId)}:{})}));
       byFrame.set(frame.id,decorated);merged.push(...decorated);
     }
-    for(const frame of frames){
-      if(!frame.parentId)continue;
-      const parent=tab.frames.get(frame.parentId);
-      const {backendNodeId}=await this.raw(tab,parent.sessionId,'DOM.getFrameOwner',{frameId:frame.id});
-      const owner=byFrame.get(parent.id)?.find(node=>node.backendDOMNodeId?.backendNodeId===backendNodeId);
-      const child=byFrame.get(frame.id)?.find(node=>node.role?.value==='RootWebArea');
-      if(owner&&child)owner.childIds=[...(owner.childIds??[]),child.nodeId];
+    const children=frames.filter(frame=>frame.parentId);
+    if(children.length){
+      const owners=await Promise.all(children.map(async frame=>{
+        const parent=tab.frames.get(frame.parentId);
+        const {backendNodeId}=await this.raw(tab,parent.sessionId,'DOM.getFrameOwner',{frameId:frame.id});
+        return [frame,parent,backendNodeId];
+      }));
+      for(const [frame,parent,backendNodeId] of owners){
+        const owner=byFrame.get(parent.id)?.find(node=>node.backendDOMNodeId?.backendNodeId===backendNodeId);
+        const child=byFrame.get(frame.id)?.find(node=>node.role?.value==='RootWebArea');
+        if(owner&&child)owner.childIds=[...(owner.childIds??[]),child.nodeId];
+      }
     }
     return {nodes:merged,frames:frames.length};
   }
@@ -179,9 +187,9 @@ export class BrowserFrames {
   async focusedValue(tab,expression){
     const frames=await this.refresh(tab);
     let focused=frames[0];
-    for(const frame of frames){
-      const response=await this.evaluate(tab,frame,"document.hasFocus()&&!['IFRAME','FRAME'].includes(document.activeElement?.tagName)");
-      if(response.result?.value)focused=frame;
+    if(frames.length>1){
+      const checks=await Promise.all(frames.map(frame=>this.evaluate(tab,frame,"document.hasFocus()&&!['IFRAME','FRAME'].includes(document.activeElement?.tagName)")));
+      for(let i=0;i<frames.length;i++)if(checks[i].result?.value)focused=frames[i];
     }
     return this.evaluate(tab,focused,expression);
   }

@@ -30,11 +30,6 @@ function Write-BackendStage {
 #                loading and C# compilation)
 # ============================================================================
 
-function Write-JsonLine {
-  param([object]$Value)
-  $Value | ConvertTo-Json -Depth 50 -Compress
-}
-
 function Get-InputObject {
   $raw = [Console]::In.ReadToEnd()
   if ([string]::IsNullOrWhiteSpace($raw)) {
@@ -641,7 +636,7 @@ function Set-DpiAware {
   # Per-Monitor V2 (context value -4); fall back to system-aware. Must run
   # before any screen/UIA work so coordinates and pixels are physical.
   $ok = [WindowsComputerUseNative]::SetProcessDpiAwarenessContext([IntPtr]::new(-4))
-  if ($ok -ne [IntPtr]::Zero) {
+  if ($ok -eq [IntPtr]::Zero) {
     [void][WindowsComputerUseNative]::SetProcessDPIAware()
   }
 }
@@ -761,41 +756,52 @@ function Convert-ElementInfo {
   if (-not $UseCache) {
     $Element = $Element.GetUpdatedCache((New-ElementCacheRequest $DetailLevel))
   }
-  $rect = Convert-Rect (Invoke-Safe { $Element.Cached.BoundingRectangle } $null)
-  $rtArr = Invoke-Safe { @($Element.GetCachedPropertyValue([System.Windows.Automation.AutomationElement]::RuntimeIdProperty)) } $null
+  $cached = try { $Element.Cached } catch { $null }
+  $rect = Convert-Rect $(try { $cached.BoundingRectangle } catch { $null })
+  $rtArr = try { @($Element.GetCachedPropertyValue([System.Windows.Automation.AutomationElement]::RuntimeIdProperty)) } catch { $null }
   $rtStr = $null
   if ($null -ne $rtArr -and $rtArr.Count -ge 2) { $rtStr = ($rtArr | ForEach-Object { [int]$_ }) -join "-" }
   $info = [ordered]@{
     id = if ($null -ne $rtStr) { "uia:rt:$rtStr" } else { $Id }
     depth = $Depth
-    name = Invoke-Safe { $Element.Cached.Name } ""
-    automationId = Invoke-Safe { $Element.Cached.AutomationId } ""
-    className = Invoke-Safe { $Element.Cached.ClassName } ""
-    controlType = Get-ControlTypeName (Invoke-Safe { $Element.Cached.ControlType } $null)
+    name = $(try { $cached.Name } catch { "" })
+    automationId = $(try { $cached.AutomationId } catch { "" })
+    className = $(try { $cached.ClassName } catch { "" })
+    controlType = Get-ControlTypeName $(try { $cached.ControlType } catch { $null })
     boundingBox = $rect
-    isEnabled = Invoke-Safe { $Element.Cached.IsEnabled } $null
-    isOffscreen = Invoke-Safe { $Element.Cached.IsOffscreen } $null
-    hasKeyboardFocus = Invoke-Safe { $Element.Cached.HasKeyboardFocus } $null
+    isEnabled = $(try { $cached.IsEnabled } catch { $null })
+    isOffscreen = $(try { $cached.IsOffscreen } catch { $null })
+    hasKeyboardFocus = $(try { $cached.HasKeyboardFocus } catch { $null })
   }
   if ($null -ne $rtStr -and $null -ne $script:ObservationOwner) {
     Register-ObservedElement "uia:rt:$rtStr" $Element $script:ObservationOwner
   }
   if ($DetailLevel -eq "full") {
-    $valuePattern = Invoke-Safe { $Element.GetCachedPattern([System.Windows.Automation.ValuePattern]::Pattern) } $null
+    $valuePattern = $null
     $patterns = New-Object System.Collections.Generic.List[string]
-    foreach ($name in @('Invoke','Value','Toggle','SelectionItem','ExpandCollapse','ScrollItem')) {
-      $patternType = "System.Windows.Automation.${name}Pattern" -as [type]
-      if ($null -ne (Invoke-Safe { $Element.GetCachedPattern($patternType::Pattern) } $null)) { $patterns.Add($name) }
+    foreach ($pair in @(
+      @('Invoke', [System.Windows.Automation.InvokePattern]::Pattern),
+      @('Value', [System.Windows.Automation.ValuePattern]::Pattern),
+      @('Toggle', [System.Windows.Automation.TogglePattern]::Pattern),
+      @('SelectionItem', [System.Windows.Automation.SelectionItemPattern]::Pattern),
+      @('ExpandCollapse', [System.Windows.Automation.ExpandCollapsePattern]::Pattern),
+      @('ScrollItem', [System.Windows.Automation.ScrollItemPattern]::Pattern)
+    )) {
+      $pat = try { $Element.GetCachedPattern($pair[1]) } catch { $null }
+      if ($null -ne $pat) {
+        $patterns.Add($pair[0])
+        if ($pair[0] -eq 'Value') { $valuePattern = $pat }
+      }
     }
-    $info["localizedControlType"] = Invoke-Safe { $Element.Cached.LocalizedControlType } ""
-    $info["processId"] = Invoke-Safe { $Element.Cached.ProcessId } $null
-    $info["nativeWindowHandle"] = Invoke-Safe { $Element.Cached.NativeWindowHandle } $null
+    $info["localizedControlType"] = try { $cached.LocalizedControlType } catch { "" }
+    $info["processId"] = try { $cached.ProcessId } catch { $null }
+    $info["nativeWindowHandle"] = try { $cached.NativeWindowHandle } catch { $null }
     $info["runtimeId"] = $rtStr
-    $info["value"] = if ($null -ne $valuePattern) { Invoke-Safe { $valuePattern.Cached.Value } $null } else { $null }
+    $info["value"] = if ($null -ne $valuePattern) { try { $valuePattern.Cached.Value } catch { $null } } else { $null }
     $info["patterns"] = [string[]]$patterns.ToArray()
   } else {
-    if ($Depth -le 1) { $info["processId"] = Invoke-Safe { $Element.Cached.ProcessId } $null }
-    $nativeHwnd = Invoke-Safe { $Element.Cached.NativeWindowHandle } 0
+    if ($Depth -le 1) { $info["processId"] = try { $cached.ProcessId } catch { $null } }
+    $nativeHwnd = try { $cached.NativeWindowHandle } catch { 0 }
     if ($nativeHwnd) { $info["nativeWindowHandle"] = $nativeHwnd }
   }
   return $info
@@ -1244,7 +1250,6 @@ function Focus-TextControl {
 
 $script:WindowCache = @{}   # hwnd -> @{ x=..; y=..; ts=.. }
 $script:WindowObservations = @{} # immutable token -> window identity and origin
-$script:OcrAwait = $null    # WinRT AsTask helper (filled lazily by Get-OcrEngine)
 
 function Get-FreshWindowRect {
   param([object]$Element)
@@ -1754,7 +1759,8 @@ function Invoke-Ocr {
   param([string]$PngPath, [string]$Language = '', [byte[]]$PngBytes = $null)
   Get-OcrHelper
   $raw = if ($null -ne $PngBytes) { [WindowsComputerUseOcr]::RecognizeBytes($PngBytes, $Language) } else { [WindowsComputerUseOcr]::Recognize($PngPath, $Language) }
-  $linesOut = @()
+  $linesOut = New-Object System.Collections.Generic.List[object]
+  $lineTexts = New-Object System.Collections.Generic.List[string]
   $lang = ""
   $readScale = 1.0
   foreach ($line in ($raw -split "`r?`n")) {
@@ -1762,7 +1768,7 @@ function Invoke-Ocr {
     if ($line -match '^SCALE\t(.*)$') { $readScale = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture); continue }
     if ($line -match '^LINE\t(.*)\t(.*)$') {
       $lineText = $Matches[1]
-      $words = @()
+      $words = New-Object System.Collections.Generic.List[object]
       # Words are separated by U+001F and text from its box by U+001E, so OCR
       # text may hold any printable character.
       foreach ($w in $Matches[2].Split([char]0x1F)) {
@@ -1772,12 +1778,13 @@ function Invoke-Ocr {
         $wtext = $w.Substring(0, $at)
         $coords = $w.Substring($at + 1) -split ','
         if ($coords.Count -lt 4) { continue }
-        $words += [ordered]@{ text = $wtext; x = [int]$coords[0]; y = [int]$coords[1]; width = [int]$coords[2]; height = [int]$coords[3] }
+        $words.Add([ordered]@{ text = $wtext; x = [int]$coords[0]; y = [int]$coords[1]; width = [int]$coords[2]; height = [int]$coords[3] })
       }
-      $linesOut += [ordered]@{ text = $lineText; words = $words }
+      $lineTexts.Add($lineText)
+      $linesOut.Add([ordered]@{ text = $lineText; words = $words.ToArray() })
     }
   }
-  return [ordered]@{ text = (@($linesOut | ForEach-Object { $_.text }) -join "`n"); lines = $linesOut; language = $lang; readScale = $readScale }
+  return [ordered]@{ text = ($lineTexts.ToArray() -join "`n"); lines = $linesOut.ToArray(); language = $lang; readScale = $readScale }
 }
 
 function Get-OcrWordBounds {
@@ -1815,38 +1822,45 @@ function Find-OcrWordRun {
   if ($start -lt 0) { return $null }
   $end = $start + $normalizedQuery.Length
   $offset = 0
-  $hitWords = @()
+  $hitWords = New-Object System.Collections.Generic.List[object]
+  $hitTexts = New-Object System.Collections.Generic.List[string]
   for ($index = 0; $index -lt $Words.Count; $index++) {
     $length = $parts[$index].Length
     if ($length -gt 0 -and $offset -lt $end -and ($offset + $length) -gt $start) {
-      $hitWords += $Words[$index]
+      $w = $Words[$index]
+      $hitWords.Add($w)
+      $hitTexts.Add([string]$w.text)
     }
     $offset += $length
   }
-  $bounds = Get-OcrWordBounds -Words $hitWords
+  $hitArr = $hitWords.ToArray()
+  $bounds = Get-OcrWordBounds -Words $hitArr
   if ($null -eq $bounds) { return $null }
-  return [ordered]@{text=($hitWords.text -join ' ');boundingBox=$bounds}
+  return [ordered]@{text=($hitTexts.ToArray() -join ' ');boundingBox=$bounds}
 }
 
 function Get-NativeWindowList {
   param([bool]$IncludeInvisible = $false, [int]$MaxWindows = 50, [switch]$RecordObservation)
   $items = New-Object System.Collections.Generic.List[object]
   $foreground = [WindowsComputerUseNative]::GetForegroundWindow()
+  $title = New-Object System.Text.StringBuilder 2048
+  $class = New-Object System.Text.StringBuilder 256
+  $rect = New-Object WindowsComputerUseNative+RECT
   foreach ($handle in [WindowsComputerUseNative]::TopLevelWindows()) {
     $visible = [WindowsComputerUseNative]::IsWindowVisible($handle)
-    if (-not $IncludeInvisible -and (-not $visible -or [WindowsComputerUseNative]::IsIconic($handle))) { continue }
-    $title = New-Object System.Text.StringBuilder 2048
-    [void][WindowsComputerUseNative]::GetWindowText($handle, $title, $title.Capacity)
-    $class = New-Object System.Text.StringBuilder 256
-    [void][WindowsComputerUseNative]::GetClassName($handle, $class, $class.Capacity)
-    $rect = New-Object WindowsComputerUseNative+RECT
-    if (-not [WindowsComputerUseNative]::GetWindowRect($handle, [ref]$rect)) { continue }
+    $iconic = [WindowsComputerUseNative]::IsIconic($handle)
+    if (-not $IncludeInvisible -and (-not $visible -or $iconic)) { continue }
     $ownerId = [uint32]0
     [void][WindowsComputerUseNative]::GetWindowThreadProcessId($handle, [ref]$ownerId)
     if (-not $ownerId) { continue }
+    if (-not [WindowsComputerUseNative]::GetWindowRect($handle, [ref]$rect)) { continue }
+    $title.Length = 0
+    [void][WindowsComputerUseNative]::GetWindowText($handle, $title, $title.Capacity)
+    $class.Length = 0
+    [void][WindowsComputerUseNative]::GetClassName($handle, $class, $class.Capacity)
     $hwnd = $handle.ToInt64()
     $box = [ordered]@{ x=$rect.left; y=$rect.top; width=$rect.right-$rect.left; height=$rect.bottom-$rect.top; centerX=($rect.left+$rect.right)/2; centerY=($rect.top+$rect.bottom)/2 }
-    $items.Add([ordered]@{id="uia:hwnd:${hwnd}:pid:${ownerId}"; depth=1; name=$title.ToString(); className=$class.ToString(); controlType='Window'; processId=$ownerId; nativeWindowHandle=$hwnd; boundingBox=$box; isEnabled=[WindowsComputerUseNative]::IsWindowEnabled($handle); isOffscreen=(-not $visible -or [WindowsComputerUseNative]::IsIconic($handle)); hasKeyboardFocus=($foreground -eq $handle); source='win32'})
+    $items.Add([ordered]@{id="uia:hwnd:${hwnd}:pid:${ownerId}"; depth=1; name=$title.ToString(); className=$class.ToString(); controlType='Window'; processId=$ownerId; nativeWindowHandle=$hwnd; boundingBox=$box; isEnabled=[WindowsComputerUseNative]::IsWindowEnabled($handle); isOffscreen=(-not $visible -or $iconic); hasKeyboardFocus=($foreground -eq $handle); source='win32'})
     # Target lookup must not replace the coordinates used by Home-Point.
     # Only explicit observations establish a new coordinate baseline.
     if ($RecordObservation) {
@@ -2185,8 +2199,10 @@ function Click-At {
     $sent = [WindowsComputerUseNative]::SendClick($X, $Y, [uint32]$flags[0], [uint32]$flags[1])
     if ($sent -lt 2) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected mouse input. The click was not replayed.' }
     if ($sent -ne 3) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected mouse release. Cleanup was attempted; the click was not replayed.' }
-    # Let queued input reach the app before restoring pointer and foreground.
-    Start-Sleep -Milliseconds 60
+    if ($i + 1 -lt $Count) {
+      # Pause between rapid multi-clicks so double/triple click detection fires reliably.
+      Start-Sleep -Milliseconds 60
+    }
   }
 }
 
@@ -2513,12 +2529,19 @@ function Try-PrintWindowCapture {
     $allDark=$true
     $stepX=[Math]::Max(4,[Math]::Min(16,[int]($Width/16)))
     $stepY=[Math]::Max(4,[Math]::Min(16,[int]($Height/16)))
-    for($x=0;$x -lt $Width;$x+=$stepX){
+    $bmpRect=New-Object System.Drawing.Rectangle 0,0,$Width,$Height
+    $bmpData=$cropped.LockBits($bmpRect,[System.Drawing.Imaging.ImageLockMode]::ReadOnly,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    try {
       for($y=0;$y -lt $Height;$y+=$stepY){
-        $pixel=$cropped.GetPixel($x,$y)
-        if($pixel.R -gt 4 -or $pixel.G -gt 4 -or $pixel.B -gt 4){$allDark=$false;break}
+        $rowOffset=$y*$bmpData.Stride
+        for($x=0;$x -lt $Width;$x+=$stepX){
+          $argb=[System.Runtime.InteropServices.Marshal]::ReadInt32($bmpData.Scan0,$rowOffset+($x*4))
+          if(((($argb -shr 16) -band 0xFF) -gt 4) -or ((($argb -shr 8) -band 0xFF) -gt 4) -or (($argb -band 0xFF) -gt 4)){$allDark=$false;break}
+        }
+        if(-not $allDark){break}
       }
-      if(-not $allDark){break}
+    } finally {
+      $cropped.UnlockBits($bmpData)
     }
     if($allDark){return $null}
     $accepted=$true;return $cropped
@@ -2531,8 +2554,12 @@ function Try-PrintWindowCapture {
 # Our own screenshot PNGs older than 30 minutes. Times compare in UTC: a
 # local write time against a UTC cutoff kept files for hours east of UTC and
 # deleted fresh ones west of it.
+$script:LastScreenshotCleanupUtc = $null
 function Remove-OldScreenshots {
-  $cutoff = [DateTime]::UtcNow.AddMinutes(-30)
+  $now = [DateTime]::UtcNow
+  if ($null -ne $script:LastScreenshotCleanupUtc -and ($now - $script:LastScreenshotCleanupUtc).TotalSeconds -lt 60) { return }
+  $script:LastScreenshotCleanupUtc = $now
+  $cutoff = $now.AddMinutes(-30)
   try {
     foreach ($file in [System.IO.Directory]::EnumerateFiles($env:TEMP, 'windows-computer-use-*.png')) {
       if ([System.IO.File]::GetLastWriteTimeUtc($file) -lt $cutoff) { Remove-TempFile $file }
@@ -2791,20 +2818,38 @@ function Test-GeckoPageTree {
   return $false
 }
 
+$script:GeckoPages = @{}
 function Initialize-GeckoPages {
   param([object]$Window, [object]$Traversal)
   if ($null -eq $Window -or $Window.className -ne 'MozillaWindowClass') { return $null }
   $hwnd = [IntPtr]([int64]$Window.nativeWindowHandle)
   if ($hwnd -eq [IntPtr]::Zero -or -not [WindowsComputerUseNative]::IsWindow($hwnd)) { return $null }
   if (-not [WindowsComputerUseNative]::IsResponsive($hwnd)) { return $null }
+  if ($null -eq $script:GeckoPages) { $script:GeckoPages = @{} }
+  $owner = [uint32]0
+  [void][WindowsComputerUseNative]::GetWindowThreadProcessId($hwnd, [ref]$owner)
+  $key = [string]$hwnd.ToInt64()
+  $entry = $script:GeckoPages[$key]
+  if ($null -eq $entry -or $entry.processId -ne $owner) {
+    $entry = @{ processId = $owner; ready = $false }
+    $script:GeckoPages[$key] = $entry
+  }
+  if ($entry.ready -and (Invoke-Safe { Test-GeckoPageTree $hwnd } $false)) {
+    return @{ state = 'ready'; waitedMs = 0 }
+  }
+  $entry.ready = $false
   [UIntPtr]$wakeRes = [UIntPtr]::Zero
   try { [void][WindowsComputerUseNative]::SendMessageTimeout($hwnd, 0x003D, [UIntPtr]::Zero, [IntPtr](-4), 3, 500, [ref]$wakeRes) } catch { }
-  if (Invoke-Safe { Test-GeckoPageTree $hwnd } $false) { return @{ state = 'ready'; waitedMs = 0 } }
+  if (Invoke-Safe { Test-GeckoPageTree $hwnd } $false) {
+    $entry.ready = $true
+    return @{ state = 'ready'; waitedMs = 0 }
+  }
   $start = $Traversal.watch.ElapsedMilliseconds
   $limit = [Math]::Min(2500, [int]($Traversal.budgetMs / 2))
   while (($Traversal.watch.ElapsedMilliseconds - $start) -lt $limit) {
     Start-Sleep -Milliseconds 80
     if (Invoke-Safe { Test-GeckoPageTree $hwnd } $false) {
+      $entry.ready = $true
       return @{ state = 'ready'; waitedMs = [int]($Traversal.watch.ElapsedMilliseconds - $start) }
     }
   }
@@ -3783,23 +3828,24 @@ function Invoke-Action {
       $scale = 1.0
       if ($null -ne $shot.imageScale) { $scale = [double]$shot.imageScale }
       $ocr = if ($internalOcr) { Invoke-Ocr -PngBytes $shot.pngBytes -Language $language } else { Invoke-Ocr -PngPath $shot.path -Language $language }
-      $lines = @()
+      $lines = New-Object System.Collections.Generic.List[object]
       foreach ($line in $ocr.lines) {
-        $words = @()
+        $words = New-Object System.Collections.Generic.List[object]
         foreach ($w in $line.words) {
-          $words += [ordered]@{
+          $words.Add([ordered]@{
             text = $w.text
             x = [int]($origX + ($w.x / $scale))
             y = [int]($origY + ($w.y / $scale))
             width = [int]($w.width / $scale)
             height = [int]($w.height / $scale)
-          }
+          })
         }
-        $lines += [ordered]@{ text = $line.text; words = $words; boundingBox = (Get-OcrWordBounds -Words $words) }
+        $wordArr = $words.ToArray()
+        $lines.Add([ordered]@{ text = $line.text; words = $wordArr; boundingBox = (Get-OcrWordBounds -Words $wordArr) })
       }
       # OCR -> control upgrade: ignore OCR whitespace when matching, then
       # hit-test the center of the matching word run's union box with UIA.
-      $matched = @()
+      $matched = New-Object System.Collections.Generic.List[object]
       if ($query.Length -gt 0 -and $lines.Count -gt 0) {
         if ([bool](Get-Prop $inputObject 'resolveControl' $false) -and $null -ne $winEl) {
           if ($winEl.className -eq 'MozillaWindowClass') { [void](Initialize-GeckoPages $winEl @{ watch = [Diagnostics.Stopwatch]::StartNew(); budgetMs = 2000 }) }
@@ -3824,14 +3870,14 @@ function Invoke-Action {
               boundingBox = Convert-Rect (Invoke-Safe { $el.Current.BoundingRectangle } $null)
             }
           }
-          $matched += [ordered]@{ source = "ocr"; line = $lineText; word = [ordered]@{ text = $hit.text; x = $wx; y = $wy }; boundingBox = $hit.boundingBox; control = $ctl }
+          $matched.Add([ordered]@{ source = "ocr"; line = $lineText; word = [ordered]@{ text = $hit.text; x = $wx; y = $wy }; boundingBox = $hit.boundingBox; control = $ctl })
         }
       }
       $result = [ordered]@{
         ok = $true
         action = "ocr"
         text = $ocr.text
-        lines = $lines
+        lines = $lines.ToArray()
         image = $shot.path
         imageBounds = $shot.bounds
         source = if ($winEl -ne $null) { "window" } else { "desktop" }
@@ -3847,7 +3893,7 @@ function Invoke-Action {
       if ([bool](Get-Prop $inputObject 'includeScreenshot' $false)) { $result['screenshot'] = $shot }
       if ($query.Length -gt 0) {
         $result["query"] = $query
-        $result["matched"] = $matched
+        $result["matched"] = $matched.ToArray()
         if ($matched.Count -eq 0) { $result["note"] = "No OCR word sequence matched the query (case-insensitive, ignoring whitespace). Inspect 'lines' for the recognized text and word boxes." }
       }
       if ($activationRefused) {

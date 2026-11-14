@@ -149,6 +149,13 @@ namespace DshTakeover {
       uint x=96,y=96;try{if(GetDpiForMonitor(monitor,0,out x,out y)!=0)x=y=96;}catch(EntryPointNotFoundException){}
       return bounds.ToString()+"/"+monitor.ToInt64()+"/"+x+"/"+y;
     }
+    internal static float ScaleForDisplay(Rectangle bounds) {
+      IntPtr monitor = MonitorFromPoint(new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2), 2);
+      uint x = 96, y = 96;
+      try { if (GetDpiForMonitor(monitor, 0, out x, out y) == 0 && x > 0) return Math.Max(1f, Math.Min(3f, x / 96f)); }
+      catch (EntryPointNotFoundException) { }
+      return Math.Max(1f, Math.Min(2f, bounds.Width / 1920f));
+    }
     internal static void KeepOnTop(IntPtr window) { SetWindowPos(window,new IntPtr(-1),0,0,0,0,0x213); }
   }
 
@@ -327,7 +334,8 @@ namespace DshTakeover {
     PointerWatch pointerWatch;
     Native.Point? testOverlayCursor;
     DateTime progressPreviewUntil=DateTime.MinValue;
-    bool progressDismissed,progressCloseWhenIdle;
+    bool progressCloseWhenIdle;
+    string lastTurnKey="",dismissedTurnKey;
     bool progressSettingEnabled=true;
     volatile bool progressAvailable;
     int progressKey,progressModifiers;
@@ -361,24 +369,30 @@ namespace DshTakeover {
       timer.Interval = 35;
       timer.Tick += delegate {
         // A window the user is moving or resizing goes once they are done.
-        if(progress!=null&&progressPreviewUntil!=DateTime.MaxValue&&DateTime.UtcNow>progressPreviewUntil&&!progress.Adjusting)CloseProgress();
+        if(progress!=null&&progressPreviewUntil!=DateTime.MaxValue&&DateTime.UtcNow>progressPreviewUntil&&!progress.Adjusting){progressPreviewUntil=DateTime.MinValue;CloseProgress();}
         if(progressCloseWhenIdle&&progress!=null&&!progress.Adjusting)CloseProgress();
         TrackProgressPointer();
 
         double elapsed = hideAt == DateTime.MaxValue ? -1 : (DateTime.UtcNow - hideAt).TotalMilliseconds;
-        if (elapsed >= 160) { HideFrames(); HidePointer(); armed = false; hideAt = DateTime.MaxValue; return; }
+        if (elapsed >= 160) { HideFrames(); HidePointer(); armed = false; hideAt = DateTime.MaxValue; SyncTimer(); return; }
         byte alpha = elapsed >= 0 ? (byte)Math.Max(0, 255 * (1 - elapsed / 160)) : (byte)255;
         if(armed&&!paused)RefreshDisplays(false);
         UpdatePointer(alpha);
         if (elapsed >= 0) foreach (var frame in frames) frame.Present(alpha);
+        SyncTimer();
       };
-      timer.Start();
+      SyncTimer();
       SystemEventsSubscribe();
       new Thread(ReadCommands) { IsBackground = true, Name = "DSH takeover control" }.Start();
       RefreshDisplays(true);
       // The Windows process id: under WSL the server sees only the id of the
       // interop process that started this one (#79).
       Emit(new { kind = "ready", hookActive = keyboard.Active, monitors = displays.Length, pid = System.Diagnostics.Process.GetCurrentProcess().Id });
+    }
+    void SyncTimer() {
+      bool active = !shuttingDown && (armed || hideAt != DateTime.MaxValue || frames.Count > 0 || pointer != null || progress != null);
+      if (active && !timer.Enabled) timer.Start();
+      else if (!active && timer.Enabled) timer.Stop();
     }
 
     void SystemEventsSubscribe() { Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplaysChanged; Microsoft.Win32.SystemEvents.SessionSwitch += SessionChanged; Microsoft.Win32.SystemEvents.UserPreferenceChanged += PreferencesChanged; }
@@ -394,7 +408,7 @@ namespace DshTakeover {
     }
     void DisplaysChanged(object sender, EventArgs args) {
       if (shuttingDown) return;
-      try { dispatcher.BeginInvoke((Action)delegate { RefreshDisplays(true); UpdatePointer(255); }); } catch (InvalidOperationException) { }
+      try { dispatcher.BeginInvoke((Action)delegate { RefreshDisplays(true); UpdatePointer(255); SyncTimer(); }); } catch (InvalidOperationException) { }
     }
     bool RefreshDisplays(bool force) {
       if(!force&&DateTime.UtcNow<nextDisplayPoll)return false;
@@ -442,17 +456,18 @@ namespace DshTakeover {
         object strings; if (command.TryGetValue("strings", out strings)) Words.Use(strings);
         if(action=="capture_begin"){
           captureDepth++;ApplyCaptureVisibility();
-          Native.DwmFlush();
+          if (captureDepth == 1 && remoteVisible && (frames.Count > 0 || pointer != null || progress != null)) Native.DwmFlush();
         } else if(action=="capture_end"){
           captureDepth=Math.Max(0,captureDepth-1);ApplyCaptureVisibility();
         } else if (action == "begin" || action == "preview") {
           if (paused) throw new InvalidOperationException("COMPUTER_USE_STOPPED_BY_USER");
+          string prevShortcut = stopShortcut;
           ConfigureShortcut(Get(command, "stopShortcut", stopShortcut));
           bool nextIndicator = Get(command, "indicatorEnabled", true);
           ConfigureVisibility(Get(command,"remoteIndicatorVisible",true));
           cursorIndicator = Get(command, "cursorIndicatorEnabled", true);
           string nextText = Get(command, "indicatorText", Words.Get("indicatorDefault")), nextPosition = Get(command, "indicatorPosition", "top"), nextHint = Words.Get("stopHint");
-          bool rebuild = nextIndicator != indicator || nextText != text || nextHint != hint || nextPosition != position || frames.Count == 0;
+          bool rebuild = nextIndicator != indicator || nextText != text || nextHint != hint || nextPosition != position || prevShortcut != stopShortcut || frames.Count == 0;
           indicator = nextIndicator; text = nextText; hint = nextHint; position = nextPosition;
           idleMs = Math.Max(200, Math.Min(3000, Get(command, "indicatorIdleMs", 800)));
           bool alreadyArmed=armed;
@@ -465,23 +480,34 @@ namespace DshTakeover {
           UpdatePointer(255);
         } else if (action == "progress") {
           bool enabled=Get(command,"enabled",false),preview=Get(command,"preview",false);
-          object settingsObject;var presentedSettings=command.TryGetValue("settings",out settingsObject)?settingsObject as Dictionary<string,object>:null;
-          bool settingEnabled=presentedSettings==null||Get(presentedSettings,"progressOverlayEnabled",true);
-          if(progressSettingEnabled&&!settingEnabled)progressPreviewUntil=DateTime.MinValue;
+          object supplied;
+          var data=command.TryGetValue("progress",out supplied)?supplied as Dictionary<string,object>:null;
+          var settings=command.TryGetValue("settings",out supplied)?supplied as Dictionary<string,object>:null;
+          bool settingEnabled=settings==null||Get(settings,"progressOverlayEnabled",true);
+          if(progressSettingEnabled&&!settingEnabled){progressPreviewUntil=DateTime.MinValue;dismissedTurnKey=null;}
           progressSettingEnabled=settingEnabled;
-          if(preview){progressDismissed=false;progressPreviewUntil=DateTime.UtcNow.AddSeconds(60);}
-          if(!enabled)progressDismissed=false;
-          if(progressDismissed&&!preview){Emit(new {id=id,ok=true,progressVisible=false});return;}
-          bool leavingPreview=enabled&&!preview&&progressPreviewUntil!=DateTime.MaxValue;
+          if(preview){dismissedTurnKey=null;progressPreviewUntil=DateTime.UtcNow.AddSeconds(60);}
+          if(!enabled){lastTurnKey="";dismissedTurnKey=null;}
+          else if(!preview){
+            string explicitKey=Get(command,"turnKey","");
+            long startedAt=ProgressFrame.Whole(data,"startedAt");
+            string currentTurnKey=explicitKey!=""?explicitKey:(startedAt>0?startedAt.ToString():"active");
+            lastTurnKey=currentTurnKey;
+            if(dismissedTurnKey!=null&&currentTurnKey!=dismissedTurnKey)dismissedTurnKey=null;
+            if(dismissedTurnKey!=null){Emit(new {id=id,ok=true,progressVisible=false});return;}
+          }
+          bool leavingPreview=enabled&&!preview&&progressPreviewUntil!=DateTime.MaxValue&&progressPreviewUntil!=DateTime.MinValue;
           if(enabled&&!preview)progressPreviewUntil=DateTime.MaxValue;
           if(!enabled&&(progressPreviewUntil==DateTime.MaxValue||DateTime.UtcNow>=progressPreviewUntil)){if(progress!=null&&progress.Adjusting)progressCloseWhenIdle=true;else CloseProgress();}
           else {
             progressCloseWhenIdle=false;
-            object supplied;
-            var data=command.TryGetValue("progress",out supplied)?supplied as Dictionary<string,object>:null;
-            var settings=command.TryGetValue("settings",out supplied)?supplied as Dictionary<string,object>:null;
             bool fresh=progress==null;
-            if(fresh){progress=new ProgressFrame(delegate(Dictionary<string,object> patch,Dictionary<string,object> baseline){Emit(new {kind="progress-layout",patch=patch,@base=baseline});},delegate {Emit(new {kind="progress-layout",patch=new Dictionary<string,object>{{"progressOverlayEnabled",false}}});progressPreviewUntil=DateTime.MinValue;progressDismissed=true;CloseProgress();});progressAvailable=true;}
+            if(fresh){progress=new ProgressFrame(delegate(Dictionary<string,object> patch,Dictionary<string,object> baseline){Emit(new {kind="progress-layout",patch=patch,@base=baseline});},delegate {
+              bool wasPreview=(progressPreviewUntil!=DateTime.MinValue&&progressPreviewUntil!=DateTime.MaxValue&&DateTime.UtcNow<progressPreviewUntil)||(progress!=null&&progress.IsPreview);
+              progressPreviewUntil=DateTime.MinValue;
+              if(!wasPreview&&lastTurnKey!="")dismissedTurnKey=lastTurnKey;
+              CloseProgress();
+            });progressAvailable=true;}
             progress.Configure(settings,Get(command,"remoteIndicatorVisible",true));
             lock(keyState){int savedKey=stopKey,savedModifiers=stopModifiers;string savedShortcut=stopShortcut;
             ConfigureShortcut(settings!=null?Get(settings,"progressLockShortcut",""):"");progressKey=stopKey;progressModifiers=stopModifiers;
@@ -528,9 +554,11 @@ namespace DshTakeover {
           new Thread(()=>{Thread.Sleep(80);keyboard.TestStop();}){IsBackground=true}.Start();
           Thread.Sleep(Get(command,"milliseconds",500));
         } else if (action == "configure") {
+          string prevShortcut = stopShortcut;
           ConfigureShortcut(Get(command, "stopShortcut", ""));
           ConfigureVisibility(Get(command,"remoteIndicatorVisible",remoteVisible));
           cursorIndicator = Get(command, "cursorIndicatorEnabled", cursorIndicator); UpdatePointer(255);
+          if (prevShortcut != stopShortcut && armed && !paused && indicator && frames.Count > 0) { HideFrames(); ShowFrames(); }
         } else if (action == "end") {
           hideAt = DateTime.UtcNow.AddMilliseconds(idleMs);
         } else if (action == "stop") {
@@ -545,7 +573,7 @@ namespace DshTakeover {
           ulong extra=(ulong)Get<long>(command,"extra",injected?(long)(ulong)KeyboardWatch.InputMarker:0L);
           consumed = HandleKey(Get(command, "vk", 0), KeyboardWatch.OwnInput(flags,new UIntPtr(extra)), Get(command, "down", true));
         } else if (action == "test_render" && testMode) {
-          using (var image = Frame.Draw(1200, 675, Get(command, "indicatorText", text), Get(command, "indicatorPosition", "top"))) image.Save(Get(command, "path", ""), ImageFormat.Png);
+          using (var image = Frame.Draw(1200, 675, Get(command, "indicatorText", text), Get(command, "indicatorPosition", "top"), Get(command, "stopShortcut", stopShortcut), 0f)) image.Save(Get(command, "path", ""), ImageFormat.Png);
         } else if (action == "test_render_pointer" && testMode) {
           float zoom=(float)Get(command,"scale",2.0);
           using (var image = PointerFrame.Draw(zoom, false, false)) {
@@ -566,8 +594,13 @@ namespace DshTakeover {
           testDisplays=null;nextDisplayPoll=DateTime.MinValue;
         } else if (action != "status") throw new InvalidOperationException("Unknown takeover command");
         ApplyCaptureVisibility();
-        Native.Point livePoint; bool liveCursorAvailable=Native.GetCursorPos(out livePoint);
-        Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0), consumed = consumed, uiWindowCount=Application.OpenForms.Count, stopShortcut = stopShortcut, windows = frames.Count, progressVisible=progress!=null, progressClickThrough=progress!=null&&progress.ClickThrough, progressContent=progress!=null?progress.Content:null, progressLocked=progress!=null&&progress.Locked, progressHover=progress!=null?progress.HoverStatus():null, pointerWatchActive=pointerWatch!=null&&pointerWatch.Active, progressReading=progress!=null?progress.ReadingStatus():null, progressOpacity=progress!=null?progress.BackgroundOpacity:0, progressBounds=progress!=null?new {x=progress.Left,y=progress.Top,width=progress.Width,height=progress.Height}:null, remoteIndicatorVisible=remoteVisible, overlayCaptureExcluded=frames.Count>0&&frames.TrueForAll(frame=>frame.CaptureExcluded), overlayClickThrough=frames.Count>0&&frames.TrueForAll(frame=>frame.ClickThrough), displayRevision=displayRevision, displays=Array.ConvertAll(displays,r=>new {left=r.Left,top=r.Top,width=r.Width,height=r.Height}), overlayBounds=frames.ConvertAll(frame=>new {left=frame.DisplayBounds.Left,top=frame.DisplayBounds.Top,width=frame.DisplayBounds.Width,height=frame.DisplayBounds.Height}), cursorError = cursorError, liveCursorAvailable = liveCursorAvailable, pointerSource = testPointerPoint.HasValue ? "test-seam" : "windows", pointerVisible = pointer != null, pointerClickThrough = pointer != null && pointer.ClickThrough, pointerCaptureExcluded = pointer != null && pointer.CaptureExcluded, foreground = Native.GetForegroundWindow().ToInt64() });
+        SyncTimer();
+        if (testMode || action == "status") {
+          Native.Point livePoint; bool liveCursorAvailable=Native.GetCursorPos(out livePoint);
+          Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0), consumed = consumed, uiWindowCount=Application.OpenForms.Count, stopShortcut = stopShortcut, windows = frames.Count, progressVisible=progress!=null, progressClickThrough=progress!=null&&progress.ClickThrough, progressContent=progress!=null?progress.Content:null, progressLocked=progress!=null&&progress.Locked, progressHover=progress!=null?progress.HoverStatus():null, pointerWatchActive=pointerWatch!=null&&pointerWatch.Active, progressReading=progress!=null?progress.ReadingStatus():null, progressOpacity=progress!=null?progress.BackgroundOpacity:0, progressBounds=progress!=null?new {x=progress.Left,y=progress.Top,width=progress.Width,height=progress.Height}:null, remoteIndicatorVisible=remoteVisible, overlayCaptureExcluded=frames.Count>0&&frames.TrueForAll(frame=>frame.CaptureExcluded), overlayClickThrough=frames.Count>0&&frames.TrueForAll(frame=>frame.ClickThrough), displayRevision=displayRevision, displays=Array.ConvertAll(displays,r=>new {left=r.Left,top=r.Top,width=r.Width,height=r.Height}), overlayBounds=frames.ConvertAll(frame=>new {left=frame.DisplayBounds.Left,top=frame.DisplayBounds.Top,width=frame.DisplayBounds.Width,height=frame.DisplayBounds.Height}), cursorError = cursorError, liveCursorAvailable = liveCursorAvailable, pointerSource = testPointerPoint.HasValue ? "test-seam" : "windows", pointerVisible = pointer != null, pointerClickThrough = pointer != null && pointer.ClickThrough, pointerCaptureExcluded = pointer != null && pointer.CaptureExcluded, foreground = Native.GetForegroundWindow().ToInt64() });
+        } else {
+          Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0) });
+        }
       } catch (Exception error) { Emit(new { id = id, ok = false, error = error.Message }); }
     }
     static int Modifier(int vk) {
@@ -614,14 +647,14 @@ namespace DshTakeover {
     void Stop(string reason, bool broadcast=true) {
       cancel.Set();paused=true;armed=false;
       if(broadcast)stopBus.Publish();
-      Action draw=()=>{hideAt=DateTime.MaxValue;HideFrames();HidePointer();};
+      Action draw=()=>{hideAt=DateTime.MaxValue;HideFrames();HidePointer();SyncTimer();};
       if(dispatcher.InvokeRequired){
         try{dispatcher.BeginInvoke(draw);}catch(InvalidOperationException){}
         ThreadPool.QueueUserWorkItem(_=>Emit(new {kind="stopped",reason=reason}));
       }else{draw();Emit(new {kind="stopped",reason=reason});}
     }
     void ShowFrames() {
-      foreach (var bounds in displays) { var frame = new Frame(bounds, text, position,remoteVisible&&captureDepth==0); frames.Add(frame); frame.Show(); frame.Present(255); }
+      foreach (var bounds in displays) { var frame = new Frame(bounds, text, position, remoteVisible&&captureDepth==0, stopShortcut, Native.ScaleForDisplay(bounds)); frames.Add(frame); frame.Show(); frame.Present(255); }
     }
     void HideFrames() { foreach (var frame in frames) frame.Dispose(); frames.Clear(); }
     void UpdatePointer(byte alpha) {
@@ -639,6 +672,7 @@ namespace DshTakeover {
       progressCloseWhenIdle=false;
       if(progress!=null){progress.Dispose();progress=null;}
       if(pointerWatch!=null){pointerWatch.Dispose();pointerWatch=null;}
+      SyncTimer();
     }
     // The overlay's lock button answers the user's own pointer only. The hook
     // runs only while a locked (or hover-unlocked) overlay is on screen.
@@ -749,6 +783,7 @@ namespace DshTakeover {
       configured=true;remoteVisible=visible;BackgroundOpacity=Math.Max(.2,Math.Min(1,opacity/100.0));
       if(IsHandleCreated){Native.ApplyDisplayAffinity(this,visible);RefreshDpi();}Present();
     }
+    internal bool IsPreview {get{return previewUnlocked;}}
     internal void BeginPreview(){previewUnlocked=true;SetLocked(false,false);}
     internal void EndPreview(){if(!previewUnlocked)return;previewUnlocked=false;SetLocked(configuredLocked,false);}
     // After any lock the pointer must leave the button before resting on it
@@ -850,20 +885,28 @@ namespace DshTakeover {
       return items;
     }
     static bool Flag(Dictionary<string,object> data,string key){object v;if(data==null||!data.TryGetValue(key,out v)||v==null)return false;try{return Convert.ToBoolean(v);}catch(FormatException){return false;}}
-    static long Whole(Dictionary<string,object> data,string key){object v;if(data==null||!data.TryGetValue(key,out v)||v==null)return 0;try{return Convert.ToInt64(v);}catch(FormatException){return 0;}catch(InvalidCastException){return 0;}catch(OverflowException){return 0;}}
+    internal static long Whole(Dictionary<string,object> data,string key){object v;if(data==null||!data.TryGetValue(key,out v)||v==null)return 0;try{return Convert.ToInt64(v);}catch(FormatException){return 0;}catch(InvalidCastException){return 0;}catch(OverflowException){return 0;}}
     static string Shorten(string text,int limit){text=text.Trim();return text.Length>limit?"…"+text.Substring(text.Length-limit+1):text;}
     // DSH renders Markdown, so plain text shows the same words without the
     // marks; paragraphs follow each other without blank lines in a small window.
+    static readonly System.Text.RegularExpressions.Regex RxCodeFence=new System.Text.RegularExpressions.Regex(@"(?m)^[ \t]*```[^\n]*\n?",System.Text.RegularExpressions.RegexOptions.Compiled);
+    static readonly System.Text.RegularExpressions.Regex RxImage=new System.Text.RegularExpressions.Regex(@"!\[([^\]\n]*)\]\([^)\n]*\)",System.Text.RegularExpressions.RegexOptions.Compiled);
+    static readonly System.Text.RegularExpressions.Regex RxLink=new System.Text.RegularExpressions.Regex(@"\[([^\]\n]+)\]\([^)\n]*\)",System.Text.RegularExpressions.RegexOptions.Compiled);
+    static readonly System.Text.RegularExpressions.Regex RxBold=new System.Text.RegularExpressions.Regex(@"(\*\*|__)(?=\S)(.+?)(?<=\S)\1",System.Text.RegularExpressions.RegexOptions.Compiled);
+    static readonly System.Text.RegularExpressions.Regex RxCode=new System.Text.RegularExpressions.Regex(@"`([^`\n]+)`",System.Text.RegularExpressions.RegexOptions.Compiled);
+    static readonly System.Text.RegularExpressions.Regex RxHeading=new System.Text.RegularExpressions.Regex(@"(?m)^[ \t]{0,3}#{1,6}[ \t]+",System.Text.RegularExpressions.RegexOptions.Compiled);
+    static readonly System.Text.RegularExpressions.Regex RxBullet=new System.Text.RegularExpressions.Regex(@"(?m)^([ \t]*)[-*+][ \t]+",System.Text.RegularExpressions.RegexOptions.Compiled);
+    static readonly System.Text.RegularExpressions.Regex RxBlankLines=new System.Text.RegularExpressions.Regex(@"\n[ \t]*(?:\n[ \t]*)+",System.Text.RegularExpressions.RegexOptions.Compiled);
     static string Readable(string text){
       text=(text??"").Replace("\r","");
-      text=System.Text.RegularExpressions.Regex.Replace(text,@"(?m)^[ \t]*```[^\n]*\n?","");
-      text=System.Text.RegularExpressions.Regex.Replace(text,@"!\[([^\]\n]*)\]\([^)\n]*\)",match=>match.Groups[1].Value.Trim()==""?Words.Get("image"):Words.Format("imageNamed",match.Groups[1].Value.Trim()));
-      text=System.Text.RegularExpressions.Regex.Replace(text,@"\[([^\]\n]+)\]\([^)\n]*\)","$1");
-      text=System.Text.RegularExpressions.Regex.Replace(text,@"(\*\*|__)(?=\S)(.+?)(?<=\S)\1","$2");
-      text=System.Text.RegularExpressions.Regex.Replace(text,@"`([^`\n]+)`","$1");
-      text=System.Text.RegularExpressions.Regex.Replace(text,@"(?m)^[ \t]{0,3}#{1,6}[ \t]+","");
-      text=System.Text.RegularExpressions.Regex.Replace(text,@"(?m)^([ \t]*)[-*+][ \t]+","$1• ");
-      text=System.Text.RegularExpressions.Regex.Replace(text,@"\n[ \t]*(?:\n[ \t]*)+","\n");
+      text=RxCodeFence.Replace(text,"");
+      text=RxImage.Replace(text,match=>match.Groups[1].Value.Trim()==""?Words.Get("image"):Words.Format("imageNamed",match.Groups[1].Value.Trim()));
+      text=RxLink.Replace(text,"$1");
+      text=RxBold.Replace(text,"$2");
+      text=RxCode.Replace(text,"$1");
+      text=RxHeading.Replace(text,"");
+      text=RxBullet.Replace(text,"$1• ");
+      text=RxBlankLines.Replace(text,"\n");
       return text.Trim();
     }
     // When a task ends with a reply longer than the window, show the reply from
@@ -967,7 +1010,7 @@ namespace DshTakeover {
           var clip=g.Save();g.SetClip(viewport);int first=scrollY/LineHeight,last=Math.Min(lines.Count,(scrollY+viewport.Height)/LineHeight+1);
           for(int i=first;i<last;i++){var line=lines[i];Font font=line.heading?headingFont:bodyFont;Brush brush=line.heading?muted:fg;float x=viewport.X,y=viewport.Y+i*LineHeight-scrollY;g.DrawString(line.text,font,shadow,new PointF(x+halo,y+halo),format);g.DrawString(line.text,font,brush,new PointF(x,y),format);}
           g.Restore(clip);
-          if(!Locked)Shadowed(g,Words.Get(hoverUnlocked?"hintUnlocked":"hintAdjust"),footerFont,muted,shadow,new RectangleF(Px(12),Height-Px(22),Math.Max(10,Width-Px(24)),Px(20)),format,halo);
+          if(!Locked)Shadowed(g,Words.Get(hoverUnlocked?"hintUnlocked":previewUnlocked?"hintPreview":"hintAdjust"),footerFont,muted,shadow,new RectangleF(Px(12),Height-Px(22),Math.Max(10,Width-Px(24)),Px(20)),format,halo);
         }
         // The translucent scrollbar appears only when there is more to read.
         if(MaxScroll>0){
@@ -1151,11 +1194,11 @@ namespace DshTakeover {
     readonly Rectangle rectangle;
     bool remoteVisible;
     IntPtr dc, bitmap, previous;
-    internal Frame(Rectangle bounds, string text, string position,bool visible) {
+    internal Frame(Rectangle bounds, string text, string position, bool visible, string stopShortcut = "", float dpiScale = 0f) {
       remoteVisible=visible;rectangle = bounds; AutoScaleMode=AutoScaleMode.None;FormBorderStyle = FormBorderStyle.None;
       ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
       Bounds=bounds;
-      using (var image = Draw(bounds.Width, bounds.Height, text, position)) bitmap = image.GetHbitmap(Color.FromArgb(0));
+      using (var image = Draw(bounds.Width, bounds.Height, text, position, stopShortcut, dpiScale)) bitmap = image.GetHbitmap(Color.FromArgb(0));
       dc = Native.CreateCompatibleDC(IntPtr.Zero); previous = Native.SelectObject(dc, bitmap);
     }
     protected override bool ShowWithoutActivation { get { return true; } }
@@ -1175,13 +1218,16 @@ namespace DshTakeover {
       if (!Native.UpdateLayeredWindow(Handle, IntPtr.Zero, ref destination, ref size, dc, ref origin, 0, ref blend, 2)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not present takeover overlay");
     }
     internal static Bitmap Draw(int width, int height, string text, string position) {
+      return Draw(width, height, text, position, "", 0f);
+    }
+    internal static Bitmap Draw(int width, int height, string text, string position, string stopShortcut = "", float dpiScale = 0f) {
       var image = new Bitmap(width,height,PixelFormat.Format32bppPArgb);
       using (var g = Graphics.FromImage(image)) {
         g.SmoothingMode = SmoothingMode.AntiAlias;
         // ClearType needs an opaque surface; layered windows need grayscale text.
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         g.Clear(Color.Transparent);
-        float scale = Math.Max(1f, Math.Min(2f, width/1920f));
+        float scale = dpiScale > 0f ? dpiScale : Math.Max(1f, Math.Min(2f, width/1920f));
         // Edge glow: a bright core line that reads on dark wallpapers, then a
         // DeepSeek-blue falloff that reads on light ones.
         g.CompositingMode = CompositingMode.SourceCopy;
@@ -1191,14 +1237,15 @@ namespace DshTakeover {
           using (var pen = new Pen(color,1)) g.DrawRectangle(pen,i,i,width-2*i-1,height-2*i-1);
         }
         g.CompositingMode = CompositingMode.SourceOver;
-        // Status pill: live dot, the user's text, then an Esc keycap.
+        // Status pill: live dot, the user's text, then an Esc (or Esc / custom) keycap.
         using (var font = new Font("Microsoft YaHei UI",10.5f*scale,FontStyle.Regular,GraphicsUnit.Point))
         using (var keyFont = new Font("Segoe UI",8.5f*scale,FontStyle.Bold,GraphicsUnit.Point))
         using (var hintFont = new Font("Microsoft YaHei UI",9.5f*scale,FontStyle.Regular,GraphicsUnit.Point))
         using (var measure = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces }) {
           string hint = Words.Get("stopHint");
+          string keyLabel = String.IsNullOrEmpty(stopShortcut) ? "Esc" : "Esc / " + stopShortcut;
           float pillHeight=40*scale, padding=16*scale, dot=8*scale, gap=10*scale, keyHeight=20*scale;
-          float keyWidth=g.MeasureString("Esc",keyFont,PointF.Empty,measure).Width+12*scale;
+          float keyWidth=g.MeasureString(keyLabel,keyFont,PointF.Empty,measure).Width+12*scale;
           float hintWidth=g.MeasureString(hint,hintFont,PointF.Empty,measure).Width;
           float fixedWidth=padding*2+dot+gap*3+1+keyWidth+6*scale+hintWidth;
           float textWidth=Math.Min(g.MeasureString(text,font,PointF.Empty,measure).Width,Math.Max(48*scale,width-48*scale-fixedWidth));
@@ -1228,7 +1275,7 @@ namespace DshTakeover {
           }
           using (var brush=new SolidBrush(Color.FromArgb(255,245,247,250)))
           using (var format=new StringFormat(StringFormat.GenericTypographic) { Alignment=StringAlignment.Center, LineAlignment=StringAlignment.Center })
-            g.DrawString("Esc",keyFont,brush,key,format);
+            g.DrawString(keyLabel,keyFont,brush,key,format);
           cursor+=keyWidth+6*scale;
           using (var brush=new SolidBrush(Color.FromArgb(200,245,247,250)))
           using (var format=new StringFormat(StringFormat.GenericTypographic) { LineAlignment=StringAlignment.Center, FormatFlags=StringFormatFlags.NoWrap })

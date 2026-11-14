@@ -87,23 +87,37 @@ try {
   atomicJson(configFile,{...geometry,...moved.patch});
   status=await wait(value=>value.progressBounds?.width===550);
   assert.equal(status.progressBounds.y,160);
+  const beforeCloseLayout=await readFile(control.layoutFile,'utf8');
   await control.command('test_progress_close');
-  assert.equal(JSON.parse(await readFile(control.layoutFile,'utf8')).patch.progressOverlayEnabled,false);
+  await wait(value=>!value.progressVisible);
+  assert.equal(Object.hasOwn(JSON.parse(await readFile(control.layoutFile,'utf8')).patch,'progressOverlayEnabled'),false,'Closing the overlay must not turn off progressOverlayEnabled');
+  assert.equal(await readFile(control.layoutFile,'utf8'),beforeCloseLayout);
+  event('assistant/chunk', { step: 3, chunk: { type: 'text-delta', text: 'Still same turn.' } });
+  await new Promise(r => setTimeout(r, 150)); await control.sync();
+  assert.equal((await control.command('status')).progressVisible,false,'Closing keeps only the current turn hidden');
+  // Starting a new turn shows the overlay again automatically, even before linger expires.
+  event('turn/end', {});
+  const turn8={session,phase:{kind:'running',turn:8}};
+  await handlers['tools/execute']({ name: 'mcp__wincu__windows_computer_use_wait', arguments: { milliseconds: 1 }, agent: turn8 }, async () => true);
+  handlers['session/event'](session,{type:'step/start',data:{turn:8,step:1}});
+  handlers['session/event'](session,{type:'assistant/chunk',data:{turn:8,step:1,chunk:{type:'text-delta',text:'Fixture reply.'}}});
+  status=await wait(value=>value.progressVisible&&value.progressContent.includes('Fixture reply.'));
   atomicJson(configFile,{...geometry,progressOverlayEnabled:false});
   await wait(value=>!value.progressVisible);
-  // Opening from DSH settings works with the normal overlay switch off.
+  // Opening from DSH settings works with the normal overlay switch off, and closing the preview writes no setting change.
   atomicJson(configFile,{...geometry,progressOverlayEnabled:false,progressPreviewToken:1});
   status=await wait(value=>value.progressVisible);
   assert.equal(status.progressLocked,false);assert.equal(status.armed,false);
-  atomicJson(configFile, { ...DEFAULT_SETTINGS, progressOverlayEnabled: false });
+  const layoutBeforePreviewClose=await readFile(control.layoutFile,'utf8');
   await control.command('test_progress_close');await wait(value=>!value.progressVisible);
-  atomicJson(configFile, { ...DEFAULT_SETTINGS, progressOverlayEnabled: true });
+  assert.equal(await readFile(control.layoutFile,'utf8'),layoutBeforePreviewClose,'Closing the preview must not change settings');
+  atomicJson(configFile, { ...DEFAULT_SETTINGS, progressOverlayEnabled: true, progressPreviewToken: 1 });
   await wait(value => value.progressVisible);
   // The finished state stays briefly so the result can be read, then goes.
-  event('turn/end', {});
+  handlers['session/event'](session,{type:'turn/end',data:{turn:8}});
   status = await wait(value => value.progressVisible && value.progressContent.startsWith('DSH · 已完成'));
   assert.ok(status.progressContent.includes('Fixture reply.'), 'The final reply stays readable after the turn ends');
   assert.equal(status.armed, false, 'The lingering result holds no stop key');
   await wait(value => !value.progressVisible);
-  console.log(JSON.stringify({ passed: true, hostChunkContract: 'agent/assistant-stream frames and legacy assistant/chunk', sessionIsolation: true, boundedText: true, noActivation: true, clickThrough: true, noStopHookArmed: true, liveToggle: true, endCleanup: true, finishedStateLingers: true, opacitySizePosition:true, lockShortcut:true, nativeLayoutEvents:true, persistentClose:true, settingsPreviewOpener:true, artifact, root }));
+  console.log(JSON.stringify({ passed: true, hostChunkContract: 'agent/assistant-stream frames and legacy assistant/chunk', sessionIsolation: true, boundedText: true, noActivation: true, clickThrough: true, noStopHookArmed: true, liveToggle: true, endCleanup: true, finishedStateLingers: true, opacitySizePosition:true, lockShortcut:true, nativeLayoutEvents:true, turnScopedClose:true, previewClosePreservesSetting:true, settingsPreviewOpener:true, artifact, root }));
 } finally { await control.close(); for (const dispose of disposers) dispose?.(); }
