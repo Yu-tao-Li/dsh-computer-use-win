@@ -7,6 +7,8 @@ using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.IO.MemoryMappedFiles;
+using System.Security.Principal;
 #if WCU_CORE
 using System.Text.Json;
 #else
@@ -99,6 +101,8 @@ namespace DshTakeover {
     [DllImport("user32.dll")] internal static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32.dll")] internal static extern int SetWindowLong(IntPtr window,int index,int value);
     [DllImport("user32.dll")] internal static extern bool SetWindowDisplayAffinity(IntPtr window, uint affinity);
+    internal static bool ApplyDisplayAffinity(Form window, bool visible){if(window==null||!window.IsHandleCreated)return true;bool ok=SetWindowDisplayAffinity(window.Handle,visible?0u:0x11u);if(!ok&&!visible&&window.Visible)window.Hide();return ok;}
+    [DllImport("dwmapi.dll")] internal static extern int DwmFlush();
     [DllImport("user32.dll")] internal static extern bool GetWindowDisplayAffinity(IntPtr window, out uint affinity);
     [DllImport("user32.dll")] internal static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int width,int height,uint flags);
     [StructLayout(LayoutKind.Sequential)] internal struct ScrollInfo {public uint size,mask;public int minimum,maximum;public uint page;public int position,track;}
@@ -196,11 +200,125 @@ namespace DshTakeover {
     public void Dispose() { disposed = true; if (threadId != 0) Native.PostThreadMessage(threadId, 0x12, IntPtr.Zero, IntPtr.Zero); }
   }
 
+
+  // The keyboard callback owns a dedicated message pump. Drawing and pipe
+  // writes never run on this thread. Session changes reinstall the hook via
+  // Reinstall(); readiness is cleared if replacement fails.
+  internal sealed class KeyboardWatch : IDisposable {
+    internal static readonly uint InputMarker = ParseInputMarker();
+    static uint ParseInputMarker() {
+      string raw = Environment.GetEnvironmentVariable("WCU_INPUT_MARKER");
+      if (!String.IsNullOrEmpty(raw)) {
+        string s = raw.Trim();
+        uint parsed;
+        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) {
+          if (uint.TryParse(s.Substring(2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out parsed) && parsed != 0u) return parsed;
+        } else if (uint.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out parsed) && parsed != 0u) return parsed;
+      }
+      return 0x44534857u;
+    }
+    internal static bool OwnInput(uint flags, UIntPtr extra){return (flags&0x10u)!=0&&(flags&0x02u)==0&&extra.ToUInt64()==(ulong)InputMarker;}
+    readonly Native.Hook callback;
+    readonly EventWaitHandle available;
+    readonly ManualResetEvent started = new ManualResetEvent(false);
+    readonly Func<int,bool,bool,bool> handle;
+    IntPtr hook; uint threadId; volatile bool disposed;
+    internal KeyboardWatch(string eventName, Func<int,bool,bool,bool> onKey) {
+      handle=onKey;callback=OnKey;
+      available=new EventWaitHandle(false,EventResetMode.ManualReset,eventName+"-ready");
+      new Thread(Run){IsBackground=true,Name="DSH stop keyboard"}.Start();
+      if(!started.WaitOne(3000)||!Active)throw new InvalidOperationException("Could not start the stop keyboard listener");
+    }
+    internal bool Active {get{return hook!=IntPtr.Zero&&!disposed;}}
+    void ReplaceHook(){
+      var next=Native.SetWindowsHookEx(13,callback,Native.GetModuleHandle(null),0);
+      if(next==IntPtr.Zero){available.Reset();return;}
+      var old=hook;hook=next;available.Set();
+      if(old!=IntPtr.Zero)Native.UnhookWindowsHookEx(old);
+    }
+    void Run(){
+      Native.Msg message;Native.PeekMessage(out message,IntPtr.Zero,0,0,0);threadId=Native.GetCurrentThreadId();
+      try{
+        ReplaceHook();started.Set();
+        while(!disposed&&Native.GetMessage(out message,IntPtr.Zero,0,0)>0){if(message.message==0x8001)ReplaceHook();else if(message.message==0x8002)handle(0x1B,false,true);}
+      }finally{available.Reset();if(hook!=IntPtr.Zero)Native.UnhookWindowsHookEx(hook);hook=IntPtr.Zero;}
+    }
+    IntPtr OnKey(int code,IntPtr message,IntPtr data){
+      if(code>=0){int kind=message.ToInt32();if(kind==0x100||kind==0x104||kind==0x101||kind==0x105){
+        var key=(Native.Key)Marshal.PtrToStructure(data,typeof(Native.Key));
+        if(handle((int)key.vk,OwnInput(key.flags,key.extra),kind==0x100||kind==0x104))return new IntPtr(1);
+      }}
+      return Native.CallNextHookEx(hook,code,message,data);
+    }
+    internal void Reinstall(){if(threadId!=0&&!disposed)Native.PostThreadMessage(threadId,0x8001,IntPtr.Zero,IntPtr.Zero);}
+    internal void TestStop(){Native.PostThreadMessage(threadId,0x8002,IntPtr.Zero,IntPtr.Zero);}
+    public void Dispose(){disposed=true;available.Reset();if(threadId!=0)Native.PostThreadMessage(threadId,0x12,IntPtr.Zero,IntPtr.Zero);}
+  }
+
+  // A generation counter cannot be cleared by another helper starting a new
+  // operation. Every live helper retains the mapping and polls on its own thread.
+  // Local keyboard cancellation never waits for this cross-process publication.
+  internal sealed class StopBus : IDisposable {
+    readonly Mutex mutex;
+    readonly MemoryMappedFile mapping;
+    readonly MemoryMappedViewAccessor view;
+    readonly ManualResetEvent closing = new ManualResetEvent(false);
+    readonly object gate = new object();
+    readonly Thread thread;
+    readonly Action stopped;
+    long seen;
+    bool disposed;
+    internal StopBus(string name, Action onStop) {
+      stopped=onStop;
+      mutex=new Mutex(false,name+"-lock");
+      mapping=MemoryMappedFile.CreateOrOpen(name,8);
+      view=mapping.CreateViewAccessor(0,8);
+      if(!Read(false))throw new InvalidOperationException("Could not initialize shared stop listener");
+      thread=new Thread(Run){IsBackground=true,Name="DSH shared stop"};thread.Start();
+    }
+    bool Acquire(int timeout) {
+      try{return mutex.WaitOne(timeout);}catch(AbandonedMutexException){return true;}
+    }
+    bool Read(bool notify) {
+      bool changed=false;
+      lock(gate){
+        if(disposed||!Acquire(250))return false;
+        try{long next=view.ReadInt64(0);changed=next!=seen;seen=next;}
+        finally{mutex.ReleaseMutex();}
+      }
+      if(changed&&notify)stopped();
+      return true;
+    }
+    void Run(){
+      while(!closing.WaitOne(40)){
+        try{if(!Read(true))stopped();}catch{stopped();return;}
+      }
+    }
+    internal void Publish(){
+      ThreadPool.QueueUserWorkItem(_=>{
+        try{
+          lock(gate){
+            if(disposed)return;
+            if(!Acquire(250)){stopped();return;}
+            try{seen=unchecked(view.ReadInt64(0)+1);view.Write(0,seen);}
+            finally{mutex.ReleaseMutex();}
+          }
+        }catch{stopped();}
+      });
+    }
+    public void Dispose(){
+      closing.Set();thread.Join(2000);
+      lock(gate){disposed=true;view.Dispose();mapping.Dispose();mutex.Dispose();}
+      closing.Dispose();
+    }
+  }
+
   internal sealed class Controller : ApplicationContext {
     readonly Control dispatcher = new Control();
     readonly EventWaitHandle cancel;
-    readonly Native.Hook callback;
-    readonly IntPtr hook;
+    readonly KeyboardWatch keyboard;
+    readonly StopBus stopBus;
+    readonly object keyState=new object();
     readonly bool testMode;
     readonly CommandJson json = new CommandJson();
     readonly List<Frame> frames = new List<Frame>();
@@ -211,6 +329,7 @@ namespace DshTakeover {
     DateTime progressPreviewUntil=DateTime.MinValue;
     bool progressDismissed,progressCloseWhenIdle;
     bool progressSettingEnabled=true;
+    volatile bool progressAvailable;
     int progressKey,progressModifiers;
     Native.Point? testPointerPoint;
     Rectangle[] displays=new Rectangle[0],testDisplays;
@@ -218,12 +337,14 @@ namespace DshTakeover {
     DateTime nextDisplayPoll=DateTime.MinValue;
     int displayRevision;
     readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
-    bool armed, paused, shuttingDown;
+    volatile bool armed, paused, shuttingDown;
+    bool previewOnly;
     readonly HashSet<int> physicalDown = new HashSet<int>(), swallowed = new HashSet<int>();
     string stopShortcut = "";
     int stopKey, stopModifiers;
     DateTime hideAt = DateTime.MaxValue;
     bool indicator = true, cursorIndicator = true, remoteVisible = true;
+    int captureDepth;
     int cursorError;
     string text = "", hint = "", position = "top";
     int idleMs = 800;
@@ -232,9 +353,11 @@ namespace DshTakeover {
       testMode = tests;
       cancel = new EventWaitHandle(false, EventResetMode.ManualReset, eventName);
       var handle = dispatcher.Handle;
-      callback = OnKey;
-      hook = Native.SetWindowsHookEx(13, callback, Native.GetModuleHandle(null), 0);
-      if (hook == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not install the stop shortcut listener");
+      cancel.Reset();
+      string group=tests?(Environment.GetEnvironmentVariable("WCU_TEST_STOP_GROUP")??eventName+"-test-stop"):
+        "Local\\DSH-WCU-AllStop-v1-"+WindowsIdentity.GetCurrent().User.Value;
+      stopBus=new StopBus(group,()=>{if(armed&&!paused&&!shuttingDown)Stop("shared-stop",false);});
+      keyboard=new KeyboardWatch(eventName,HandleKey);
       timer.Interval = 35;
       timer.Tick += delegate {
         // A window the user is moving or resizing goes once they are done.
@@ -255,7 +378,7 @@ namespace DshTakeover {
       RefreshDisplays(true);
       // The Windows process id: under WSL the server sees only the id of the
       // interop process that started this one (#79).
-      Emit(new { kind = "ready", hookActive = true, monitors = displays.Length, pid = System.Diagnostics.Process.GetCurrentProcess().Id });
+      Emit(new { kind = "ready", hookActive = keyboard.Active, monitors = displays.Length, pid = System.Diagnostics.Process.GetCurrentProcess().Id });
     }
 
     void SystemEventsSubscribe() { Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplaysChanged; Microsoft.Win32.SystemEvents.SessionSwitch += SessionChanged; Microsoft.Win32.SystemEvents.UserPreferenceChanged += PreferencesChanged; }
@@ -264,7 +387,11 @@ namespace DshTakeover {
       if (shuttingDown) return;
       try { dispatcher.BeginInvoke((Action)PointerFrame.ForgetPointerSize); } catch (InvalidOperationException) { }
     }
-    void SessionChanged(object sender,Microsoft.Win32.SessionSwitchEventArgs args) { DisplaysChanged(sender,EventArgs.Empty); }
+    void SessionChanged(object sender,Microsoft.Win32.SessionSwitchEventArgs args) {
+      lock(keyState){physicalDown.Clear();swallowed.Clear();}
+      if(keyboard!=null)keyboard.Reinstall();
+      DisplaysChanged(sender,EventArgs.Empty);
+    }
     void DisplaysChanged(object sender, EventArgs args) {
       if (shuttingDown) return;
       try { dispatcher.BeginInvoke((Action)delegate { RefreshDisplays(true); UpdatePointer(255); }); } catch (InvalidOperationException) { }
@@ -282,8 +409,13 @@ namespace DshTakeover {
     }
     void ConfigureVisibility(bool visible) {
       remoteVisible=visible;
+      ApplyCaptureVisibility();
+    }
+    void ApplyCaptureVisibility() {
+      bool visible=remoteVisible&&captureDepth==0;
       foreach(var frame in frames)frame.SetRemoteVisible(visible);
       if(pointer!=null)pointer.SetRemoteVisible(visible);
+      if(progress!=null)Native.ApplyDisplayAffinity(progress,visible);
     }
     void Emit(object value) { lock (json) { Console.Out.WriteLine(json.Serialize(value)); Console.Out.Flush(); } }
     void ReadCommands() {
@@ -291,6 +423,9 @@ namespace DshTakeover {
         string line;
         while ((line = Console.ReadLine()) != null) {
           var command = new CommandJson().Deserialize<Dictionary<string,object>>(line);
+          if(Get(command,"command","")=="cancel_input"){
+            cancel.Set();object id;command.TryGetValue("id",out id);if(id!=null)Emit(new {id=id,ok=true});continue;
+          }
           dispatcher.BeginInvoke((Action)(() => Dispatch(command)));
         }
       } catch (Exception error) { Console.Error.WriteLine(error.Message); }
@@ -305,7 +440,12 @@ namespace DshTakeover {
         bool consumed = false;
         string action = Get(command, "command", "");
         object strings; if (command.TryGetValue("strings", out strings)) Words.Use(strings);
-        if (action == "begin" || action == "preview") {
+        if(action=="capture_begin"){
+          captureDepth++;ApplyCaptureVisibility();
+          Native.DwmFlush();
+        } else if(action=="capture_end"){
+          captureDepth=Math.Max(0,captureDepth-1);ApplyCaptureVisibility();
+        } else if (action == "begin" || action == "preview") {
           if (paused) throw new InvalidOperationException("COMPUTER_USE_STOPPED_BY_USER");
           ConfigureShortcut(Get(command, "stopShortcut", stopShortcut));
           bool nextIndicator = Get(command, "indicatorEnabled", true);
@@ -315,7 +455,9 @@ namespace DshTakeover {
           bool rebuild = nextIndicator != indicator || nextText != text || nextHint != hint || nextPosition != position || frames.Count == 0;
           indicator = nextIndicator; text = nextText; hint = nextHint; position = nextPosition;
           idleMs = Math.Max(200, Math.Min(3000, Get(command, "indicatorIdleMs", 800)));
-          armed = true; hideAt = action == "preview" ? DateTime.UtcNow.AddMilliseconds(1800) : DateTime.MaxValue;
+          bool alreadyArmed=armed;
+          armed=true;previewOnly=action=="preview"&&!alreadyArmed;
+          hideAt=previewOnly?DateTime.UtcNow.AddMilliseconds(1800):DateTime.MaxValue;
           bool displaysRebuilt=RefreshDisplays(true);
           if (!indicator) HideFrames();
           else if (rebuild&&!displaysRebuilt) { HideFrames(); ShowFrames(); }
@@ -339,11 +481,11 @@ namespace DshTakeover {
             var data=command.TryGetValue("progress",out supplied)?supplied as Dictionary<string,object>:null;
             var settings=command.TryGetValue("settings",out supplied)?supplied as Dictionary<string,object>:null;
             bool fresh=progress==null;
-            if(fresh)progress=new ProgressFrame(delegate(Dictionary<string,object> patch,Dictionary<string,object> baseline){Emit(new {kind="progress-layout",patch=patch,@base=baseline});},delegate {Emit(new {kind="progress-layout",patch=new Dictionary<string,object>{{"progressOverlayEnabled",false}}});progressPreviewUntil=DateTime.MinValue;progressDismissed=true;CloseProgress();});
+            if(fresh){progress=new ProgressFrame(delegate(Dictionary<string,object> patch,Dictionary<string,object> baseline){Emit(new {kind="progress-layout",patch=patch,@base=baseline});},delegate {Emit(new {kind="progress-layout",patch=new Dictionary<string,object>{{"progressOverlayEnabled",false}}});progressPreviewUntil=DateTime.MinValue;progressDismissed=true;CloseProgress();});progressAvailable=true;}
             progress.Configure(settings,Get(command,"remoteIndicatorVisible",true));
-            int savedKey=stopKey,savedModifiers=stopModifiers;string savedShortcut=stopShortcut;
+            lock(keyState){int savedKey=stopKey,savedModifiers=stopModifiers;string savedShortcut=stopShortcut;
             ConfigureShortcut(settings!=null?Get(settings,"progressLockShortcut",""):"");progressKey=stopKey;progressModifiers=stopModifiers;
-            stopKey=savedKey;stopModifiers=savedModifiers;stopShortcut=savedShortcut;
+            stopKey=savedKey;stopModifiers=savedModifiers;stopShortcut=savedShortcut;}
             if(enabled)progress.UpdateProgress(data);
             if(fresh)progress.Show();
             // The adjustment preview unlocks only while it lasts; the saved lock
@@ -382,6 +524,9 @@ namespace DshTakeover {
           if(progress!=null)progress.ShowTestBackdrop();
         } else if(action=="test_progress_resize_redraw"&&testMode){
           if(progress!=null)progress.TestResizeRedraw(Get(command,"enabled",true));
+        } else if(action=="test_block_ui_stop"&&testMode){
+          new Thread(()=>{Thread.Sleep(80);keyboard.TestStop();}){IsBackground=true}.Start();
+          Thread.Sleep(Get(command,"milliseconds",500));
         } else if (action == "configure") {
           ConfigureShortcut(Get(command, "stopShortcut", ""));
           ConfigureVisibility(Get(command,"remoteIndicatorVisible",remoteVisible));
@@ -395,7 +540,10 @@ namespace DshTakeover {
         } else if (action == "close") {
           cancel.Set(); ExitThread();
         } else if (action == "test_key" && testMode) {
-          consumed = HandleKey(Get(command, "vk", 0), Get(command, "injected", false), Get(command, "down", true));
+          bool injected=Get(command,"injected",false);
+          uint flags=(uint)Get<long>(command,"flags",injected?0x10L:0L);
+          ulong extra=(ulong)Get<long>(command,"extra",injected?(long)(ulong)KeyboardWatch.InputMarker:0L);
+          consumed = HandleKey(Get(command, "vk", 0), KeyboardWatch.OwnInput(flags,new UIntPtr(extra)), Get(command, "down", true));
         } else if (action == "test_render" && testMode) {
           using (var image = Frame.Draw(1200, 675, Get(command, "indicatorText", text), Get(command, "indicatorPosition", "top"))) image.Save(Get(command, "path", ""), ImageFormat.Png);
         } else if (action == "test_render_pointer" && testMode) {
@@ -417,19 +565,10 @@ namespace DshTakeover {
         } else if(action=="test_restore_displays"&&testMode) {
           testDisplays=null;nextDisplayPoll=DateTime.MinValue;
         } else if (action != "status") throw new InvalidOperationException("Unknown takeover command");
+        ApplyCaptureVisibility();
         Native.Point livePoint; bool liveCursorAvailable=Native.GetCursorPos(out livePoint);
-        Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0), consumed = consumed, stopShortcut = stopShortcut, windows = frames.Count, progressVisible=progress!=null, progressClickThrough=progress!=null&&progress.ClickThrough, progressContent=progress!=null?progress.Content:null, progressLocked=progress!=null&&progress.Locked, progressHover=progress!=null?progress.HoverStatus():null, pointerWatchActive=pointerWatch!=null&&pointerWatch.Active, progressReading=progress!=null?progress.ReadingStatus():null, progressOpacity=progress!=null?progress.BackgroundOpacity:0, progressBounds=progress!=null?new {x=progress.Left,y=progress.Top,width=progress.Width,height=progress.Height}:null, remoteIndicatorVisible=remoteVisible, overlayCaptureExcluded=frames.Count>0&&frames.TrueForAll(frame=>frame.CaptureExcluded), overlayClickThrough=frames.Count>0&&frames.TrueForAll(frame=>frame.ClickThrough), displayRevision=displayRevision, displays=Array.ConvertAll(displays,r=>new {left=r.Left,top=r.Top,width=r.Width,height=r.Height}), overlayBounds=frames.ConvertAll(frame=>new {left=frame.DisplayBounds.Left,top=frame.DisplayBounds.Top,width=frame.DisplayBounds.Width,height=frame.DisplayBounds.Height}), cursorError = cursorError, liveCursorAvailable = liveCursorAvailable, pointerSource = testPointerPoint.HasValue ? "test-seam" : "windows", pointerVisible = pointer != null, pointerClickThrough = pointer != null && pointer.ClickThrough, pointerCaptureExcluded = pointer != null && pointer.CaptureExcluded, foreground = Native.GetForegroundWindow().ToInt64() });
+        Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0), consumed = consumed, uiWindowCount=Application.OpenForms.Count, stopShortcut = stopShortcut, windows = frames.Count, progressVisible=progress!=null, progressClickThrough=progress!=null&&progress.ClickThrough, progressContent=progress!=null?progress.Content:null, progressLocked=progress!=null&&progress.Locked, progressHover=progress!=null?progress.HoverStatus():null, pointerWatchActive=pointerWatch!=null&&pointerWatch.Active, progressReading=progress!=null?progress.ReadingStatus():null, progressOpacity=progress!=null?progress.BackgroundOpacity:0, progressBounds=progress!=null?new {x=progress.Left,y=progress.Top,width=progress.Width,height=progress.Height}:null, remoteIndicatorVisible=remoteVisible, overlayCaptureExcluded=frames.Count>0&&frames.TrueForAll(frame=>frame.CaptureExcluded), overlayClickThrough=frames.Count>0&&frames.TrueForAll(frame=>frame.ClickThrough), displayRevision=displayRevision, displays=Array.ConvertAll(displays,r=>new {left=r.Left,top=r.Top,width=r.Width,height=r.Height}), overlayBounds=frames.ConvertAll(frame=>new {left=frame.DisplayBounds.Left,top=frame.DisplayBounds.Top,width=frame.DisplayBounds.Width,height=frame.DisplayBounds.Height}), cursorError = cursorError, liveCursorAvailable = liveCursorAvailable, pointerSource = testPointerPoint.HasValue ? "test-seam" : "windows", pointerVisible = pointer != null, pointerClickThrough = pointer != null && pointer.ClickThrough, pointerCaptureExcluded = pointer != null && pointer.CaptureExcluded, foreground = Native.GetForegroundWindow().ToInt64() });
       } catch (Exception error) { Emit(new { id = id, ok = false, error = error.Message }); }
-    }
-    IntPtr OnKey(int code, IntPtr message, IntPtr data) {
-      if (code >= 0) {
-        int kind = message.ToInt32();
-        if (kind == 0x100 || kind == 0x104 || kind == 0x101 || kind == 0x105) {
-          var key = (Native.Key)Marshal.PtrToStructure(data, typeof(Native.Key));
-          if (HandleKey((int)key.vk, (key.flags & 0x12) != 0, kind == 0x100 || kind == 0x104)) return new IntPtr(1);
-        }
-      }
-      return Native.CallNextHookEx(hook, code, message, data);
     }
     static int Modifier(int vk) {
       if (vk == 0x11 || vk == 0xA2 || vk == 0xA3) return 1;
@@ -455,29 +594,34 @@ namespace DshTakeover {
           if (!common.TryGetValue(key, out nextKey)) throw new ArgumentException("Invalid stop shortcut key");
         }
       }
-      stopShortcut = shortcut; stopKey = nextKey; stopModifiers = nextModifiers;
+      lock(keyState){stopShortcut = shortcut; stopKey = nextKey; stopModifiers = nextModifiers;}
     }
-    bool HandleKey(int vk, bool injected, bool down) {
-      if (injected) return false;
+    bool HandleKey(int vk, bool ownInput, bool down) { lock(keyState) {
+      if (ownInput) return false;
       if (!down) { physicalDown.Remove(vk); return swallowed.Remove(vk); }
       physicalDown.Add(vk);
       if (swallowed.Contains(vk)) return true;
       int modifiers = 0; foreach (int key in physicalDown) modifiers |= Modifier(key);
-      if(progress!=null&&progressKey!=0&&vk==progressKey&&modifiers==progressModifiers&&!(armed&&!paused&&vk==stopKey&&modifiers==stopModifiers)){
-        swallowed.Add(vk);progress.SetLocked(!progress.Locked,true);return true;
+      if(progressAvailable&&progressKey!=0&&vk==progressKey&&modifiers==progressModifiers&&!(armed&&!paused&&vk==stopKey&&modifiers==stopModifiers)){
+        swallowed.Add(vk);if(dispatcher.InvokeRequired)dispatcher.BeginInvoke((Action)(()=>{if(progress!=null)progress.SetLocked(!progress.Locked,true);}));else progress.SetLocked(!progress.Locked,true);return true;
       }
       if (!armed || paused) return false;
       if (vk != 0x1B && (stopKey == 0 || vk != stopKey || modifiers != stopModifiers)) return false;
       swallowed.Add(vk);
       // Signal the worker first, before any rendering or pipe activity.
       cancel.Set(); Stop(vk == 0x1B ? "escape" : "shortcut"); return true;
-    }
-    void Stop(string reason) {
-      cancel.Set(); paused = true; armed = false; hideAt = DateTime.MaxValue; HideFrames(); HidePointer();
-      Emit(new { kind = "stopped", reason = reason });
+    }}
+    void Stop(string reason, bool broadcast=true) {
+      cancel.Set();paused=true;armed=false;
+      if(broadcast)stopBus.Publish();
+      Action draw=()=>{hideAt=DateTime.MaxValue;HideFrames();HidePointer();};
+      if(dispatcher.InvokeRequired){
+        try{dispatcher.BeginInvoke(draw);}catch(InvalidOperationException){}
+        ThreadPool.QueueUserWorkItem(_=>Emit(new {kind="stopped",reason=reason}));
+      }else{draw();Emit(new {kind="stopped",reason=reason});}
     }
     void ShowFrames() {
-      foreach (var bounds in displays) { var frame = new Frame(bounds, text, position,remoteVisible); frames.Add(frame); frame.Show(); frame.Present(255); }
+      foreach (var bounds in displays) { var frame = new Frame(bounds, text, position,remoteVisible&&captureDepth==0); frames.Add(frame); frame.Show(); frame.Present(255); }
     }
     void HideFrames() { foreach (var frame in frames) frame.Dispose(); frames.Clear(); }
     void UpdatePointer(byte alpha) {
@@ -486,11 +630,12 @@ namespace DshTakeover {
       if(testMode&&testPointerPoint.HasValue)point=testPointerPoint.Value;
       else if (!Native.GetCursorPos(out point)) { cursorError=Marshal.GetLastWin32Error(); HidePointer(); return; }
       cursorError=0;
-      if (pointer == null) { pointer = new PointerFrame(remoteVisible); pointer.Update(point, alpha); pointer.Show(); }
+      if (pointer == null) { pointer = new PointerFrame(remoteVisible&&captureDepth==0); pointer.Update(point, alpha); pointer.Show(); }
       else pointer.Update(point, alpha);
     }
     void HidePointer() { if (pointer != null) { pointer.Dispose(); pointer = null; } }
     void CloseProgress() {
+      progressAvailable=false;
       progressCloseWhenIdle=false;
       if(progress!=null){progress.Dispose();progress=null;}
       if(pointerWatch!=null){pointerWatch.Dispose();pointerWatch=null;}
@@ -517,7 +662,7 @@ namespace DshTakeover {
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplaysChanged;
         Microsoft.Win32.SystemEvents.SessionSwitch -= SessionChanged;
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= PreferencesChanged;
-        if (hook != IntPtr.Zero) Native.UnhookWindowsHookEx(hook);
+        stopBus.Dispose();keyboard.Dispose();
         dispatcher.Dispose(); cancel.Dispose();
       }
       base.Dispose(disposing);
@@ -578,7 +723,7 @@ namespace DshTakeover {
     }
     protected override bool ShowWithoutActivation {get{return true;}}
     protected override CreateParams CreateParams {get{var p=base.CreateParams;p.ExStyle|=0x80000|0x80|0x08000000;if(Locked)p.ExStyle|=0x20;return p;}}
-    protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);RefreshDpi();Native.SetWindowDisplayAffinity(Handle,remoteVisible?0u:0x11u);}
+    protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);RefreshDpi();Native.ApplyDisplayAffinity(this,remoteVisible);}
     protected override void OnShown(EventArgs e){base.OnShown(e);Present();}
     internal bool ClickThrough {get{return (Native.GetWindowLong(Handle,-20)&0x08000020)==0x08000020;}}
     static string TextValue(Dictionary<string,object> data,string key){object v;if(data==null||!data.TryGetValue(key,out v)||v==null)return "";string s=Convert.ToString(v);return s.Length>1200?s.Substring(s.Length-1200):s;}
@@ -602,7 +747,7 @@ namespace DshTakeover {
       }
       if(!configured||configuredLocked!=locked){SetLocked(locked,false);configuredLocked=locked;}
       configured=true;remoteVisible=visible;BackgroundOpacity=Math.Max(.2,Math.Min(1,opacity/100.0));
-      if(IsHandleCreated){Native.SetWindowDisplayAffinity(Handle,visible?0u:0x11u);RefreshDpi();}Present();
+      if(IsHandleCreated){Native.ApplyDisplayAffinity(this,visible);RefreshDpi();}Present();
     }
     internal void BeginPreview(){previewUnlocked=true;SetLocked(false,false);}
     internal void EndPreview(){if(!previewUnlocked)return;previewUnlocked=false;SetLocked(configuredLocked,false);}
@@ -743,13 +888,14 @@ namespace DshTakeover {
       string step=TextValue(entry,"step");
       return labels.Count>0?Words.Format("stepActions",step,String.Join(Words.Get("listSeparator"),labels.ToArray())):Words.Format("stepHeading",step);
     }
+    static string DoneHeaderKey(string step){long n;if(!long.TryParse(step,out n))return "headerDone";long a=Math.Abs(n),m10=a%10,m100=a%100;if(n==1)return "headerDoneOne";if(m10>=2&&m10<=4&&(m100<12||m100>14))return "headerDoneFew";return "headerDone";}
     internal void UpdateProgress(Dictionary<string,object> data){
       string status=TextValue(data,"status");
       string step=TextValue(data,"step");if(step==""||step=="0")step="1";
       long started=Whole(data,"startedAt"),ended=Whole(data,"endedAt");
       bool finished=ended>0&&(status=="done"||status=="failed"||status=="stopped");
       string took=started>0&&ended>=started?Words.Format("took",Math.Max(1,(long)Math.Round((ended-started)/1000.0))):"";
-      if(finished)header=status=="done"?Words.Format(step=="1"?"headerDoneOne":"headerDone",step,took):Words.Format(status=="failed"?"headerFailed":"headerStopped",step);
+      if(finished)header=status=="done"?Words.Format(DoneHeaderKey(step),step,took):Words.Format(status=="failed"?"headerFailed":"headerStopped",step);
       else header=Words.Format("headerWorking",step,Words.Get(status=="thinking"?"statusThinking":status=="acting"?"statusActing":status=="replying"?"statusReplying":status=="stopped"?"statusStopped":"statusWorking"));
       // The plugin names each action; a bare tool name stands in for one it did not name.
       string action=TextValue(data,"action");if(action=="")action=TextValue(data,"tool");
@@ -876,7 +1022,7 @@ namespace DshTakeover {
       get { var value=base.CreateParams; value.ExStyle|=0x80000|0x20|0x80|0x08000000; return value; }
     }
     protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); SetRemoteVisible(remoteVisible); }
-    internal void SetRemoteVisible(bool visible) {remoteVisible=visible;if(IsHandleCreated)Native.SetWindowDisplayAffinity(Handle,visible?0u:0x11u);}
+    internal void SetRemoteVisible(bool visible) {remoteVisible=visible;Native.ApplyDisplayAffinity(this,visible);}
     internal bool ClickThrough { get { return (Native.GetWindowLong(Handle,-20)&0x08080020)==0x08080020; } }
     internal bool CaptureExcluded { get { uint affinity; return Native.GetWindowDisplayAffinity(Handle,out affinity)&&affinity==0x11; } }
     // Geometry in 96-DPI units. The tag sits just past the pointer's visible
@@ -1017,7 +1163,7 @@ namespace DshTakeover {
       get { var value = base.CreateParams; value.ExStyle |= 0x80000 | 0x20 | 0x80 | 0x08000000; return value; }
     }
     protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); SetRemoteVisible(remoteVisible); }
-    internal void SetRemoteVisible(bool visible) {remoteVisible=visible;if(IsHandleCreated)Native.SetWindowDisplayAffinity(Handle,visible?0u:0x11u);}
+    internal void SetRemoteVisible(bool visible) {remoteVisible=visible;Native.ApplyDisplayAffinity(this,visible);}
     internal Rectangle DisplayBounds {get{return rectangle;}}
     internal bool CaptureExcluded { get { uint affinity;return Native.GetWindowDisplayAffinity(Handle,out affinity)&&affinity==0x11; } }
     internal bool ClickThrough {get{return (Native.GetWindowLong(Handle,-20)&0x08080020)==0x08080020;}}
