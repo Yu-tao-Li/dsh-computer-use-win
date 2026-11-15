@@ -18,7 +18,8 @@ public static class WindowsComputerUseNative {
  public static bool SendKeyChord(string[] keys){Fixture.Forms.SendKeys.SendWait(keys.Length==2&&keys[0]=="ctrl"?"^"+keys[1]:keys[keys.Length-1]);return true;}
  public static long Front=200,Hit=200;
  public static Dictionary<long,long> Owners=new Dictionary<long,long>();
- public static List<long> Popups=new List<long>();
+ public static List<long> Popups=new List<long>(),Hidden=new List<long>();
+ public static bool IsWindowVisible(IntPtr h){return !Hidden.Contains(h.ToInt64());}
  public static IntPtr GetForegroundWindow(){return new IntPtr(Front);}
  public static bool IsWindow(IntPtr h){return h.ToInt64()==200;}
  public static uint GetWindowThreadProcessId(IntPtr h,out uint pid){pid=2;return 1;}
@@ -93,6 +94,22 @@ Assert-Equal (Select-TargetWindow @{windowTitle='Project -'}).nativeWindowHandle
 Expect-Error {Select-TargetWindow @{windowTitle='Pro'}} 'WINDOW_TARGET_AMBIGUOUS'
 Expect-Error {Select-TargetWindow @{processId=2}} 'WINDOW_TARGET_AMBIGUOUS'
 Assert-Equal (Select-TargetWindow @{processId=2;nativeWindowHandle=201}).nativeWindowHandle 201
+# Real processes also own hidden IME/DDE windows and tiny untitled visible ones.
+$script:Windows=@(
+ @{name='Default IME';nativeWindowHandle=301;processId=7;isOffscreen=$true;boundingBox=@{width=0;height=0}},
+ @{name='';nativeWindowHandle=302;processId=7;isOffscreen=$false;boundingBox=@{width=15;height=15}},
+ @{name='Notes - Editor';nativeWindowHandle=303;processId=7;isOffscreen=$false;boundingBox=@{width=800;height=600}},
+ @{name='MSCTFIME UI';nativeWindowHandle=304;processId=7;isOffscreen=$true;boundingBox=@{width=0;height=0}},
+ @{name='Tray';nativeWindowHandle=311;processId=8;isOffscreen=$true;boundingBox=@{width=160;height=28}},
+ @{name='';nativeWindowHandle=312;processId=8;isOffscreen=$true;boundingBox=@{width=0;height=0}},
+ @{name='Report';nativeWindowHandle=321;processId=9;isOffscreen=$false;boundingBox=@{width=900;height=700}},
+ @{name='Report';nativeWindowHandle=322;processId=9;isOffscreen=$false;boundingBox=@{width=900;height=700}})
+[WindowsComputerUseNative]::Hidden.AddRange([long[]]@(301,304,312))
+Assert-Equal (Select-TargetWindow @{processId=7}).nativeWindowHandle 303
+Assert-Equal (Select-TargetWindow @{processId=8}).nativeWindowHandle 311
+Expect-Error {Select-TargetWindow @{processId=9}} 'WINDOW_TARGET_AMBIGUOUS'
+Expect-Error {Select-TargetWindow @{windowTitle='Report'}} '"name":"Report","processId":9,"nativeWindowHandle":322'
+[WindowsComputerUseNative]::Hidden.Clear()
 
 $script:Element=New-Object Fixture.Element(10)
 [Fixture.Element]::Hit=$script:Element

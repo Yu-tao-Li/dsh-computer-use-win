@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
-Add-Type -Path (Join-Path $PSScriptRoot '../scripts/windows-clipboard.cs') -ReferencedAssemblies System.Windows.Forms,System.Drawing
+. (Join-Path $PSScriptRoot 'core-references.ps1')
+Add-Type -Path (Join-Path $PSScriptRoot '../scripts/windows-clipboard.cs') -ReferencedAssemblies (Get-HelperReferences)
 Add-Type -TypeDefinition @'
 using System; using System.Runtime.InteropServices;
 public static class ClipboardReader {

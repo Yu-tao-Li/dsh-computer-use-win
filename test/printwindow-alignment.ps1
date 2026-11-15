@@ -1,7 +1,8 @@
 # Synthetic PrintWindow pixels and actual bitmap crop. No desktop read/input.
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
-Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+. (Join-Path $PSScriptRoot 'core-references.ps1')
+Add-Type -ReferencedAssemblies (Get-HelperReferences) -TypeDefinition @'
 using System;using System.Drawing;
 public static class WindowsComputerUseNative {
  public struct RECT{public int left,top,right,bottom;}

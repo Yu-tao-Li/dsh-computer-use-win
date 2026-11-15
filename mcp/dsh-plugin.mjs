@@ -239,7 +239,10 @@ export async function apply(ctx, config) {
       if(saveOverlayPatch&&!layoutSaving)try{
         const st = statSync(runtime.layoutFile, { bigint: true, throwIfNoEntry: false });
         const statKey = st ? `${st.mtimeNs}:${st.size}` : '';
-        if (st && statKey !== layoutStatKey) {
+        // An unchanged file is skipped, except when its failed save is due for
+        // a retry: the backoff ends without the file changing.
+        const retryDue = layoutRetry.id !== undefined && Date.now() >= layoutRetry.at;
+        if (st && (statKey !== layoutStatKey || retryDue)) {
           layoutStatKey = statKey;
           const layout=JSON.parse(readFileSync(runtime.layoutFile,'utf8'));
           // A failed save is retried with backoff (0.5 s, doubling up to 60 s) and
@@ -251,7 +254,7 @@ export async function apply(ctx, config) {
               if(!layout.patch||typeof layout.patch!=='object'||Object.keys(layout.patch).some(key=>!allowed.includes(key)))throw Error('Invalid overlay layout patch');
               normalizeSettings({...desired,...layout.patch});
               usable=!(layout.base&&Object.entries(layout.base).some(([key,value])=>!allowed.includes(key)||desired[key]!==value));
-            }finally{if(!usable)layoutId=layout.id;}
+            }finally{if(!usable){layoutId=layout.id;if(layoutRetry.id===layout.id)layoutRetry={id:undefined,at:0,delay:0};}}
             if(usable){
               layoutSaving=true;
               Promise.resolve().then(()=>saveOverlayPatch(layout.patch)).then(()=>{layoutId=layout.id;layoutRetry={id:undefined,at:0,delay:0};},error=>{

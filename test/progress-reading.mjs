@@ -144,7 +144,8 @@ try{
  const russian={...english,steps:[{step:1,actions:[{label:'Открыть новую вкладку',state:'done'}],reasoning:'Страница открыта.',reply:''},
    {step:3,actions:[],reasoning:'Проверка завершена.',reply:'Готово. 😀'}]};
  data=russian;status=await show();
- assert.ok(status.progressContent.startsWith('DSH · готово · шагов: 3 · 38 с'),status.progressContent.slice(0,90));
+ // Russian plural forms: 1 шаг, 2–4 шага, 5+ шагов.
+ assert.ok(status.progressContent.startsWith('DSH · готово · 3 шага · 38 с'),status.progressContent.slice(0,90));
  assert.equal(status.progressReading.text,'Шаг 1 · Открыть новую вкладку\nСтраница открыта.\nШаг 3\nПроверка завершена.\nОтвет\nГотово. 😀');
  assert.equal(status.foreground,initial.foreground,'Changing to Russian must not activate the overlay');
  await capture('history-russian.png');
