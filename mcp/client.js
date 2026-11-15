@@ -852,7 +852,7 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] .wcu-title-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
       [data-wincu-settings] .wcu-version{font-size:13px;font-weight:500;color:var(--wcu-muted);white-space:nowrap}
       [data-wincu-settings] .wcu-header-actions{display:flex;gap:4px;align-items:center;margin-left:auto}
-      [data-wincu-settings] .wcu-header-actions[data-compact]{gap:0;padding:1px;border:.5px solid var(--wcu-line-strong);border-radius:8px;background:var(--wcu-control)}
+      [data-wincu-settings] .wcu-header-actions[data-compact]{gap:0;padding:1px;border:.5px solid var(--wcu-line-strong);border-radius:8px;background:transparent}
       [data-wincu-settings] .wcu-project-icon{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:0 8px;height:28px;color:var(--wcu-muted);border-radius:6px;font-size:12px;text-decoration:none;white-space:nowrap}
       [data-wincu-settings] .wcu-project-icon svg{width:16px;height:16px}
       [data-wincu-settings] .wcu-community{margin-top:10px!important;margin-bottom:4px!important}
