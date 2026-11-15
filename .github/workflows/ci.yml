@@ -80,11 +80,12 @@ jobs:
       fail-fast: false
       matrix:
         host: ['0.1.0-rc.6', '0.1.0-rc.7', '0.2.1-rc.2', '0.2.2-rc.1']
+    # The runner context is not available in job-level env, only in steps, so
+    # each step that needs the fixture path sets WCU_HOST_MODULES itself.
     env:
       NODE_ENV: test
       WCU_TEST_NO_TAKEOVER: '1'
       WCU_TEST_ALL_SETTINGS: '1'
-      WCU_HOST_MODULES: ${{ runner.temp }}/wcu-host-${{ matrix.host }}/node_modules
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -96,9 +97,15 @@ jobs:
         run: node test/install-host-fixture.mjs '${{ matrix.host }}' '${{ runner.temp }}/wcu-host-${{ matrix.host }}'
       - name: Approval and real MCP bridge
         run: node test/host-policy.mjs "$env:WCU_HOST_MODULES"
+        env:
+          WCU_HOST_MODULES: ${{ runner.temp }}/wcu-host-${{ matrix.host }}/node_modules
       - name: Modern full settings matrix
         if: startsWith(matrix.host, '0.2.')
         run: node test/host-settings-integration.mjs "$env:WCU_HOST_MODULES"
+        env:
+          WCU_HOST_MODULES: ${{ runner.temp }}/wcu-host-${{ matrix.host }}/node_modules
       - name: Legacy real settings provider
         if: startsWith(matrix.host, '0.1.')
         run: node test/host-settings-legacy.mjs "$env:WCU_HOST_MODULES"
+        env:
+          WCU_HOST_MODULES: ${{ runner.temp }}/wcu-host-${{ matrix.host }}/node_modules
