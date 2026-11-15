@@ -217,8 +217,9 @@ They appear the first time a turn uses the mouse or keyboard and stay on through
 #### 5.4 Good to know
 
 - The plugin operates controls in the background when it can, without moving the mouse or the foreground. Clicks at screen positions, pasting text and key presses still need the real mouse and keyboard: the plugin brings the target window forward, checks that no other window covers the click point, and afterwards puts the mouse back and returns the foreground to the window you had in front. If the action opened a menu, drop-down list or dialog, the window stays in front; if you switched windows or moved the mouse meanwhile, the plugin leaves them as you set them. Avoid using the mouse and keyboard during these steps.
-- After the foreground goes back to you, later actions and screenshots that name no window still aim at the window the agent was working in, never at the one you are using. Text DSH pastes stays out of your clipboard history (Win+V), and your clipboard is restored after the paste.
+- After the foreground goes back to you, later actions and screenshots that name no window still aim at the window the agent was working in, never at the one you are using. Text DSH pastes stays out of your clipboard history (Win+V). Your clipboard is restored only after the target program has read the text; if it never reads it, the text stays on the clipboard and the result says so, so a slow program never pastes your old content.
 - Only one conversation can use the desktop at a time. Others get a “busy” result.
+- DSH asks you first, and acts only after you agree, before it launches a program with arguments or through a shortcut, opens a local file in a page, uploads a local file to a page, connects to your own open browser, or acts for the first time on one of your own browser tabs. An approval covers that one call with those arguments; refusing or cancelling runs nothing. The agent cannot operate DSH's own windows, so it cannot click Allow for you. The standalone MCP server has no such prompt and refuses these calls unless environment variables allow them; see [Safety](docs/wiki/safety.md).
 - Inside DSH, a screenshot reaches the agent as the path of a PNG file and the image data stays out of the conversation, so several screenshots no longer fill the context. To send a screenshot over IM, have the IM tool send that file.
 - An action already delivered to an app cannot be undone. If the app is stuck, stopping waits until it responds.
 - Switching presets keeps your custom list. Saved changes take effect after the current step finishes and survive a restart. The agent cannot turn on tools you have turned off.
@@ -334,7 +335,7 @@ npm ci
 npm test
 ```
 
-The standalone MCP server needs no third-party packages at runtime. Inside DSH, it uses DSH's own Schemastery and the official MCP bridge. Development dependencies are only for testing. `npm test` runs **54 isolated regression suites** covering settings compatibility, takeover and stopping, the progress overlay, reading controls, capture, OCR protocols, input edge cases, batch actions and the browser lane. It sends no real keyboard or mouse input and does not touch your installed DSH profiles. Tests that need a real interface use only their own test windows and temporary browser profiles, and logs go to the temporary folder the command prints.
+The standalone MCP server needs no third-party packages at runtime. Inside DSH, it uses DSH's own Schemastery and the official MCP bridge. Development dependencies are only for testing. `npm test` runs **87 isolated regression suites** covering settings compatibility, takeover and stopping, the progress overlay, reading controls, capture, OCR protocols, input edge cases, batch actions and the browser lane. It sends no real keyboard or mouse input and does not touch your installed DSH profiles. Tests that need a real interface use only their own test windows and temporary browser profiles, and logs go to the temporary folder the command prints.
 
 `node test/notepad-e2e.mjs` is a separate test that really types. It opens Notepad, so run it on a dedicated test desktop.
 
@@ -551,8 +552,9 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 #### 5.4 使用须知
 
 - 能在后台操作控件时，插件会优先这样做，不动鼠标、不抢前台。按坐标点击、粘贴文字和按键还是要用真实的鼠标键盘：插件先把目标窗口提到前面，点击前检查落点没有被别的窗口挡住，做完把鼠标放回原处、把前台还给你原来的窗口。动作打开了菜单、下拉列表或对话框时，窗口留在前面；你中途换了窗口或移了鼠标，插件不再改回去。这几步进行时最好别同时动鼠标键盘。
-- 前台还给你之后，不指定窗口的后续操作和截图仍对准 agent 刚操作的那个窗口，不会打进或读你正在用的窗口。DSH 粘贴的文字不进剪贴板历史（Win+V），粘贴后恢复你原来的剪贴板。
+- 前台还给你之后，不指定窗口的后续操作和截图仍对准 agent 刚操作的那个窗口，不会打进或读你正在用的窗口。DSH 粘贴的文字不进剪贴板历史（Win+V）；目标程序把文字读走以后，才恢复你原来的剪贴板。目标一直没来读，这次的文字就留在剪贴板上，结果里会注明，以免慢一点的程序粘进你原来的内容。
 - 同一时间只有一段对话能操作桌面，其他对话会收到“忙碌”的结果。
+- 这几类操作，DSH 会先弹窗问你，同意后才执行：带参数启动程序、通过快捷方式启动程序、在网页里打开本机文件、把本机文件上传到网页、连接你自己已打开的浏览器、第一次操作你自己浏览器里的标签页。同意只对这一次、这组参数有效；拒绝或取消就不执行。agent 不能操作 DSH 自己的窗口，所以也没法替你点“同意”。单独运行的 MCP 服务没有这个确认框，这几类操作默认拒绝，可以用环境变量放开，见[安全说明](docs/wiki/safety.md)。
 - 在 DSH 里，截图以 PNG 文件路径交给 agent，图片数据不进对话，多截几张也不会撑满上下文。要把截图发到 IM，就让 IM 工具按这个路径发送文件。
 - 已经发给程序的操作无法撤回。如果程序卡住了，要等它响应后才能停下来。
 - 切换方案时，你的自定义清单会保留。保存的改动在当前这一步操作结束后生效，重启后也还在。agent 不能打开你关掉的工具。
@@ -668,7 +670,7 @@ npm ci
 npm test
 ```
 
-单独运行的 MCP 服务不依赖任何第三方包；接入 DSH 时，用的是 DSH 自带的 Schemastery 和官方 MCP 桥。开发依赖只用于测试。`npm test` 会运行 **54 套互相隔离的回归测试**，覆盖设置兼容、接管与停止、思考与操作浮窗、界面读取、截图、文字识别协议、输入边界、批量动作和浏览器通道。它不会发出真实的键盘鼠标输入，也不会改动你装好的 DSH 配置；需要真实界面的测试只操作专用的测试窗口和临时的浏览器配置，日志写在命令输出的临时目录里。
+单独运行的 MCP 服务不依赖任何第三方包；接入 DSH 时，用的是 DSH 自带的 Schemastery 和官方 MCP 桥。开发依赖只用于测试。`npm test` 会运行 **87 套互相隔离的回归测试**，覆盖设置兼容、接管与停止、思考与操作浮窗、界面读取、截图、文字识别协议、输入边界、批量动作和浏览器通道。它不会发出真实的键盘鼠标输入，也不会改动你装好的 DSH 配置；需要真实界面的测试只操作专用的测试窗口和临时的浏览器配置，日志写在命令输出的临时目录里。
 
 `node test/notepad-e2e.mjs` 是另一项会真实打字的测试，它会打开记事本，请在专门的测试桌面上运行。
 
