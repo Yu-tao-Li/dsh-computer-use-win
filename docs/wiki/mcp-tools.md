@@ -260,6 +260,7 @@ Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windo
 
 For Excel Ribbon commands, keep the chord sequence in one foreground lease:
 `{"keys":["alt","h"],"thenKeys":[["o"],["w"]]}` opens Column Width.
+Send a value such as the width in a separate call after the dialog is observed: if a key tip does not engage, later keys land in the active cell.
 Each chord still checks cancellation and the target foreground. A failed chord stops the sequence and restores the borrowed foreground; sent chords are not replayed.
 
 For spreadsheet layout, select the range with Ctrl+G and the observed Go To dialog.
