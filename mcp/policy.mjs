@@ -484,6 +484,21 @@ export function consumeGrant(token, name, args, secret, used, now = Date.now(), 
   } catch (error) { if (error.code === 'WCU_APPROVAL_STATE_UNAVAILABLE') throw error; return false; }
 }
 
+// DSH's "full access" preset: no approval prompts (policy never) and no file
+// sandbox. DSH rejects every approval request under policy never, so asking
+// would only break these operations for a user who chose not to be asked,
+// in a session whose shell tool can already run any command. Restricted
+// presets with policy never still get the ask, which DSH then rejects.
+export function sessionSkipsApproval(ctx, exec) {
+  const session = exec?.agent?.session;
+  if (!session) return false;
+  try {
+    const approval = ctx.get('approval'), sandbox = ctx.get('sandboxPolicy');
+    if (typeof approval?.effectivePolicy !== 'function' || typeof sandbox?.resolve !== 'function') return false;
+    return approval.effectivePolicy(session) === 'never' && sandbox.resolve({session}).mode === 'danger-full-access';
+  } catch { return false; }
+}
+
 export function installHostPolicy(ctx, runtime) {
   const gated = new WeakMap();
   const env = () => ({
@@ -501,7 +516,9 @@ export function installHostPolicy(ctx, runtime) {
     if (decision.kind === 'ask') gated.set(exec, stable(args));
     if (decision.kind === 'deny') return decision;
     const downstream = await next();
-    return decision.kind === 'ask' && downstream.kind === 'allow' ? decision : downstream;
+    if (decision.kind !== 'ask' || downstream.kind !== 'allow') return downstream;
+    // The grant is still minted in tools/execute, bound to these arguments.
+    return sessionSkipsApproval(ctx, exec) ? downstream : decision;
   }, {global: true});
   ctx.on('tools/execute', async (exec, next) => {
     if (!gated.has(exec)) return next();

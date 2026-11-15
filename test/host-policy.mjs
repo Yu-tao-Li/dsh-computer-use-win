@@ -28,7 +28,11 @@ ctx.provide('profileContext',{home:root,dir:root,name:'isolated-policy'});
 const tools=new ToolRuntime(ctx);
 const webServer={port:undefined};ctx.provide('webServer',webServer);
 let choice='rejected';const asks=[];
-ctx.provide('approval',{request:async req=>{asks.push({name:req.toolName,reason:req.displayReason});return choice}});
+// DSH's permission state: dsh-user-approval's effectivePolicy and
+// dsh-sandbox-policy's resolve, with the same signatures in all four hosts.
+let approvalPolicy='ask',sandboxMode='workspace-write';
+ctx.provide('approval',{request:async req=>{asks.push({name:req.toolName,reason:req.displayReason});return choice},effectivePolicy:()=>approvalPolicy});
+ctx.provide('sandboxPolicy',{resolve:()=>({mode:sandboxMode,workspaceRoot:root})});
 try{await ctx.plugin(await load('@deepseek-ai/dsh-tool-executor-native'));}catch(error){if(error.code!=='MODULE_NOT_FOUND')throw error;}
 const agent={ctx};
 const execute=async(args,action='launch_app')=>{
@@ -52,10 +56,20 @@ try{
  const forged=await execute({...args,_wcuApproval:'caller supplied'});assert.match(text(forged),/credentials cannot be supplied/);assert.equal(asks.length,3);
  let denyLater=true;const undoLater=ctx.on('tools/pre-execute',(exec,next)=>denyLater?{kind:'deny',reason:'later host rule denied'}:next(),{global:true});
  const deniedLater=await execute(args);assert.match(text(deniedLater),/later host rule denied/);assert.equal(asks.length,3);denyLater=false;
+ // Full access (policy never + danger-full-access): DSH would reject any ask,
+ // so none is made; the grant still reaches MCP bound to these arguments.
+ agent.session={id:'policy-fixture-session'};approvalPolicy='never';sandboxMode='danger-full-access';
+ const fullArgs={target:'fixture.exe',arguments:'full access argument'};
+ const full=await execute(fullArgs);assert.notEqual(full.isError,true,text(full));assert.equal(asks.length,3,'No approval request under full access');
+ const fullSent=JSON.parse(await readFile(marker,'utf8'));assert.equal(fullSent.args._wcuLaunchApproved,true);assert.equal(fullSent.args.arguments,'full access argument');
+ // Policy never with a restricted sandbox still asks; DSH then rejects it.
+ sandboxMode='workspace-write';choice='rejected';
+ const restricted=await execute(fullArgs);assert.match(text(restricted),/user rejected/);assert.equal(asks.length,4);
+ approvalPolicy='ask';delete agent.session;
  globalThis.wcuPolicyFixture.disposePreExecute();const dispatchedBefore=await readFile(marker,'utf8');
  for(const [action,input]of [['launch_app',args],['set_value',{elementId:'new-tab',value:pathToFileURL(uploadFixture).href}],['set_value',{elementId:'tfixture:1',value:uploadFixture}],['set_value',{elementId:'bfixture:connect',value:'connect'}]]){
   const result=await execute(input,action);assert.match(text(result),/APPROVAL_REQUIRED/);assert.equal(await readFile(marker,'utf8'),dispatchedBefore);
- }undoLater();assert.equal(asks.length,3);
- const report={missingPreExecuteFailsClosed:true,laterHostDenialPreserved:true,passed:true,hostVersion:require('@deepseek-ai/dsh/package.json').version,bridgeVersion:require('@deepseek-ai/dsh-mcp-client/package.json').version,rejectedNoDispatch:true,cancelledNoDispatch:true,allowedThroughRealMcpSdk:true,forgedCredentialDenied:true,lateHostPortProtected:true,physicalInputSent:false,root};
+ }undoLater();assert.equal(asks.length,4);
+ const report={fullAccessSkipsPrompt:true,restrictedNeverStillAsks:true,missingPreExecuteFailsClosed:true,laterHostDenialPreserved:true,passed:true,hostVersion:require('@deepseek-ai/dsh/package.json').version,bridgeVersion:require('@deepseek-ai/dsh-mcp-client/package.json').version,rejectedNoDispatch:true,cancelledNoDispatch:true,allowedThroughRealMcpSdk:true,forgedCredentialDenied:true,lateHostPortProtected:true,physicalInputSent:false,root};
  await writeFile(path.join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 }finally{delete globalThis.wcuPolicyFixture;await ctx.fiber.dispose();for(const [key,value]of Object.entries(oldEnv))if(value===undefined)delete process.env[key];else process.env[key]=value;}
