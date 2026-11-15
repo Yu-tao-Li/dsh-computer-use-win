@@ -14,7 +14,7 @@
 
 ## 简体中文
 
-这个插件让 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里的 agent 看到并操作你电脑上真实的 Windows 程序和网页：找到按钮和输入框，读出屏幕上的文字，点击、打字，切换和管理窗口。网页默认在 DSH 自己的浏览器里后台完成，不动你的鼠标，也不抢前台。
+这个插件让 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）看到并操作你电脑上真实的 Windows 程序和网页：找到按钮和输入框，读出屏幕上的文字，点击、打字，切换和管理窗口。网页默认在 DSH 自己的浏览器里后台完成，不动你的鼠标，也不抢前台。
 
 **网页在后台完成 · 浮窗按步骤显示 DSH 在想什么、做什么 · 25 个操作工具 + 1 个管理入口 · 用到鼠标键盘时有明显提示 · 按 Esc 随时停止 · 中英文设置界面**
 
@@ -171,7 +171,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/architecture-zh-dark.png">
-  <img alt="整体架构图。你在 DSH 里布置任务、调整设置，按 Esc 停止。DSH 里有 agent、插件适配器 mcp/dsh-plugin.mjs（把设置交给服务，跟踪对话轮次，并把这段对话的思考和步骤交给浮窗）、设置页与操作记录 mcp/client.js，以及官方 MCP 桥。MCP 桥通过 stdio 连到 MCP 服务 mcp/server.mjs，服务按方案提供工具（全部 26、精简 12、懒启动 1、自定义），检查参数后把每次调用交给两条通道之一。浏览器操控（Browser Use）：带 browserTab 或网页元素 ID 的调用交给服务里的浏览器通道 mcp/browser.mjs，它通过 Chrome DevTools 协议（CDP）读网页、在网页里操作，不动鼠标、不抢前台、不显示接管提示；它连接 DSH 专用浏览器（默认跟随 Windows 的默认浏览器，每次用临时空白配置；打开“保留网站登录”后改用长期保留的配置）；打开实验性的“连接现有浏览器”并在浏览器里点“允许”后，也能操作你自己已经打开的 Chrome 或 Edge。电脑操控（Computer Use）：其余调用一个一个交给常驻的 PowerShell 后端 scripts/windows-uia.ps1，后端通过 UI Automation、鼠标键盘、窗口、截图和文字识别操作你的 Windows 桌面，浏览器工具栏和浏览器通道读不到的网页内容也走这里。接管助手 scripts/windows-takeover.ps1 是独立进程，在电脑操控用到鼠标键盘时显示屏幕提示，按步骤显示思考与操作浮窗，并直接监听 Esc，不经过 DSH。" src="assets/diagrams/architecture-zh-light.png">
+  <img alt="整体架构图。你在 DSH 里布置任务、调整设置，按 Esc 停止。DSH 里有 Agent 循环、插件适配器 mcp/dsh-plugin.mjs（把设置交给服务，跟踪对话轮次，并把这段对话的思考和步骤交给浮窗）、设置页与操作记录 mcp/client.js，以及官方 MCP 桥。MCP 桥通过 stdio 连到 MCP 服务 mcp/server.mjs，服务按方案提供工具（全部 26、精简 12、懒启动 1、自定义），检查参数后把每次调用交给两条通道之一。浏览器操控（Browser Use）：带 browserTab 或网页元素 ID 的调用交给服务里的浏览器通道 mcp/browser.mjs，它通过 Chrome DevTools 协议（CDP）读网页、在网页里操作，不动鼠标、不抢前台、不显示接管提示；它连接 DSH 专用浏览器（默认跟随 Windows 的默认浏览器，每次用临时空白配置；打开“保留网站登录”后改用长期保留的配置）；打开实验性的“连接现有浏览器”并在浏览器里点“允许”后，也能操作你自己已经打开的 Chrome 或 Edge。电脑操控（Computer Use）：其余调用一个一个交给常驻的 PowerShell 后端 scripts/windows-uia.ps1，后端通过 UI Automation、鼠标键盘、窗口、截图和文字识别操作你的 Windows 桌面，浏览器工具栏和浏览器通道读不到的网页内容也走这里。接管助手 scripts/windows-takeover.ps1 是独立进程，在电脑操控用到鼠标键盘时显示屏幕提示，按步骤显示思考与操作浮窗，并直接监听 Esc，不经过 DSH。" src="assets/diagrams/architecture-zh-light.png">
 </picture>
 
 图里蓝色的部分是本插件的代码，灰色的部分由 DSH、Windows 或浏览器提供。各部分的分工如下：
@@ -349,7 +349,7 @@ MIT 许可。本项目基于 [cgissing/windows-computer-use](https://github.com/
 
 ## English
 
-This plugin lets a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) agent see and use the real Windows apps and web pages on your computer. It can find buttons and text fields, read text on the screen, click, type, and switch or manage windows. Web pages are worked on in DSH's own browser in the background by default, without moving your pointer or taking the foreground.
+This plugin lets [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) see and use the real Windows apps and web pages on your computer. It can find buttons and text fields, read text on the screen, click, type, and switch or manage windows. Web pages are worked on in DSH's own browser in the background by default, without moving your pointer or taking the foreground.
 
 **Web pages in the background · An overlay shows what DSH is thinking and doing, step by step · 25 action tools + 1 management entry · Clear indicators when the mouse or keyboard is used · Press Esc to stop at any time · Chinese and English settings**
 
@@ -506,7 +506,7 @@ The plugin keeps two kinds of result apart. Input actions only report “sent”
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/architecture-en-dark.png">
-  <img alt="Architecture. You ask for tasks and change settings in DSH, and press Esc to stop. Inside DSH are the agent, the plugin adapter mcp/dsh-plugin.mjs (passes your settings on, tracks turns and hands the conversation’s reasoning and steps to the overlay), the settings page and step records mcp/client.js, and the official MCP bridge. The bridge talks MCP over stdio to the MCP server mcp/server.mjs, which offers tools by preset (All 26, Lite 12, Lazy 1, Custom), checks arguments and hands each call to one of two lanes. Browser Use: calls with browserTab or a page element ID go to the browser lane mcp/browser.mjs inside the server, which reads and acts inside pages over the Chrome DevTools Protocol (CDP), with no pointer, no foreground change and no takeover indicator. It drives the DSH browser (by default the Windows default browser with a fresh temporary profile each time, or one kept profile with Keep website sign-ins on); with the experimental Connect browser on and Allow clicked in that browser, it also works in your own open Chrome or Edge. Computer Use: all other calls go one at a time to the long-running PowerShell backend scripts/windows-uia.ps1, which works on your Windows desktop through UI Automation, mouse and keyboard, windows, capture and text recognition; the browser toolbar and page content the browser lane cannot read are handled here too. The takeover helper scripts/windows-takeover.ps1 is a separate process: it shows the screen indicators when Computer Use needs the mouse or keyboard, draws the reasoning and progress overlay step by step, and listens for Esc itself, not through DSH." src="assets/diagrams/architecture-en-light.png">
+  <img alt="Architecture. You ask for tasks and change settings in DSH, and press Esc to stop. Inside DSH are the agent loop, the plugin adapter mcp/dsh-plugin.mjs (passes your settings on, tracks turns and hands the conversation’s reasoning and steps to the overlay), the settings page and step records mcp/client.js, and the official MCP bridge. The bridge talks MCP over stdio to the MCP server mcp/server.mjs, which offers tools by preset (All 26, Lite 12, Lazy 1, Custom), checks arguments and hands each call to one of two lanes. Browser Use: calls with browserTab or a page element ID go to the browser lane mcp/browser.mjs inside the server, which reads and acts inside pages over the Chrome DevTools Protocol (CDP), with no pointer, no foreground change and no takeover indicator. It drives the DSH browser (by default the Windows default browser with a fresh temporary profile each time, or one kept profile with Keep website sign-ins on); with the experimental Connect browser on and Allow clicked in that browser, it also works in your own open Chrome or Edge. Computer Use: all other calls go one at a time to the long-running PowerShell backend scripts/windows-uia.ps1, which works on your Windows desktop through UI Automation, mouse and keyboard, windows, capture and text recognition; the browser toolbar and page content the browser lane cannot read are handled here too. The takeover helper scripts/windows-takeover.ps1 is a separate process: it shows the screen indicators when Computer Use needs the mouse or keyboard, draws the reasoning and progress overlay step by step, and listens for Esc itself, not through DSH." src="assets/diagrams/architecture-en-light.png">
 </picture>
 
 The blue parts are this plugin's code, and the grey parts come from DSH, Windows or the browser. Here is what each part does:
