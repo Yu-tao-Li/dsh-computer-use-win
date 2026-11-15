@@ -28,7 +28,9 @@ if (process.argv.includes('--pack')) {
   const root = path.resolve(import.meta.dirname, '..');
   for (const rel of ['README.md', 'README.en.md', 'CHANGELOG.md', 'PUBLISH.md', 'docs/computer-use-settings.md', 'mcp/client.js', 'package.json']) {
     const content = await readFile(path.join(root, rel), 'utf8');
-    if (/fable5p2|Fable 5\.2/i.test(content)) throw new Error(`Internal codename leaked in ${rel}`);
+    // The internal plan file name stays private; the changelog names the
+    // models that worked on a release on purpose.
+    if (/fable5p2/i.test(content)) throw new Error(`Internal codename leaked in ${rel}`);
     if (/[CD]:\\Users\\(?!XXX)|[CD]:\\Downloads\\|Documents\\Codex|\.gemini\\antigravity/i.test(content)) throw new Error(`Local path leaked in ${rel}`);
   }
   packAudit = { checked: true, fileCount: names.length, totalBytes: (Array.isArray(parsed) ? parsed[0]?.size : parsed?.size) ?? 0 };

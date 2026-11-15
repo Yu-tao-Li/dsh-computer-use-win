@@ -10,6 +10,13 @@ const file=path.join(inside,'fixture.txt'),secretFile=path.join(outside,'private
 const cases=[
  ['launch_app',{target:'notepad.exe'},'allow'],
  ['launch_app',{target:'fixture.exe',arguments:'--flag'},'ask'],
+ // Command hosts with arguments are refused before any prompt: the backend
+ // refuses them even after an approval. Without arguments they still start.
+ ['launch_app',{target:'C:\\Windows\\System32\\cmd.exe',arguments:'/c echo x'},'deny'],
+ ['launch_app',{target:'%ComSpec%',arguments:'/c echo x'},'deny'],
+ ['launch_app',{target:'PowerShell.EXE. ',arguments:'-Command exit'},'deny'],
+ ['launch_app',{target:'python',arguments:'app.py'},'deny'],
+ ['launch_app',{target:'cmd.exe'},'allow'],
  ['launch_app',{target:'shortcut.lnk'},'ask'],
  ['launch_app',{target:'\\\\server\\share\\app.exe'},'deny'],
  ['launch_app',{target:'app.exe',workingDirectory:'//server/share'},'deny'],

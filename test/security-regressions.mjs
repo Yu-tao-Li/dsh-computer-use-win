@@ -62,9 +62,11 @@ try {
   assert.equal(classifyOperation('launch_app', { target: '\\\\\\\\server\\share\\a.exe' }).kind, 'deny');
   assert.throws(() => assertOperation('launch_app', { target: '\\\\\\\\server\\share\\a.exe' }), /POLICY_DENIED/);
   assert.equal(classifyOperation('launch_app', { target: 'C:\\tools\\app.lnk.' }).kind, 'ask');
-  assert.equal(classifyOperation('launch_app', { target: 'cmd.exe.', arguments: '/c echo hi' }).kind, 'ask');
-  assert.equal(classifyOperation('launch_app', { target: 'python.exe.', arguments: '-c "print(1)"' }).kind, 'ask');
-  assert.throws(() => assertOperation('launch_app', { target: 'cmd.exe.', arguments: '/c echo hi' }), /APPROVAL_REQUIRED/);
+  // A trailing dot does not hide a command host: refused before any prompt.
+  assert.equal(classifyOperation('launch_app', { target: 'cmd.exe.', arguments: '/c echo hi' }).kind, 'deny');
+  assert.equal(classifyOperation('launch_app', { target: 'python.exe.', arguments: '-c "print(1)"' }).kind, 'deny');
+  assert.throws(() => assertOperation('launch_app', { target: 'cmd.exe.', arguments: '/c echo hi' }), /LAUNCH_COMMAND_REFUSED/);
+  assert.throws(() => assertOperation('launch_app', { target: 'cmd.exe.', arguments: '/c echo hi' }, { approved: true }), /LAUNCH_COMMAND_REFUSED/);
 
   // 5. Batch nested step policy & approval enforcement
   assert.equal(

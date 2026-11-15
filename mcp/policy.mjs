@@ -216,6 +216,15 @@ const existingLocalFile = file => {
   try { return statSync(text).isFile(); } catch { return false; }
 };
 const isLnkTarget = value => /\.lnk$/i.test(String(value ?? '').trim().replace(/[. ]+$/, ''));
+// The backend's list (Invoke-LaunchApp): these run the commands in their
+// arguments and are refused with arguments even after an approval, so asking
+// the user first would show a prompt whose answer cannot matter.
+const COMMAND_HOSTS = new Set(['cmd', 'powershell', 'pwsh', 'wt', 'wsl', 'bash', 'sh', 'conhost', 'wscript', 'cscript', 'mshta', 'rundll32', 'regsvr32', 'msiexec', 'forfiles', 'schtasks', 'pcalua', 'ftp', 'python', 'pythonw', 'node', 'deno', 'bun', 'perl', 'ruby', 'php']);
+const commandHostName = (target, env) => {
+  const expanded = String(target ?? '').trim().replace(/^"|"$/g, '').replace(/%([^%]+)%/g, (whole, name) => env?.[name] ?? process.env[name] ?? whole);
+  const name = path.win32.basename(expanded).replace(/[. ]+$/, '').replace(/\.(?:exe|com)$/i, '').toLowerCase();
+  return COMMAND_HOSTS.has(name) ? name : null;
+};
 const launchKey = args => `${String(args.target ?? '').trim().toLowerCase()}\0${String(args.arguments ?? '').trim()}`;
 
 export function classifyOperation(name, args = {}, env = process.env, locale = env?.WCU_LOCALE || systemLocale(), seenTabs) {
@@ -249,6 +258,8 @@ export function classifyOperation(name, args = {}, env = process.env, locale = e
   if (action === 'launch_app') {
     if (unc(args.target) || unc(args.workingDirectory)) return verdict('deny', 'WCU_POLICY_DENIED: network application paths are not supported.');
     const argText = String(args.arguments ?? '').trim();
+    const commandHost = argText ? commandHostName(args.target, env) : null;
+    if (commandHost) return verdict('deny', `LAUNCH_COMMAND_REFUSED: ${commandHost} runs the commands in its arguments. launch_app starts command interpreters and script hosts only without arguments; run commands with DSH's own shell tool.`);
     if (argText || isLnkTarget(args.target)) {
       const prompt = argText
         ? formatText(strings.approveLaunchArgs, String(args.target ?? ''), argText)
