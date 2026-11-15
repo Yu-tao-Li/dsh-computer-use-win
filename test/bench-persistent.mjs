@@ -1,10 +1,14 @@
 // Persistent backend protocol test: spawn the backend once, send N actions
 // over stdin, time each round-trip.
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const BACKEND = "E:/PythonFiles/dsh-computer-use-win/scripts/windows-uia.ps1";
+const BACKEND = fileURLToPath(new URL("../scripts/windows-uia.ps1", import.meta.url));
+const tSpawn = Date.now();
 const child = spawn("powershell", ["-NoLogo", "-NoProfile", "-Sta", "-ExecutionPolicy", "Bypass", "-File", BACKEND, "-Persistent"], { stdio: ["pipe", "pipe", "pipe"] });
 
+let resolveReady;
+const ready = new Promise((resolve) => { resolveReady = resolve; });
 let buf = "";
 const waiters = new Map();
 child.stdout.setEncoding("utf8");
@@ -16,6 +20,7 @@ child.stdout.on("data", (d) => {
     buf = buf.slice(idx + 1);
     if (!line) continue;
     let msg; try { msg = JSON.parse(line); } catch { continue; }
+    if (msg.type === "ready") { resolveReady(Date.now() - tSpawn); continue; }
     const w = waiters.get(msg.id);
     if (w) { waiters.delete(msg.id); w.resolve(msg); }
   }
@@ -38,7 +43,9 @@ const actions = [
   ["cursor_pos", {}],
 ];
 
-console.log("spawning persistent backend (first call includes startup)...");
+console.log("spawning persistent backend...");
+const startupMs = await ready;
+console.log(`ready in ${startupMs}ms`);
 for (let i = 0; i < 2; i++) {
   for (const [action, args] of actions) {
     const r = await call(action, args);

@@ -38,7 +38,9 @@ Each action uses the least intrusive way that works. Reads (snapshot, accessibil
 
 Real input (coordinate clicks, pastes, key presses, drags, wheel scrolls) borrows the foreground: the target comes forward for the action, a coordinate click is refused with POINT_COVERED when its point shows a window of another process, and afterwards the pointer goes back where the user left it and the foreground goes back to the window that was in front. The target stays in front while a menu, list or dialog the action opened is showing, with activate:true, and when the user switched windows meanwhile; a pointer the user moved is left where they put it. Keys are sent only after a last check that the target (or a window of its process) is still in front. Bringing a window forward first joins the input of the thread in front, which needs no key press, and falls back to the Alt-key method.
 
-Without a window target, the active window is the window the operation series last gave input to, while it is open, else the foreground window. Input and observations without a target use it, so after the foreground went back to the user they keep to DSH's window; snapshot captures that window when it is behind another one. health.activeWindow still reports the real foreground window.
+Without a window target, the active window is the window the operation series last gave input to, while it is open, else the foreground window. Background element actions count too: after set_value, invoke, a pattern click or an element scroll, that element's window is the one a following targetless keypress or type_text goes to. Input and observations without a target use it, so after the foreground went back to the user they keep to DSH's window; snapshot captures that window when it is behind another one. health.activeWindow still reports the real foreground window.
+
+keypress and type_text report `deliveredTo`: the window that got the input (`nativeWindowHandle`, `processId`, `title`), `via` (how it was chosen: `window target`, `last DSH window` or `front window`) and, when that window was in front and answered messages, `focus`, the control with the keyboard focus, such as `Edit 'Address and search bar'`. With `via: front window` (no window target, and DSH had not worked in a window this turn) the result's verification is `unconfirmed`.
 
 Reads, list_windows, wait, background dispatch and element actions that start in the background take a quiet lease: they honour a stopped series but show no indicator and arm no global Esc. An element action (invoke, set_value, scroll on an element) or type_text in auto mode that turns out to need real input fails in the background attempt with WCU_NEEDS_INPUT before anything is sent, and the server runs it again with the indicator and Esc. Text DSH pastes carries the clipboard formats that keep it out of clipboard history and the cloud clipboard, and the previous clipboard is restored.
 
@@ -100,11 +102,11 @@ Read the UI Automation tree without taking a screenshot. In a Chromium-based win
 
 ### list_windows
 
-List top-level windows visible to Windows UI Automation.
+List top-level windows visible to Windows UI Automation, in Z order. Minimized windows are listed too, with `minimized: true` and `isOffscreen: true` and without a bounding box (Windows parks them at -32000,-32000); activate_window, or any input with that window as target, restores them. When more windows exist than `maxWindows`, the result has `truncated: true`.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
-| includeInvisible | boolean | default: false |
+| includeInvisible | boolean | default: false; also lists hidden windows (tray, helper windows) |
 | maxWindows | integer | default: 50; min: 1; max: 200 |
 
 ### find
@@ -245,7 +247,7 @@ Type text into the focused control of the target (or active) window. method:'aut
 
 ### keypress
 
-Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. The keys go to the target (or active) window, which comes forward for them and then gives the foreground back, unless a menu or dialog they opened is showing. dispatch:'background' supports only a single printable character (posted as WM_CHAR to the focused control of the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendKeys).
+Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. The keys go to the target window, else the window DSH last worked in this turn, else the window in front; it comes forward for them and then gives the foreground back, unless a menu or dialog they opened is showing. The result's `deliveredTo` names the window and its focused control that received the keys (see "Foreground, pointer and the takeover indicator"). dispatch:'background' supports only a single printable character (posted as WM_CHAR to the focused control of the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendInput).
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -254,7 +256,19 @@ Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windo
 | nativeWindowHandle | integer | min: 1 |
 | activate | boolean | default: false |
 | keys | array | min items: 1; required |
+| thenKeys | array of chords | 1–19 following chords; desktop foreground only |
+| intervalMs | integer | 0–500 ms between chords; default: 60 |
 | dispatch | string | foreground/background; default: "foreground" |
+
+For Excel Ribbon commands, keep the chord sequence in one foreground lease:
+`{"keys":["alt","h"],"thenKeys":[["o"],["w"]]}` opens Column Width.
+Send a value such as the width in a separate call after the dialog is observed: if a key tip does not engage, later keys land in the active cell.
+Each chord still checks cancellation and the target foreground. A failed chord stops the sequence and restores the borrowed foreground; sent chords are not replayed.
+
+For spreadsheet layout, select the range with Ctrl+G and the observed Go To dialog.
+Use numeric column widths or AutoFit, set long-text columns to a bounded width,
+enable Wrap Text in Format Cells > Alignment, then AutoFit Row Height.
+Inspect the saved workbook rather than relying on a drag being dispatched.
 
 ### focus
 
@@ -288,7 +302,7 @@ Invoke a UI Automation element in the background: BM_CLICK on a Win32 button, el
 
 ### set_value
 
-Set a value in the background (EM_REPLACESEL on a Win32 edit, else the UI Automation ValuePattern), or focus and type as fallback.
+Set a value in the background (EM_REPLACESEL on a Win32 edit, else the UI Automation ValuePattern), or focus and type as fallback. Whether the keyboard focus moves to the element depends on the app: Chromium moves it (measured on the Chrome address bar and a page field), a Win32 edit keeps it where it was. When a key must follow in that field, such as Enter in a search box, call focus on the element first; a targetless keypress afterwards goes to this element's window.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -305,7 +319,7 @@ Set a value in the background (EM_REPLACESEL on a Win32 edit, else the UI Automa
 
 ### activate_window
 
-Bring a top-level window to the foreground by title substring, process id, or native HWND. This tool always activates its target; the shared activate flag cannot suppress it.
+Bring a top-level window to the foreground by title substring, process id, or native HWND. A minimized window is restored first; the result then says `restored: true`, and `window` describes the window after the call, not the -32000,-32000 position it had while minimized. If Windows leaves it minimized, `activated` is false and a warning says so. This tool always activates its target; the shared activate flag cannot suppress it.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -324,7 +338,7 @@ Wait for a short period before observing the UI again.
 
 ### ocr
 
-Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns text, lines and word boxes in SCREEN coordinates. Best effort: small or faint text can still be misread and there is no confidence score, so prefer UIA names and values when the app exposes them. query is literal text matching, not semantic recognition; inspect lines if 'search' misses a placeholder. Click matched.word.x/y using foreground dispatch, then type_text with focusMode:'preserve'. Optional resolveControl performs a potentially blocking UIA hit-test; its control may be the whole page rather than the text input.
+Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns text, lines and word boxes in SCREEN coordinates. With query, only the lines with a match come back (lineCount counts all lines); without a match, every line's text and box but no word boxes. Best effort: small or faint text can still be misread and there is no confidence score, so prefer UIA names and values when the app exposes them. query is literal text matching, not semantic recognition; inspect lines if 'search' misses a placeholder. Click matched.word.x/y using foreground dispatch, then type_text with focusMode:'preserve'. Optional resolveControl performs a potentially blocking UIA hit-test; its control may be the whole page rather than the text input.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -341,9 +355,11 @@ Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns
 
 The capture is read at full size unless maxWidth shrinks it. Windows OCR misreads small text, so when the median word is under 30 px tall the image is read a second time enlarged toward 36 px, at most 3x (`ocrScale` in the result; word boxes stay in SCREEN coordinates). `language` picks an installed recognizer by tag or prefix (`zh-Hans` reads with zh-Hans-CN); without it the Windows user languages decide, and the result names the recognizer in `language`. Chinese and Japanese lines come back without spaces between characters; Latin words and digits keep theirs. Windows OCR gives no confidence score, so a misread cannot be detected here: when the app exposes the text through UIA (find or accessibility_tree names and values), that text is exact.
 
+Word boxes are most of a full result: a 1500 × 900 window of text reads as about 50,000 characters. A query asks for one piece of text, so its result keeps the matching lines with their word boxes and leaves out `text`; when nothing matches, `lines` holds every line's text and box to reformulate from. A minimized window has nothing to read (Windows draws only its title strip), so OCR of one fails and says to restore it with activate_window.
+
 ### screenshot
 
-Capture a window or desktop without querying UIA. Returns an image plus bounds and imageScale for mapping image pixels to SCREEN coordinates: screen = bounds origin + image / imageScale. Use when the accessibility provider is unavailable, or to locate icons visually. Capture does not prove an action succeeded; inspect the resulting state.
+Capture a window or desktop without querying UIA. Returns an image plus bounds and imageScale for mapping image pixels to SCREEN coordinates: screen = bounds origin + image / imageScale. Use when the accessibility provider is unavailable, or to locate icons visually. Capture does not prove an action succeeded; inspect the resulting state. A minimized window shows only its title strip; the result then says `minimized: true` with a warning (activate_window restores it).
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -453,7 +469,7 @@ An alert, confirm, prompt or leave-page dialog blocks the page. It is reported a
 
 The visible agent browser shows what DSH does without covering the page, as Codex's Browser Use does. Its window frame is DSH blue. The tab DSH works in shows a blue arrow badge as its icon from the call's first command until the call ends and 2.5 s more, and in DSH for as long as the host holds the turn; then the page's own icon returns (a link the badge added is turned into a touch icon and removed, so Chrome drops it). A small glowing arrow moves to where DSH clicks, scrolls or types, with a ring on clicks. Both live in an isolated world: the arrow sits in a closed shadow root inside a `pointer-events: none`, `aria-hidden` element, its changes never reach the page's mutation observers, and screenshots hide it. A stopped call takes the badge off at once. A modal dialog holds page scripts, so the icon catches up when the dialog closes.
 
-The outline header reminds the model that page content is untrusted. Content inside iframes is not part of the outline yet; the result reports how many iframes were skipped. Elements that have no accessible structure, such as a canvas, cannot be clicked by page coordinates.
+The outline header reminds the model that page content is untrusted. The Chromium outline includes same-origin, cross-origin and nested iframe content. Element ids bind frame, renderer and document; frame navigation/removal invalidates them. With browserTab, click/double_click/move/scroll use CSS viewport x/y and drag uses a viewport path. Parent-page occlusion is checked before element clicks; all frame text remains untrusted and sensitive fields are redacted.
 
 ### Environment
 

@@ -52,10 +52,9 @@ if ($Phase -eq 'main') {
     $second = Invoke-Phase 'load'
     if (-not $second.native) { throw 'The native helper did not load from the marked cache' }
     if (-not $second.ocr) { throw "The OCR helper did not load from the marked cache: $($second.ocrError)" }
-    if ($first.wgc -and -not $second.wgc) { throw "The WGC helper did not load from the marked cache: $($second.wgcError)" }
     if ($second.compiled) { throw 'The second start recompiled instead of loading the cached helpers' }
     if ($isDesktop -and $second.ocrText -notmatch '54') { throw "OCR from the marked cache did not read the test image: '$($second.ocrText)'" }
-    Write-Output ("PASS native, OCR{0} helpers load from the marked cache; OCR read '{1}'" -f $(if ($second.wgc) { ' and WGC' } else { " (WGC unavailable here: $($first.wgcError))" }), $second.ocrText)
+    Write-Output ("PASS native and OCR helpers load from the marked cache; OCR read '{0}'" -f $second.ocrText)
   } finally {
     $cacheFull = [IO.Path]::GetFullPath($Cache)
     $tempFull = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
@@ -79,12 +78,12 @@ if ($Phase -eq 'loadfrom') {
 
 # Phase 'load': the backend's own definitions, run as the backend runs them.
 $script:BackendStartupWatch = [System.Diagnostics.Stopwatch]::StartNew()
-foreach ($name in 'WcuCs', 'WcuOcrCs', 'WgcCs') {
+foreach ($name in 'WcuCs', 'WcuOcrCs') {
   $assignment = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq "`$script:$name" }, $false)
   if ($null -eq $assignment) { throw "Missing helper source $name" }
   . ([scriptblock]::Create($assignment.Extent.Text))
 }
-foreach ($name in 'Write-BackendStage', 'Get-CsHash', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Load-Assemblies', 'Set-DpiAware', 'Get-OcrHelper', 'Get-WgcHelper') {
+foreach ($name in 'Write-BackendStage', 'Get-CsHash', 'Get-HelperCacheDir', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Load-Assemblies', 'Set-DpiAware', 'Get-OcrHelper') {
   $function = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
   if ($null -eq $function) { throw "Missing backend function $name" }
   . ([scriptblock]::Create($function.Extent.Text))
@@ -110,11 +109,10 @@ if ($Phase -eq 'compile-failure') {
   exit 0
 }
 $before = @(Get-ChildItem -LiteralPath $Cache -Filter 'wcu-*.dll').Count
-$result = [ordered]@{ native = $false; ocr = $false; wgc = $false; compiled = $false; ocrText = ''; ocrError = ''; wgcError = '' }
+$result = [ordered]@{ native = $false; ocr = $false; compiled = $false; ocrText = ''; ocrError = '' }
 Load-Assemblies
 $result.native = [bool]('WindowsComputerUseNative' -as [type])
 try { Get-OcrHelper; $result.ocr = [bool]('WindowsComputerUseOcr' -as [type]) } catch { $result.ocrError = $_.Exception.Message }
-try { Get-WgcHelper; $result.wgc = [bool]('WgcCapture' -as [type]) } catch { $result.wgcError = $_.Exception.Message }
 $result.compiled = @(Get-ChildItem -LiteralPath $Cache -Filter 'wcu-*.dll').Count -gt $before
 if ($result.ocr -and $isDesktop) {
   $png = Join-Path $Cache 'ocr-54.png'

@@ -11,10 +11,10 @@ await writeFile(path.join(root, 'scripts/windows-uia.ps1'), `param([switch]$Pers
 Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop
 $title='Fixture';$extra=@();$dialog=$false;$closed=$false
 $targetClass=if($env:WCU_FIXTURE_CLASS){$env:WCU_FIXTURE_CLASS}else{'Fixture'}
-while($null -ne ($line=[Console]::In.ReadLine())){
+[Console]::WriteLine((@{type='ready';protocol=1;pid=$PID}|ConvertTo-Json -Compress));while($null -ne ($line=[Console]::In.ReadLine())){
  $r=$line|ConvertFrom-Json
  $result=@{id=$r.id;ok=$true;action=$r.action}
- if($r.action -eq 'list_windows'){$result.windows=@($(if(-not $closed){@{nativeWindowHandle=101;processId=77;name=$title;className=$targetClass}}))+$extra}
+ if($r.action -eq 'list_windows'){$result.windows=@($(if(-not $closed){@{nativeWindowHandle=101;processId=77;name=$title;className=$targetClass}}))+$extra;if($r.args.includeMinimized -ne $false){$result.windows+=@{nativeWindowHandle=303;processId=77;name=$title;className=$targetClass;minimized=$true}}}
  elseif($r.action -eq 'tree'){$result.nodeCount=30;$result.tree=@{name=$title}}
  else {
   [IO.File]::AppendAllText($env:WCU_BATCH_MARKER,$r.action+':'+$r.args.value+[Environment]::NewLine)

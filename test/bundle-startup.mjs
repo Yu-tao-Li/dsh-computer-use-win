@@ -140,7 +140,7 @@ async function main() {
   // module used by this fixture; keep the shipped backend and environment intact.
   await writeFile(path.join(fixture.installed, 'scripts', 'windows-uia.ps1'), `param([switch]$Persistent)
 Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop
-while ($null -ne ($line = [Console]::In.ReadLine())) {
+[Console]::WriteLine((@{type='ready';protocol=1;pid=$PID}|ConvertTo-Json -Compress));while ($null -ne ($line = [Console]::In.ReadLine())) {
   $request = $line | ConvertFrom-Json
   if ($request.action -notin @('health', 'wait')) { throw 'Unexpected fixture action' }
   if ($request.action -eq 'wait') { Start-Sleep -Milliseconds 1 }

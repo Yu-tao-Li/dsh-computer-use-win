@@ -32,7 +32,7 @@ try{
  assert.equal(stale.issues,undefined,JSON.stringify(stale.issues));
  assert.equal(stale.value.toolPreset.get(),'auto');assert.equal(stale.value.browserApp.get(),'default');assert.equal(stale.value.browserVisible.get(),true);
  assert.deepEqual(stale.value.enabledTools.get(),['health','tools']);
- assert.deepEqual(stale.value[adapter.REPAIRED_SETTINGS],['toolPreset: "smart"','browserApp: "unknown-browser"','browserVisible: "yes"','enabledTools: "removed_tool"']);
+ assert.deepEqual([...stale.value[adapter.REPAIRED_SETTINGS]].sort(),['toolPreset: "smart"','browserApp: "unknown-browser"','browserVisible: "yes"','enabledTools: "removed_tool"'].sort());
  assert.equal(Object.getOwnPropertyDescriptor(stale.value,adapter.REPAIRED_SETTINGS).enumerable,false,'The report is not a setting and is never saved');
  const unknownOnly=validate({enabledTools:['removed_tool']});
  assert.equal(unknownOnly.issues,undefined);assert.equal(unknownOnly.value.enabledTools.get().length,TOOL_NAMES.length,'A list of unknown tools falls back to all tools, not none');
@@ -55,14 +55,18 @@ try{
  await make(`dsh-wcu-control-${process.pid}-Live01`);await make('dsh-wcu-control-999999-Dead01');await make('dsh-wcu-control-424242-Alive1',30);
  await make('dsh-wcu-control-Old123',8);await make('dsh-wcu-control-New123',1);await make('unrelated-dir',30);
  const keep=await make('dsh-wcu-control-1-Keep01');
- assert.deepEqual(adapter.sweepControlDirs({tmp,keep,alive:pid=>pid===424242}).sort(),['dsh-wcu-control-999999-Dead01','dsh-wcu-control-Old123']);
- assert.deepEqual((await readdir(tmp)).sort(),['dsh-wcu-control-1-Keep01','dsh-wcu-control-424242-Alive1',`dsh-wcu-control-${process.pid}-Live01`,'dsh-wcu-control-New123','unrelated-dir'].sort());
+ const held=await make(`dsh-wcu-control-${process.pid}-Held01`),release=await adapter.holdControlDir(held);
+ const reused=await make(`dsh-wcu-control-${process.pid}-Reused`);await writeFile(path.join(reused,'.pipe-owner'),'1');
+ assert.deepEqual((await adapter.sweepControlDirs({tmp,keep,alive:pid=>pid===424242})).sort(),[`dsh-wcu-control-${process.pid}-Reused`,'dsh-wcu-control-999999-Dead01','dsh-wcu-control-Old123'].sort());
+ assert.deepEqual((await readdir(tmp)).sort(),['dsh-wcu-control-1-Keep01','dsh-wcu-control-424242-Alive1',`dsh-wcu-control-${process.pid}-Live01`,`dsh-wcu-control-${process.pid}-Held01`,'dsh-wcu-control-New123','unrelated-dir'].sort());
+ release();
+ assert.deepEqual(await adapter.sweepControlDirs({tmp,keep,alive:pid=>pid===424242}),[path.basename(held)],'A disposed adapter is stale even while its DSH PID is still alive');
  // A link with a control-directory name is never followed into its target.
  const target=await mkdtemp(path.join(os.tmpdir(),'wcu-control-target-'));await writeFile(path.join(target,'keep.txt'),'x');
  const links=await mkdtemp(path.join(os.tmpdir(),'wcu-control-links-'));await symlink(target,path.join(links,'dsh-wcu-control-Link01'),'junction');
  assert.equal(adapter.removeControlDir(path.join(links,'dsh-wcu-control-Link01')),false);
- assert.deepEqual(adapter.sweepControlDirs({tmp:links,maxAgeMs:-1}),[]);
+ assert.deepEqual(await adapter.sweepControlDirs({tmp:links,maxAgeMs:-1}),[]);
  assert.ok(existsSync(path.join(target,'keep.txt')),'The link target survives');
  assert.equal(adapter.removeControlDir(path.join(tmp,'missing')),true,'A missing directory counts as removed');
- console.log(JSON.stringify({passed:true,errorLogLimited:true,controlDirSweep:true,linksNotFollowed:true}));
+ console.log(JSON.stringify({passed:true,errorLogLimited:true,controlDirSweep:true,pidReuseHandled:true,livePipePreserved:true,legacyLivePreserved:true,linksNotFollowed:true}));
 }

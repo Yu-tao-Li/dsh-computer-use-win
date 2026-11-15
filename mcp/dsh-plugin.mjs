@@ -1,13 +1,18 @@
 // DSH owns MCP transport/cancellation. Display changes do not kill input.
 import z from '@deepseek-ai/schemastery';
 import { fileURLToPath } from 'node:url';
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createServer, connect } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_SETTINGS, normalizeSettings, enabledToolsForSettings, toolSelectionKey, STOP_SHORTCUT_PATTERN, TOOL_NAMES, BROWSER_APPS, repairStaleSettings } from './settings.mjs';
-import { atomicJson } from './takeover.mjs';
+import { DEFAULT_SETTINGS, normalizeSettings, enabledToolsForSettings, toolSelectionKey, repairStaleSettings } from './settings.mjs';
+import {createSettingsFields} from './settings-schema.mjs';
+import { atomicJson, atomicJsonAsync } from './takeover.mjs';
 import { installActivity } from './activity.mjs';
 import { systemLocale } from './overlay-strings.mjs';
+import { randomBytes } from 'node:crypto';
+import { installHostPolicy } from './policy.mjs';
+import { settingsMode,findOwnEntry,bridgeSupport } from './host-compat.mjs';
 
 export const name = 'windows-computer-use';
 export const inject = ['tools'];
@@ -15,37 +20,7 @@ export function createLiveReference(value){
   let current=Array.isArray(value)?Object.freeze([...value]):value;
   return Object.freeze({get:()=>current,[Symbol.for('cosmokit.volatile.write')]:next=>{current=next;}});
 }
-const fields = {
-  browserFirst: z.boolean().default(true).description('网页优先使用浏览器通道 / Prefer browser use for web pages'),
-  browserVisible: z.boolean().default(true).description('显示DSH浏览器窗口 / Show the DSH browser'),
-  browserApp: z.union(BROWSER_APPS.map(value=>z.const(value))).default('default').description('使用的浏览器 / Browser'),
-  browserSignIn: z.boolean().default(false).description('记住登录 / Keep sign-ins'),
-  browserAttachUser: z.boolean().default(false).description('连接我自己的浏览器 / Attach to my own browser'),
-  progressOverlayEnabled: z.boolean().default(true).description('思考与操作浮窗 / Progress overlay'),
-  progressOverlayMode: z.union([z.const('source'),z.const('summary')]).default('source').description('浮窗内容：原文或 AI 总结 / Overlay content: source or AI summary'),
-  progressOverlayOpacity: z.number().min(20).max(100).default(60).description('浮窗不透明度（%） / Overlay opacity (%)'),
-  progressOverlayWidth: z.number().min(240).max(1600).default(360).description('浮窗宽度 / Overlay width'),
-  progressOverlayHeight: z.number().min(160).max(1600).default(240).description('浮窗高度 / Overlay height'),
-  progressOverlayPosition: z.union(['top-right','top-left','bottom-right','bottom-left','custom'].map(value=>z.const(value))).default('top-right').description('浮窗位置 / Overlay position'),
-  progressOverlayX: z.number().min(-32768).max(32767).default(80).description('浮窗 X / Overlay X'),
-  progressOverlayY: z.number().min(-32768).max(32767).default(80).description('浮窗 Y / Overlay Y'),
-  progressOverlayLocked: z.boolean().default(true).description('锁定浮窗并穿透鼠标 / Lock overlay and pass through input'),
-  progressLockShortcut: z.string().pattern(STOP_SHORTCUT_PATTERN).default('').description('浮窗锁定快捷键 / Overlay lock shortcut'),
-  progressPreviewToken: z.number().min(0).default(0),
-  mode: z.union([z.const('lite'),z.const('full')]).default('full').description('旧版工具模式 / Legacy tool mode'),
-  toolPreset: z.union(['auto','full','lite','lazy','custom'].map(value=>z.const(value))).default('auto').description('工具加载方案 / Tool preset'),
-  enabledTools: z.array(z.union(TOOL_NAMES.map(name=>z.const(name)))).max(TOOL_NAMES.length).default([...TOOL_NAMES]).description('启用的工具 / Enabled tools'),
-  indicatorEnabled: z.boolean().default(true).description('接管提示 / Takeover indicator'),
-  cursorIndicatorEnabled: z.boolean().default(true).description('鼠标指示 / Pointer indicator'),
-  remoteIndicatorVisible: z.boolean().default(true).description('远程与录屏可见 / Visible in remote sessions and recordings'),
-  indicatorText: z.string().default(DEFAULT_SETTINGS.indicatorText).description('提示文字 / Banner text'),
-  indicatorPosition: z.union([z.const('top'),z.const('bottom')]).default('top').description('提示位置 / Banner position'),
-  indicatorIdleMs: z.number().min(200).max(3000).default(800).description('结束后隐藏延时（毫秒） / Hide delay (ms)'),
-  stopShortcut: z.string().pattern(STOP_SHORTCUT_PATTERN).default('').description('自定义停止快捷键 / Custom stop shortcut'),
-  communityNote: z.union([z.const('full'),z.const('link')]).default('full').description('项目支持说明 / Project support note'),
-  resumeToken: z.number().min(0).default(0),
-  previewToken: z.number().min(0).default(0)
-};
+const fields = createSettingsFields(z);
 export const SettingsConfig = z.object(fields);
 // Some Desktop loaders resolve Schemastery without the volatile() convenience
 // method. Never silently omit the metadata the host uses to expose the form.
@@ -100,12 +75,31 @@ export function limitedErrorLog(logger,windowMs=60000,now=Date.now){
 // in use (#71). Directories from versions before 0.5.5 carry no process id.
 const CONTROL_PREFIX='dsh-wcu-control-',CONTROL_MAX_AGE_MS=7*24*3600*1000;
 const processAlive=pid=>{try{process.kill(pid,0);return true;}catch(error){return error.code==='EPERM';}};
+const controlPipe=dir=>'\\\\.\\pipe\\'+path.basename(dir);
+// A pipe belongs to this adapter lifetime; unlike a PID it cannot be reused
+// by an unrelated process after a crash. No polling or process queries.
+export async function holdControlDir(dir){
+  const server=createServer(socket=>socket.destroy());
+  await new Promise((resolve,reject)=>server.once('error',reject).listen(controlPipe(dir),resolve));
+  server.unref();
+  try{writeFileSync(path.join(dir,'.pipe-owner'),'1');}catch(error){server.close();throw error;}
+  return ()=>server.close();
+}
+function controlPipeAlive(dir){
+  return new Promise(resolve=>{
+    const socket=connect(controlPipe(dir));
+    const finish=alive=>{socket.destroy();resolve(alive);};
+    socket.once('connect',()=>finish(true));
+    socket.once('error',error=>finish(!['ENOENT','ECONNREFUSED'].includes(error.code)));
+    socket.setTimeout(250,()=>finish(true));
+  });
+}
 export function removeControlDir(dir){
   try{if(!lstatSync(dir).isDirectory())return false;rmSync(dir,{recursive:true,force:true,maxRetries:2,retryDelay:100});}
   catch(error){if(error.code!=='ENOENT')return false;}
   return !existsSync(dir);
 }
-export function sweepControlDirs({tmp=os.tmpdir(),keep,now=Date.now(),maxAgeMs=CONTROL_MAX_AGE_MS,alive=processAlive}={}){
+export async function sweepControlDirs({tmp=os.tmpdir(),keep,now=Date.now(),maxAgeMs=CONTROL_MAX_AGE_MS,alive=processAlive}={}){
   const removed=[];let names;
   try{names=readdirSync(tmp);}catch{return removed;}
   for(const name of names){
@@ -114,7 +108,9 @@ export function sweepControlDirs({tmp=os.tmpdir(),keep,now=Date.now(),maxAgeMs=C
     const owner=/^dsh-wcu-control-(\d+)-[^-]+$/.exec(name);
     let orphan=false;
     try{
-      if(owner){const pid=Number(owner[1]);orphan=pid!==process.pid&&!alive(pid);}
+      if(!lstatSync(dir).isDirectory())continue;
+      if(existsSync(path.join(dir,'.pipe-owner')))orphan=!await controlPipeAlive(dir);
+      else if(owner){const pid=Number(owner[1]);orphan=pid!==process.pid&&!alive(pid);}
       else{let touched=lstatSync(dir).mtimeMs;for(const file of readdirSync(dir))touched=Math.max(touched,lstatSync(path.join(dir,file)).mtimeMs);orphan=now-touched>maxAgeMs;}
     }catch{continue;}
     if(orphan&&removeControlDir(dir))removed.push(name);
@@ -138,6 +134,7 @@ export function bridgeConfig(config = {}, runtime = {}) {
     serverName: 'wincu', transport: 'stdio', command: process.execPath,
     args: [fileURLToPath(new URL('./server.mjs', import.meta.url))],
     env: { ELECTRON_RUN_AS_NODE: '1', WCU_IMAGE_MODE: 'file', WCU_BROWSER_ATTACH_USER: settings.browserAttachUser?'1':'0', WCU_BROWSER_HEADLESS: settings.browserVisible?'0':'1', WCU_BROWSER_APP: settings.browserApp, WCU_BROWSER_SIGNIN: settings.browserSignIn?'1':'0', WCU_TOOL_MODE: settings.toolPreset==='lazy'?'lazy':settings.mode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(settings),
+      ...(runtime.approvalSecret ? {WCU_APPROVAL_SECRET: runtime.approvalSecret,WCU_APPROVAL_LEDGER:runtime.approvalLedger, WCU_HOST_PID: String(process.pid),WCU_HOST_EXECUTABLE:process.execPath, WCU_HOST_PORTS: (runtime.hostPorts ?? []).join('|'), WCU_HOST_PORT_FILE:runtime.hostPortFile, WCU_USER_TABS_FILE:runtime.userTabsFile} : {}),
       ...(runtime.configFile ? { WCU_CONFIG_FILE: runtime.configFile, WCU_STATE_FILE: runtime.stateFile } : {}),
       ...(runtime.activityFile ? {WCU_ACTIVITY_FILE:runtime.activityFile}: {}),
       ...(runtime.layoutFile ? {WCU_LAYOUT_FILE:runtime.layoutFile}: {}),
@@ -149,25 +146,52 @@ export function bridgeConfig(config = {}, runtime = {}) {
 export async function apply(ctx, config) {
   const bridge = await import('@deepseek-ai/dsh-mcp-client');
   const root = mkdtempSync(path.join(os.tmpdir(), `${CONTROL_PREFIX}${process.pid}-`));
-  const runtime = { configFile: path.join(root,'settings.json'), stateFile: path.join(root,'state.json'), activityFile:path.join(root,'activity.json'), layoutFile:path.join(root,'overlay-layout.json') };
+  // Without the pipe the directory falls back to the PID rule; never block loading.
+  const releaseControlDir=await holdControlDir(root).catch(error=>{ctx.logger.warn('dsh-computer-use-win: control directory pipe unavailable: %s',error?.message??error);return ()=>{};});
+  ctx.effect(()=>releaseControlDir);
+  const runtime = { configFile: path.join(root,'settings.json'), stateFile: path.join(root,'state.json'), activityFile:path.join(root,'activity.json'), layoutFile:path.join(root,'overlay-layout.json'), userTabsFile:path.join(root,'user-tabs.json'), getLocale: () => getLocale() };
+  runtime.approvalSecret = randomBytes(32).toString('base64url');
+  runtime.approvalLedger=path.join(root,'approval-grants.json');
+  runtime.hostPorts = [];
+  runtime.hostPortFile=path.join(root,'host-ports.json');atomicJson(runtime.hostPortFile,{ports:[],pending:true});let webServerSeen=false,hostPortsDisposed=false;const settleNoWebServer=setTimeout(()=>{if(!webServerSeen&&!hostPortsDisposed)atomicJsonAsync(runtime.hostPortFile,{ports:[]}).catch(()=>{});},1500);settleNoWebServer.unref?.();ctx.effect(()=>()=>{hostPortsDisposed=true;clearTimeout(settleNoWebServer);});
+  ctx.inject(['webServer'], owner => {
+    webServerSeen=true;clearTimeout(settleNoWebServer);if(!owner.webServer.port)atomicJson(runtime.hostPortFile,{ports:[],pending:true});
+    let timer;
+    const update=async()=>{
+      const port=owner.webServer.port;
+      if(port){clearInterval(timer);timer=undefined;}
+      if(port && !runtime.hostPorts.includes(String(port))){runtime.hostPorts=[String(port)];await atomicJsonAsync(runtime.hostPortFile,{ports:runtime.hostPorts});}
+    };
+    void update().catch(error=>owner.logger.warn(error));owner.effect(()=>{timer=setInterval(()=>{void update().catch(error=>owner.logger.warn(error));},250);timer.unref();return ()=>clearInterval(timer);});
+  });
+  installHostPolicy(ctx, runtime);
   // The MCP server polls these files until DSH has closed its connection, which
   // runs alongside this adapter's disposal, and its next write would recreate a
   // removed directory. Remove it once the server has had time to exit; the
   // next start sweeps whatever a crash or a quit left behind.
   ctx.effect(() => () => { for (const delay of [1500, 6000]) setTimeout(() => removeControlDir(root), delay).unref(); });
-  setTimeout(() => { try { sweepControlDirs({ keep: root }); } catch {} }, 3000).unref();
+  setTimeout(() => { void sweepControlDirs({ keep: root }).catch(()=>{}); }, 3000).unref();
   const logError = limitedErrorLog(ctx.logger);
+  const support=bridgeSupport();
+  if(!support.tested){runtime.notices={hostBridgeUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: bridge %s is unverified for this release; actions requiring approval fail closed if approval is unavailable.',support.version);}
+  if(support.legacyApprovalUiUnverified){runtime.notices={...runtime.notices,legacyApprovalUiUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: legacy bridge %s does not support interactive web approval prompts; actions requiring approval will be blocked.',support.version);}
   // Reset settings go to the DSH log and, through the server, into the health
   // and tools results the agent reads. Which duplicate's tools DSH keeps is
   // up to the host, so a duplicate entry is reported in the log only.
   const self = {};
   if (config?.[REPAIRED_SETTINGS]?.length) {
-    runtime.notices = { settingsRepaired: [...config[REPAIRED_SETTINGS]] };
+    runtime.notices = {...runtime.notices, settingsRepaired: [...config[REPAIRED_SETTINGS]] };
     ctx.logger.warn('dsh-computer-use-win: saved settings this version does not offer were reset to their defaults: %s', runtime.notices.settingsRepaired.join('; '));
   }
   liveAdapters.add(self); ctx.effect(() => () => { liveAdapters.delete(self); });
   if (liveAdapters.size > 1) ctx.logger.warn('dsh-computer-use-win: %d entries of this plugin run in one profile, and DSH keeps only one set of mcp__wincu tools. Remove the extra entry from dsh.profile.bundles in the profile package.json or from its cordis.patch.yml.', liveAdapters.size);
-  let desired = normalizeSettings(config), runningSelection, connection, stopped = false;
+  let desired = normalizeSettings(config), desiredJson = JSON.stringify(desired), desiredKey = toolSelectionKey(desired), lastWrittenConfigJson = desiredJson;
+  let runningSelection, connection, stopped = false;
+  const writeConfigIfChanged = (settings, json = JSON.stringify(settings)) => {
+    if (json === lastWrittenConfigJson) return;
+    atomicJson(runtime.configFile, settings);
+    lastWrittenConfigJson = json;
+  };
   // Read only when the overlay asks, at most every 5 s and again after DSH's
   // change notice: the locale entry may start after this plugin, and an idle
   // plugin never calls describe(), which announces every entry the first time.
@@ -189,22 +213,29 @@ export async function apply(ctx, config) {
   };
   ctx.effect(() => () => { clearTimeout(localeRefresh); localeRefresh = undefined; });
   let updates = Promise.resolve();
-  let saveOverlayPatch, layoutId, layoutSaving = false, layoutRetry = { id: undefined, at: 0, delay: 0 };
+  let saveOverlayPatch, settingsSource = 'entry', namespaceScope, layoutId, layoutStatKey = '', layoutSaving = false, layoutRetry = { id: undefined, at: 0, delay: 0 };
+  let selectionPending=0,selectionRetry={at:0,delay:0};
   atomicJson(runtime.configFile, desired);
   ctx.effect(() => () => { stopped = true; });
-  const applySettings = next => {
-    const nextSettings = normalizeSettings(next);
+  const applySettings = (next, nextJson) => {
+    const nextSettings = next === desired ? desired : normalizeSettings(next);
+    const json = next === desired ? desiredJson : (nextJson ?? JSON.stringify(nextSettings));
     // A preview shows the DSH language of this moment. It goes into the
     // activity file before the server reads the new preview token.
     if (nextSettings.previewToken !== desired.previewToken || nextSettings.progressPreviewToken !== desired.progressPreviewToken) { localeReadAt = 0; activity.refresh(); }
-    atomicJson(runtime.configFile, nextSettings);
+    writeConfigIfChanged(nextSettings, json);
     // Windows readers can briefly deny replacement. Keep desired unchanged
     // on a failed write so the next poll retries the pending settings.
-    desired = nextSettings;
-    const pending = updates.then(async () => {
+    if (nextSettings !== desired) {
+      desired = nextSettings;
+      desiredJson = json;
+      desiredKey = toolSelectionKey(desired);
+    }
+    selectionPending++;
+    const pending = updates.then(async () => {try{
       if (!connection || stopped) return;
       await connection.await();
-      const nextSelection=toolSelectionKey(nextSettings);
+      const nextSelection = desiredKey;
       if (stopped || runningSelection === nextSelection) return;
       const deadline = Date.now() + 65000;
       for (;;) {
@@ -216,8 +247,12 @@ export async function apply(ctx, config) {
         await new Promise(resolve => setTimeout(resolve,100));
       }
       if (stopped) return;
-      await connection.update(bridgeConfig({ ...config, ...nextSettings }, runtime), true);
-      await connection.await(); runningSelection = nextSelection;
+      const latest={...desired},latestSelection=desiredKey;
+      await connection.update(bridgeConfig({ ...config, ...latest }, runtime), true);
+      await connection.await(); runningSelection = latestSelection;selectionRetry={at:0,delay:0};
+    }catch(error){
+      const delay=Math.min((selectionRetry.delay||250)*2,60000);selectionRetry={at:Date.now()+delay,delay};throw error;
+    }finally{selectionPending--;}
     });
     updates = pending.catch(() => {});
     return pending;
@@ -227,30 +262,42 @@ export async function apply(ctx, config) {
   ctx.effect(() => {
     const timer = setInterval(()=>{
       if(saveOverlayPatch&&!layoutSaving)try{
-        const layout=JSON.parse(readFileSync(runtime.layoutFile,'utf8'));
-        // A failed save is retried with backoff (0.5 s, doubling up to 60 s) and
-        // a newer layout at once. A patch that cannot apply is dropped.
-        if(layout.id!==layoutId&&!(layout.id===layoutRetry.id&&Date.now()<layoutRetry.at)){
-          const allowed=['progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressOverlayLocked','progressOverlayEnabled'];
-          let usable=false;
-          try{
-            if(!layout.patch||typeof layout.patch!=='object'||Object.keys(layout.patch).some(key=>!allowed.includes(key)))throw Error('Invalid overlay layout patch');
-            normalizeSettings({...desired,...layout.patch});
-            usable=!(layout.base&&Object.entries(layout.base).some(([key,value])=>!allowed.includes(key)||desired[key]!==value));
-          }finally{if(!usable)layoutId=layout.id;}
-          if(usable){
-            layoutSaving=true;
-            Promise.resolve().then(()=>saveOverlayPatch(layout.patch)).then(()=>{layoutId=layout.id;layoutRetry={id:undefined,at:0,delay:0};},error=>{
-              const delay=layoutRetry.id===layout.id?Math.min(layoutRetry.delay*2,60000):500;
-              layoutRetry={id:layout.id,at:Date.now()+delay,delay};logError(error);
-            }).finally(()=>{layoutSaving=false;});
+        const st = statSync(runtime.layoutFile, { bigint: true, throwIfNoEntry: false });
+        const statKey = st ? `${st.mtimeNs}:${st.size}` : '';
+        // An unchanged file is skipped, except when its failed save is due for
+        // a retry: the backoff ends without the file changing.
+        const retryDue = layoutRetry.id !== undefined && Date.now() >= layoutRetry.at;
+        if (st && (statKey !== layoutStatKey || retryDue)) {
+          layoutStatKey = statKey;
+          const layout=JSON.parse(readFileSync(runtime.layoutFile,'utf8'));
+          // A failed save is retried with backoff (0.5 s, doubling up to 60 s) and
+          // a newer layout at once. A patch that cannot apply is dropped.
+          if(layout.id!==layoutId&&!(layout.id===layoutRetry.id&&Date.now()<layoutRetry.at)){
+            const allowed=['progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressOverlayLocked'];
+            let usable=false;
+            try{
+              if(!layout.patch||typeof layout.patch!=='object'||Object.keys(layout.patch).some(key=>!allowed.includes(key)))throw Error('Invalid overlay layout patch');
+              normalizeSettings({...desired,...layout.patch});
+              usable=!(layout.base&&Object.entries(layout.base).some(([key,value])=>!allowed.includes(key)||desired[key]!==value));
+            }finally{if(!usable){layoutId=layout.id;if(layoutRetry.id===layout.id)layoutRetry={id:undefined,at:0,delay:0};}}
+            if(usable){
+              layoutSaving=true;
+              Promise.resolve().then(()=>saveOverlayPatch(layout.patch)).then(()=>{layoutId=layout.id;layoutRetry={id:undefined,at:0,delay:0};},error=>{
+                const delay=layoutRetry.id===layout.id?Math.min(layoutRetry.delay*2,60000):500;
+                layoutRetry={id:layout.id,at:Date.now()+delay,delay};layoutStatKey='';logError(error);
+              }).finally(()=>{layoutSaving=false;});
+            }
           }
         }
       }catch(error){if(error.code!=='ENOENT')logError(error);}
       // Older validators keep plain values rather than volatile references.
       // The Loader still commits the validated raw options for those hosts.
       // The raw entry still holds any value the validator reset; reset it here too.
-      try {const next=normalizeSettings({...config,...repairStaleSettings(ctx.fiber.entry?.options?.config).value});if(JSON.stringify(next)!==JSON.stringify(desired))applySettings(next).catch(logError);}
+      try {
+        const raw=settingsSource==='namespace'?namespaceScope?.get():{...config,...repairStaleSettings(ctx.fiber.entry?.options?.config).value};
+        if(raw){const next=normalizeSettings(raw);const nextJson=JSON.stringify(next);if(nextJson!==desiredJson)applySettings(next,nextJson).catch(logError);}
+        if(connection&&runningSelection!==desiredKey&&selectionPending===0&&Date.now()>=selectionRetry.at)applySettings(desired,desiredJson).catch(logError);
+      }
       catch(error){logError(error);}
     },250);
     timer.unref(); return ()=>clearInterval(timer);
@@ -259,15 +306,15 @@ export async function apply(ctx, config) {
     settingsService = settingsContext.settings; localeReadAt = 0;
     settingsContext.effect(() => () => { settingsService = undefined; localeReadAt = 0; });
     settingsContext.on?.('settings/document-updated', ns => { if (String(ns) === 'locale') refreshLocale(); });
-    if (typeof settingsContext.settings.register !== 'function') {
+    if (settingsMode(settingsContext.settings) === 'entry') {
       if(typeof settingsContext.settings.update==='function')settingsContext.inject(['configEditor'],owner=>{
         // DSH 0.2.2's Loader (cordis 4.1) keeps a wrapper of the plugin's fiber
         // on its entry where 0.2.1 kept the fiber itself; the fiber knows its
         // entry either way (#72).
         saveOverlayPatch=patch=>{
           const entries=owner.configEditor.entries();
-          const entry=entries.find(entry=>entry===ctx.fiber.entry)??entries.find(entry=>entry.fiber===ctx.fiber||entry.fiber?.ctx?.fiber===ctx.fiber);
-          if(!entry)throw Error('DSH lists no editable profile entry for this plugin (is it listed twice, or inside another entry?), so overlay moves and resizes are not saved.');
+          const entry=findOwnEntry(entries,ctx.fiber);
+          if(!entry)throw Error('DSH has no editable profile entry for this plugin (check if it is duplicated or nested inside another entry), so overlay position and size changes cannot be saved.');
           return owner.settings.update(entry.options.id,patch);
         };
         return ()=>{saveOverlayPatch=undefined;};
@@ -279,13 +326,16 @@ export async function apply(ctx, config) {
     const scope = settingsContext.settings.register('windows-computer-use', SettingsConfig, {
       base: normalizeSettings(config), applies: 'live', validate: normalizeSettings
     });
+    settingsSource = 'namespace';
+    namespaceScope=scope;
+    settingsContext.effect(() => () => { settingsSource = 'entry';namespaceScope=undefined; });
     saveOverlayPatch=patch=>scope.update(patch);
-    desired = normalizeSettings(scope.get()); atomicJson(runtime.configFile, desired);
+    desired = normalizeSettings(scope.get()); desiredJson = JSON.stringify(desired); desiredKey = toolSelectionKey(desired); writeConfigIfChanged(desired, desiredJson);
     settingsContext.effect(() => scope.watch(applySettings));
-    if (connection) return applySettings(desired);
+    if (connection) return applySettings(desired, desiredJson);
   });
-  runningSelection = toolSelectionKey(desired);
+  runningSelection = desiredKey;
   connection = ctx.plugin(bridge, bridgeConfig({ ...config, ...desired }, runtime));
   await connection;
-  await applySettings(desired);
+  if (desiredKey !== runningSelection) await applySettings(desired, desiredJson);
 }

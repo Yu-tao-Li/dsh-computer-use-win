@@ -177,7 +177,7 @@ class FakeBidi {
     if (method === 'browsingContext.navigate') { this.emit('browsingContext.navigationStarted', { context: params.context, url: params.url }); return { navigation: 'n', url: params.url }; }
     if (method === 'browsingContext.getTree') return { contexts: Array.from({ length: this.next }, (_, i) => ({ context: `context-${i + 1}`, url: 'https://fixture.test' })) };
     if (method === 'script.callFunction') {
-      if (params.functionDeclaration === domOutline.toString()) return { type: 'success', result: remote({ title: 'Fixture', url: 'https://fixture.test', entries: [
+      if (params.functionDeclaration.includes(domOutline.toString())) return { type: 'success', result: remote({ title: 'Fixture', url: 'https://fixture.test', entries: [
         { node: { sharedId: 'field' }, role: 'textbox', name: '关键词', value: this.value, states: [] },
         { node: { sharedId: 'button' }, role: 'button', name: '提交', value: '', states: [] }], iframes: 0, truncated: false }) };
       if (params.arguments?.[0]?.value === 'set') this.value = params.arguments[1].value;
@@ -311,7 +311,7 @@ await test('DOM setters reject detached/disabled/readonly without side effects',
   assert.throws(() => domElement.call({ ...base, readOnly: true }, 'set', 'x'), /read-only/);
   assert.throws(() => domElement.call({ ...base, type: 'checkbox' }, 'set', 'maybe'), /true or false/);
   assert.throws(() => domElement.call({ ...base, type: 'radio', checked: true }, 'set', 'false'), /radio/);
-  assert.equal(domElement.call({ ...base, type: 'password', value: 'secret' }, 'read'), '[redacted]');
+  assert.equal(domElement.call({ ...base, type: 'password', value: 'secret' }, 'read'), '[redacted; length=6]');
 });
 await test('select options validate atomically and checkbox uses one click', () => {
   const base = { isConnected: true, matches: () => false, closest: () => null, getAttribute: () => null };

@@ -1,4 +1,6 @@
-// These functions execute in a named BiDi sandbox. Keep them self-contained.
+import {readSafeValue} from './page-values.mjs';
+// These functions execute in a named BiDi sandbox. browser-bidi.mjs injects
+// the shared readSafeValue helper when serializing them.
 // Names/roles are DOM heuristics; closed shadow roots and frame contents are
 // deliberately not represented as a complete accessibility tree.
 export function domOutline(limit = 10000) {
@@ -33,8 +35,7 @@ export function domOutline(limit = 10000) {
         const field = /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
         const name = labelled || clean(el.getAttribute('aria-label')) || label || clean(el.alt) ||
           (field ? clean(el.placeholder || el.title || (role === 'button' ? el.value : '')) : fromContent.has(role) ? clean(el.innerText || el.textContent || el.title) : '');
-        const value = el.type === 'password' ? '' : el.tagName === 'SELECT' ? [...el.selectedOptions].map(o => o.text).join(', ') :
-          el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? 'checked' : 'unchecked') : typeof el.value === 'string' ? el.value : el.isContentEditable ? el.textContent : '';
+        const value = field || el.isContentEditable ? readSafeValue(el) : '';
         entry = { node: el, role, name: name.slice(0, 1000), value: clean(value).slice(0, 1000), depth,
           states: [el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true' ? 'disabled' : '', el.readOnly ? 'readonly' : '',
             el.checked ? 'checked' : '', el === el.getRootNode().activeElement ? 'focused' : ''].filter(Boolean) };
@@ -61,8 +62,7 @@ export function domElement(operation, value) {
   let el = this;
   if (!el?.isConnected) throw new Error('BROWSER_ELEMENT_STALE: node is detached');
   if (el.tagName === 'LABEL' && el.control) el = el.control;
-  const read = () => el.type === 'password' ? '[redacted]' : el.tagName === 'SELECT' ? [...el.selectedOptions].map(o => o.text).join(', ') :
-    el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? 'checked' : 'unchecked') : el.value ?? el.textContent ?? '';
+  const read = () => readSafeValue(el);
   if (operation === 'read') return read();
   if (operation === 'info') {
     const r = el.getBoundingClientRect();

@@ -1,5 +1,8 @@
 ﻿# Exercise shipped observation code against an instrumented provider. No desktop input.
+# Input lease behavior is exercised across real processes in input-mutex.mjs.
 param([string]$BackendPath = "$PSScriptRoot/../scripts/windows-uia.ps1", [switch]$Legacy)
+function Enter-DesktopInput { return $null }
+function Exit-DesktopInput { param($Lease) }
 $ErrorActionPreference = 'Stop'
 $source = [IO.File]::ReadAllText($BackendPath, [Text.Encoding]::UTF8)
 $tokens = $null; $parseErrors = $null
@@ -79,29 +82,30 @@ namespace Fixture.Automation {
 // Native surface used by the Chromium page warm-up; no real windows involved.
 public static class WindowsComputerUseNative {
   public static IntPtr[] Renderers = new IntPtr[0];
-  public static HashSet<long> Hung = new HashSet<long>(), Gone = new HashSet<long>();
+  public static HashSet<long> Hung = new HashSet<long>(), Gone = new HashSet<long>(), Minimized = new HashSet<long>();
+  public static bool IsIconic(IntPtr hwnd) {return Minimized.Contains(hwnd.ToInt64());}
   public static IntPtr[] ChromiumRenderers(IntPtr window, int max) {return Renderers;}
   public static bool IsWindow(IntPtr hwnd) {return !Gone.Contains(hwnd.ToInt64());}
   public static bool IsResponsive(IntPtr hwnd) {return !Hung.Contains(hwnd.ToInt64());}
   public static uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId) {processId=4242; return 1;}
 }
 '@
-$names = @('Get-Prop','Get-ViewMode','Get-DetailLevel','Get-ViewCondition','Invoke-Safe','Convert-Rect','Get-ControlTypeName','Get-Patterns','Get-ValueText','New-ElementCacheRequest','Convert-ElementInfo','Test-TreeBudget','Get-Children','Convert-Tree','Element-Matches','Search-Tree','Initialize-ChromiumPages','Get-TreeResult','Invoke-Action')
+$names = @('Get-Prop','Get-ViewMode','Get-DetailLevel','Get-ViewCondition','Invoke-Safe','Convert-Rect','Get-ControlTypeName','Get-Patterns','Get-ValueText','New-ElementCacheRequest','Register-ObservedElement','Convert-ElementInfo','Test-TreeBudget','Get-Children','Convert-Tree','Element-Matches','Search-Tree','Initialize-ChromiumPages','Get-TreeResult','Invoke-Action')
 foreach ($name in $names) {
   $definition = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name}, $true)
   if ($null -ne $definition) { . ([scriptblock]::Create($definition.Extent.Text.Replace('System.Windows','Fixture'))) }
 }
 function Get-ScopeRoot {param($Scope,$InputObject) return $script:Root}
-function Update-WindowCache {param($Element)}
+function Update-WindowCache {param($Element) $script:CachedWindow=$Element}
 function Update-WindowIdentity {param($InputObject,$Target)}
 function Get-ObservationWindow {param($InputObject,$Scope) return @{nativeWindowHandle=42;name='Fixture window';className='Fixture';processId=4242;boundingBox=@{x=1;y=2;width=30;height=40};source='win32'}}
 function Get-WindowResponsive {param($Window) return $script:Responsive}
 function Has-WindowTarget {param($InputObject) return $true}
 function Resolve-TargetWindow {param($InputObject) $script:Resolutions++; return $script:Root}
 function Resolve-Element {param($ElementId,$InputObject) return $script:Root}
-function Set-WindowForeground {param($Element) return $script:Activated}
+function Set-WindowForeground {param($Element) if ($script:RestoreOnActivate) {[WindowsComputerUseNative]::Minimized.Clear()}; return $script:Activated}
 function Test-Failsafe { return $true }
-function Get-NativeWindowList {param([bool]$IncludeInvisible,[int]$MaxWindows) return ,@()}
+function Get-NativeWindowList {param([bool]$IncludeInvisible,[int]$MaxWindows) return ,@($script:ListAfter)}
 # Renderer page probe: ready from the Nth probe of a renderer listed in PageReadyAt.
 $script:ChromiumPages=@{}; $script:PageProbes=0; $script:PageReadyAt=@{}; $script:PageRefuses=@()
 function Test-ChromiumPage {param([IntPtr]$Renderer) $script:PageProbes++; $key=[string]$Renderer.ToInt64(); if ($script:PageRefuses -contains $key) {throw 'Access is denied.'}; $at=$script:PageReadyAt[$key]; return ($null -ne $at -and $script:PageProbes -ge $at)}
@@ -110,6 +114,7 @@ function Reset-Fixture {
   [Fixture.Automation.AutomationElement]::Reset()
   $script:Root = New-Object Fixture.Automation.AutomationElement 1
   $script:Responsive=$true; $script:Activated=$false; $script:Resolutions=0
+  [WindowsComputerUseNative]::Minimized.Clear(); $script:RestoreOnActivate=$false; $script:ListAfter=@(); $script:CachedWindow=$null
 }
 Reset-Fixture
 for ($i=2;$i -le 1002;$i++) { $script:Root.Add((New-Object Fixture.Automation.AutomationElement $i)) }
@@ -168,6 +173,27 @@ $script:Activated=$true
 $result=Invoke-Action activate_window ([pscustomobject]@{nativeWindowHandle=42})
 Assert-Equal $result.activated $true 'Activation success'
 if ($result.warning) {throw 'Successful activation should not warn'}
+Assert-Equal $result.Contains('restored') $false 'No restored field for a window that was not minimized'
+# #82: a minimized window is restored, and the result shows the window as it
+# is after the call, not the -32000 box read before it.
+Reset-Fixture
+$script:Activated=$true; $script:RestoreOnActivate=$true
+[void][WindowsComputerUseNative]::Minimized.Add(42)
+$script:ListAfter=@(@{nativeWindowHandle=42;name='Fixture window';boundingBox=@{x=300;y=200;width=800;height=600};isOffscreen=$false;source='win32'})
+$result=Invoke-Action activate_window ([pscustomobject]@{nativeWindowHandle=42})
+Assert-Equal $result.activated $true 'Restored window activated'
+Assert-Equal $result.restored $true 'Restore reported'
+Assert-Equal $result.window.boundingBox.x 300 'Window reported after the call'
+Assert-Equal $script:CachedWindow.boundingBox.x 300 'Window cache gets the restored position'
+if ($result.warning) {throw 'Restored activation should not warn'}
+# Windows leaves it minimized: not activated, and the warning says so.
+Reset-Fixture
+$script:Activated=$true
+[void][WindowsComputerUseNative]::Minimized.Add(42)
+$result=Invoke-Action activate_window ([pscustomobject]@{nativeWindowHandle=42})
+Assert-Equal $result.activated $false 'A window left minimized is not activated'
+Assert-Equal $result.restored $false 'Failed restore reported'
+if ($result.warning -notmatch 'still minimized') {throw 'Missing still-minimized warning'}
 Reset-Fixture
 $result=Invoke-Action element_info ([pscustomobject]@{elementId='uia:active'})
 Assert-Equal $result.element.Contains('patterns') $false 'element_info defaults compact'

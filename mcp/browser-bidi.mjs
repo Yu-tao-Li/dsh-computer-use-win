@@ -1,3 +1,5 @@
+import {readSafeValue} from './page-values.mjs';
+import {assertBrowserUrl, isBlockedRuntimeRequestUrl} from './policy.mjs';
 // Experimental Gecko lane. Own a fresh browser, or connect only to an endpoint
 // explicitly configured by the user. DOM semantics approximate, not replace, AX.
 import { execFile, spawn } from 'node:child_process';
@@ -12,6 +14,21 @@ export const GECKO_APP_ID = '{ec8030f7-c20a-464f-9b0e-13a3a9e97384}';
 const fail = (code, detail) => { throw new Error(`${code}: ${detail}`); };
 const check = request => { if (request?.cancelled) fail('COMPUTER_USE_CANCELLED', 'cancelled'); };
 const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
+const READ_SAFE_SRC = readSafeValue.toString();
+const wrappedBidiFns = new WeakMap();
+function wrappedBidiFn(fn) {
+  let src = wrappedBidiFns.get(fn);
+  if (!src) {
+    src = `function (...args) { const readSafeValue = ${READ_SAFE_SRC}; return (${fn.toString()}).apply(this, args); }`;
+    wrappedBidiFns.set(fn, src);
+  }
+  return src;
+}
+function scrollPageBy(x, y) {
+  const before = [scrollX, scrollY];
+  scrollBy({ left: x, top: y, behavior: 'instant' });
+  return { before, after: [scrollX, scrollY] };
+}
 
 // reg.exe prints in the OEM code page (GBK on Chinese Windows), so a browser
 // installed under a Chinese folder came back garbled when read as UTF-8.
@@ -125,6 +142,7 @@ export const FIREFOX_PREFS = Object.freeze({
   'datareporting.policy.dataSubmissionEnabled': false, 'datareporting.healthreport.uploadEnabled': false,
   'toolkit.telemetry.enabled': false, 'toolkit.telemetry.unified': false,
   'browser.discovery.enabled': false,
+  'accessibility.force_disabled': -1, 'accessibility.uia.enable': 1,
   'browser.tabs.loadInBackground': true, 'browser.tabs.loadDivertedInBackground': true,
 });
 
@@ -207,17 +225,19 @@ export function bidiUrl(value) {
 }
 const SPECIAL_KEYS = { enter: '\uE007', tab: '\uE004', backspace: '\uE003', delete: '\uE017', escape: '\uE00C', esc: '\uE00C',
   left: '\uE012', up: '\uE013', right: '\uE014', down: '\uE015', home: '\uE011', end: '\uE010', pageup: '\uE00E', pagedown: '\uE00F', space: ' ' };
-const MODIFIERS = { ctrl: '\uE009', control: '\uE009', shift: '\uE008', alt: '\uE00A', meta: '\uE03D', win: '\uE03D' };
+const MODIFIERS = { ctrl: '\uE009', control: '\uE009', shift: '\uE008', alt: '\uE00A', option: '\uE00A', meta: '\uE03D', win: '\uE03D' };
 export function keyActions(keys) {
   if (!Array.isArray(keys) || !keys.length) fail('INVALID_ARGUMENTS', 'keys must contain one non-modifier');
   const modifiers = [], ordinary = [];
   for (const key of keys) {
     if (typeof key !== 'string') fail('INVALID_ARGUMENTS', 'keys must be strings');
+    if (/[\uE000-\uF8FF\u0000-\u001F\u007F]/u.test(key)) fail('INVALID_ARGUMENTS', 'key contains reserved or control codepoints');
     const lower = key.toLowerCase();
     if (MODIFIERS[lower]) modifiers.push(MODIFIERS[lower]); else ordinary.push(key);
   }
   if (ordinary.length !== 1) fail('INVALID_ARGUMENTS', 'keys must contain one non-modifier');
   const lower = ordinary[0].toLowerCase();
+  if((modifiers.includes(MODIFIERS.ctrl)&&['c','v','x','insert'].includes(lower)) || (modifiers.includes(MODIFIERS.shift)&&['insert','delete'].includes(lower)))fail('BROWSER_CLIPBOARD_SHORTCUT','Use type_text or set_value instead of the system clipboard.');
   if (modifiers.includes(MODIFIERS.ctrl) && ['l', 't', 'n', 'w', 'r', 'tab'].includes(lower) || modifiers.includes(MODIFIERS.alt) || modifiers.includes(MODIFIERS.meta) || /^f\d+$/i.test(lower))
     fail('BROWSER_UI_SHORTCUT', 'browser chrome shortcuts are unavailable; use address/new-tab/close_window');
   const value = SPECIAL_KEYS[lower] ?? (Array.from(ordinary[0]).length === 1 ? ordinary[0] : null);
@@ -234,7 +254,18 @@ export class BidiBrowserLane {
   }
   listen(connection) {
     connection.listeners.add(message => {
-      const p = message.params ?? {}, tab = this.contexts.get(p.context);
+      const p = message.params ?? {};
+      if (message.method === 'network.beforeRequestSent' && p.isBlocked && p.request?.request) {
+        const reqTab = this.contexts.get(p.context);
+        const allowLocalFile = Boolean(reqTab?.approvedFileUrl || this.env.WCU_ALLOWED_FILE_ROOTS);
+        let blocked = false;
+        try {
+          blocked = isBlockedRuntimeRequestUrl(p.request.url ?? '', this.env, { isNavigation: Boolean(p.navigation), allowLocalFile }).blocked;
+        } catch { blocked = true; }
+        this.connection?.send(blocked ? 'network.failRequest' : 'network.continueRequest', { request: p.request.request }, 3000).catch(() => {});
+        return;
+      }
+      const tab = this.contexts.get(p.context);
       if (message.method === 'browsingContext.contextCreated' && p.parent == null && p.context) this.tabFor(p);
       if (!tab) return;
       if (message.method === 'browsingContext.contextDestroyed') { tab.closed = true; this.tabs.delete(tab.key); this.contexts.delete(p.context); }
@@ -271,7 +302,8 @@ export class BidiBrowserLane {
         this.connection = connection;
         await connection.send('session.new', { capabilities: { alwaysMatch: { unhandledPromptBehavior: { default: 'ignore' } } } });
         this.sessionOwned = true; this.listen(connection);
-        await connection.send('session.subscribe', { events: ['browsingContext.contextCreated', 'browsingContext.contextDestroyed', 'browsingContext.navigationStarted', 'browsingContext.load', 'browsingContext.userPromptOpened', 'browsingContext.userPromptClosed'] });
+        await connection.send('session.subscribe', { events: ['browsingContext.contextCreated', 'browsingContext.contextDestroyed', 'browsingContext.navigationStarted', 'browsingContext.load', 'browsingContext.userPromptOpened', 'browsingContext.userPromptClosed', 'network.beforeRequestSent'] });
+        await connection.send('network.addIntercept', { phases: ['beforeRequestSent'] }).catch(() => {});
         await this.refresh();
         return connection;
       } catch (error) {
@@ -309,8 +341,10 @@ export class BidiBrowserLane {
     const live = new Set(contexts.map(info => info.context));
     for (const tab of this.tabs.values()) if (!live.has(tab.context)) { this.tabs.delete(tab.key); this.contexts.delete(tab.context); }
   }
-  async call(tab, fn, args = [], sharedId) {
-    const result = await this.connection.send('script.callFunction', { functionDeclaration: fn.toString(), target: { context: tab.context, sandbox: 'dsh-bidi' },
+  async call(tab, fn, args = [], sharedId, request) {
+    assertBrowserUrl(tab.url || 'about:blank', {env:this.env, approvedFileUrl:tab.approvedFileUrl, grants:request?.approvalGrants, approved:request?.policyApproved===true});
+    const declaration = wrappedBidiFn(fn);
+    const result = await this.connection.send('script.callFunction', { functionDeclaration: declaration, target: { context: tab.context, sandbox: 'dsh-bidi' },
       awaitPromise: false, arguments: args.map(localValue), ...(sharedId ? { this: { sharedId } } : {}), serializationOptions: { maxObjectDepth: 8, maxDomDepth: 0 } });
     if (result.type === 'exception') {
       const message = result.exceptionDetails?.text || 'script exception';
@@ -324,9 +358,23 @@ export class BidiBrowserLane {
     try { return await Promise.race([Promise.resolve().then(action), prompt]); }
     finally { tab.promptWaiters.delete(wake); }
   }
-  async outline(tab, maxNodes = 500) {
-    const result = await this.call(tab, domOutline);
+  async checkLocation(tab, request) {
+    const rootOpts = { env: this.env, approvedFileUrl: tab.approvedFileUrl, grants: request?.approvalGrants, approved: request?.policyApproved === true };
+    const childOpts = { env: this.env, approvedFileUrl: tab.approvedFileUrl };
+    assertBrowserUrl(tab.url || 'about:blank', rootOpts);
+    const tree = await this.connection.send('browsingContext.getTree', { root: tab.context });
+    const walk = (node, isChild = false) => {
+      if (!node || typeof node !== 'object') return;
+      if (node.url && !/^about:(?:blank|srcdoc)$/i.test(node.url)) assertBrowserUrl(node.url, isChild ? childOpts : rootOpts);
+      for (const child of node.children ?? []) walk(child, true);
+    };
+    for (const root of tree?.contexts ?? []) walk(root, false);
+  }
+  async outline(tab, maxNodes = 500, request) {
+    const result = await this.untilPrompt(tab, () => this.call(tab, domOutline, [], undefined, request));
+    if (!result || tab.dialog) return { title: tab.title, url: tab.url, rows: [], lines: [], truncated: false, iframes: 0 };
     tab.title = result.title; tab.url = result.url;
+    assertBrowserUrl(tab.url||'about:blank',{env:this.env, approvedFileUrl:tab.approvedFileUrl, grants:request?.approvalGrants, approved:request?.policyApproved===true});
     const rows = result.entries.map(item => ({ id: this.idFor(tab, item.node.sharedId), role: item.role, name: item.name, value: item.value, states: item.states }));
     return { ...result, rows, lines: rows.slice(0, maxNodes).map(row => `[${row.id}] ${row.role} ${JSON.stringify(row.name.slice(0, 160))}${row.value ? ` value=${JSON.stringify(row.value.slice(0, 120))}` : ''}${row.states.length ? ` (${row.states.join(', ')})` : ''}`), truncated: result.truncated || rows.length > maxNodes };
   }
@@ -355,8 +403,9 @@ export class BidiBrowserLane {
     if (opener) {
       if (action !== 'set_value') fail('INVALID_ARGUMENTS', 'new-tab requires set_value');
       if (opener[1] && opener[1] !== this.key) fail('BROWSER_TAB_NOT_FOUND', 'unknown browser');
-      const url = bidiUrl(args.value); await this.ensure(request); check(request);
+      const url = bidiUrl(args.value); assertBrowserUrl(url, {env:this.env, grants:request?.approvalGrants, approved:request?.policyApproved===true}); await this.ensure(request); check(request);
       tab = this.tabFor(await this.connection.send('browsingContext.create', { type: 'tab', background: true }));
+      if ((request?.policyApproved || request?.approvalGrants?.fileUrls?.size) && /^file:/i.test(url)) tab.approvedFileUrl = new URL(url).href;
       await this.untilPrompt(tab, () => this.connection.send('browsingContext.navigate', { context: tab.context, url, wait: 'interactive' }));
       detail.opened = this.describe(tab);
     } else {
@@ -368,19 +417,22 @@ export class BidiBrowserLane {
         if (!sharedId) fail('BROWSER_ELEMENT_STALE', 'element is no longer in this document; read the page again');
       }
       if (match?.[2] === 'address' && action !== 'set_value') fail('INVALID_ARGUMENTS', 'address requires set_value');
+      if(match?.[2]!=='address')assertBrowserUrl(tab.url||'about:blank',{env:this.env,approvedFileUrl:tab.approvedFileUrl,grants:request?.approvalGrants,approved:request?.policyApproved===true});
       if (tab.dialog) return this.handleDialog(tab, action, args);
       const needsElement = ['click', 'double_click', 'move', 'invoke', 'focus', 'set_value', 'element_info'];
       if (needsElement.includes(action) && !match) fail('INVALID_ARGUMENTS', action + ' requires an element id');
       check(request);
       if (['tree', 'snapshot'].includes(action)) {
-        const result = this.page(tab, action, await this.outline(tab, args.maxNodes ?? 500), {}, true);
-        if (action === 'snapshot' && args.includeScreenshot) result.screenshot = await this.screenshot(tab, args.maxWidth);
+        const outlined = await this.outline(tab, args.maxNodes ?? 500, request);
+        if (tab.dialog) return this.dialogResult(tab, action, detail);
+        const result = this.page(tab, action, outlined, {}, true);
+        if (action === 'snapshot' && args.includeScreenshot) result.screenshot = await this.screenshot(tab, args.maxWidth, request);
         return result;
       }
-      if (action === 'find') return this.find(tab, args);
+      if (action === 'find') return this.find(tab, args, request);
       if (action === 'wait_for') return this.waitFor(tab, args, request);
-      if (action === 'screenshot') return { meta: { ok: true, channel: 'browser', backend: 'bidi', action, tab: this.describe(tab) }, screenshot: await this.screenshot(tab, args.maxWidth) };
-      if (action === 'element_info') return { meta: { ok: true, channel: 'browser', action, ...await this.call(tab, domElement, ['info'], sharedId) } };
+      if (action === 'screenshot') return { meta: { ok: true, channel: 'browser', backend: 'bidi', action, tab: this.describe(tab) }, screenshot: await this.screenshot(tab, args.maxWidth, request) };
+      if (action === 'element_info') return { meta: { ok: true, channel: 'browser', action, ...await this.call(tab, domElement, ['info'], sharedId, request) } };
       if (action === 'close_window') {
         await this.untilPrompt(tab, () => this.connection.send('browsingContext.close', { context: tab.context, promptUnload: true }));
         if (tab.dialog) return this.dialogResult(tab, action);
@@ -389,29 +441,30 @@ export class BidiBrowserLane {
       }
       await this.untilPrompt(tab, async () => {
         if (action === 'set_value' && match[2] === 'address') {
-          const url = bidiUrl(args.value); tab.ids.clear(); tab.byShared.clear(); tab.last = null;
+          const url = bidiUrl(args.value); assertBrowserUrl(url, {env:this.env, grants:request?.approvalGrants, approved:request?.policyApproved===true}); tab.approvedFileUrl=(request?.policyApproved||request?.approvalGrants?.fileUrls?.size)&&/^file:/i.test(url)?new URL(url).href:undefined; tab.ids.clear(); tab.byShared.clear(); tab.last = null;
           await this.connection.send('browsingContext.navigate', { context: tab.context, url, wait: 'interactive' });
         } else if (['click', 'double_click', 'invoke', 'move'].includes(action)) {
-          await this.call(tab, domElement, ['prepareClick'], sharedId); check(request);
+          await this.call(tab, domElement, ['prepareClick'], sharedId, request); check(request);
           const button = ({ left: 0, middle: 1, right: 2 })[args.button ?? 'left'];
           if (button === undefined) fail('INVALID_ARGUMENTS', 'unknown mouse button');
           const actions = [{ type: 'pointerMove', x: 0, y: 0, origin: { type: 'element', element: { sharedId } } }];
           if (action !== 'move') for (let i = 0; i < (action === 'double_click' ? 2 : 1); i++) actions.push({ type: 'pointerDown', button }, { type: 'pointerUp', button });
           await this.perform(tab, [{ type: 'pointer', id: 'dsh-pointer', parameters: { pointerType: 'mouse' }, actions }]);
-        } else if (action === 'focus') await this.call(tab, domElement, ['focus'], sharedId);
-        else if (action === 'set_value') { detail.verifyValue = await this.call(tab, domElement, ['set', args.value], sharedId); detail.inputMethod = 'DOM setter and synthetic events'; }
+        } else if (action === 'focus') await this.call(tab, domElement, ['focus'], sharedId, request);
+        else if (action === 'set_value') { detail.verifyValue = await this.call(tab, domElement, ['set', args.value], sharedId, request); detail.inputMethod = 'DOM setter and synthetic events'; }
         else if (action === 'type_text') {
           if (typeof args.text !== 'string') fail('INVALID_ARGUMENTS', 'text must be a string');
-          const focused = await this.call(tab, domFocused);
+          if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\uE000-\uF8FF]/u.test(args.text)) fail('INVALID_ARGUMENTS', 'text contains control or WebDriver reserved Private Use Area characters');
+          const focused = await this.call(tab, domFocused, [], undefined, request);
           const actions = Array.from(args.text).flatMap(value => [{ type: 'keyDown', value }, { type: 'keyUp', value }]);
           if (actions.length) await this.perform(tab, [{ type: 'key', id: 'dsh-keyboard', actions }]);
-          if (!tab.dialog) detail.verifyValue = await this.call(tab, domElement, ['read'], focused.sharedId);
+          if (!tab.dialog) detail.verifyValue = await this.call(tab, domElement, ['read'], focused.sharedId, request);
         } else if (action === 'keypress') await this.perform(tab, [{ type: 'key', id: 'dsh-keyboard', actions: keyActions(args.keys) }]);
         else if (action === 'scroll') {
           const dx = args.deltaX ?? 0, dy = args.deltaY ?? 480;
           if (![dx, dy].every(Number.isFinite)) fail('INVALID_ARGUMENTS', 'scroll deltas must be finite');
-          if (sharedId) detail.elementScroll = await this.call(tab, domElement, ['scroll', [dx, dy]], sharedId);
-          else detail.pageScroll = await this.call(tab, function (x, y) { const before = [scrollX, scrollY]; scrollBy({ left: x, top: y, behavior: 'instant' }); return { before, after: [scrollX, scrollY] }; }, [dx, dy]);
+          if (sharedId) detail.elementScroll = await this.call(tab, domElement, ['scroll', [dx, dy]], sharedId, request);
+          else detail.pageScroll = await this.call(tab, scrollPageBy, [dx, dy], undefined, request);
           detail.inputMethod = 'DOM scrollBy';
         } else fail('BROWSER_BIDI_UNSUPPORTED', action + ' is not supported by this prototype');
       });
@@ -419,8 +472,15 @@ export class BidiBrowserLane {
     if (tab.dialog) return this.dialogResult(tab, action, detail);
     check(request);
     // Bound settling, never infer task success from a successfully sent action.
-    await delay(80); if (tab.dialog) return this.dialogResult(tab, action, detail);
-    const outline = await this.outline(tab);
+    if (!request?.batchSuppressObservation) await this.untilPrompt(tab, () => delay(80));
+    if (tab.dialog) return this.dialogResult(tab, action, detail);
+    if (request?.batchSuppressObservation) {
+      await this.checkLocation(tab, request);
+      if (detail.opened) detail.opened = this.describe(tab);
+      return { meta: { ok: true, channel: 'browser', backend: 'bidi', action, tab: this.describe(tab), verification: 'sent', ...detail } };
+    }
+    const outline = await this.outline(tab, 500, request);
+    if (tab.dialog) return this.dialogResult(tab, action, detail);
     if (detail.opened) detail.opened = this.describe(tab);
     return this.page(tab, action, outline, { verification: 'sent', verificationNote: 'Inspect resulting page state; DOM outline is heuristic.', ...detail }, Boolean(opener));
   }
@@ -438,9 +498,10 @@ export class BidiBrowserLane {
     tab.dialog = null; await delay(80);
     return this.page(tab, action, await this.outline(tab), { handledDialog: accept ? 'accepted' : 'dismissed' });
   }
-  async find(tab, args) {
+  async find(tab, args, request) {
     if (typeof args.query !== 'string' || !args.query.trim()) fail('INVALID_ARGUMENTS', 'find requires query');
-    const outline = await this.outline(tab, 10000), query = args.query.toLowerCase();
+    const outline = await this.outline(tab, 10000, request), query = args.query.toLowerCase();
+    if (tab.dialog) return this.dialogResult(tab, 'find');
     const aliases = { edit: 'textbox', text: 'text', combobox: 'combobox', checkbox: 'checkbox', hyperlink: 'link' };
     const role = args.controlType ? (aliases[args.controlType.toLowerCase()] ?? args.controlType.toLowerCase()) : null;
     const results = outline.rows.filter(row => (!role || role === row.role) && `${row.name} ${row.value}`.toLowerCase().includes(query)).slice(0, args.maxResults ?? 50);
@@ -452,13 +513,16 @@ export class BidiBrowserLane {
     const start = Date.now(), timeoutMs = args.timeoutMs ?? 5000, intervalMs = args.intervalMs ?? 100, appear = args.appear ?? true;
     for (;;) {
       check(request); if (tab.dialog) fail('BROWSER_DIALOG_OPEN', 'handle prompt before waiting');
-      const found = (await this.find(tab, { ...args, maxResults: 1 })).meta.count > 0;
+      const result = await this.find(tab, { ...args, maxResults: 1 }, request);
+      if (tab.dialog) fail('BROWSER_DIALOG_OPEN', 'handle prompt before waiting');
+      const found = result.meta.count > 0;
       if (found === appear) return { meta: { ok: true, channel: 'browser', action: 'wait_for', verification: 'observed', elapsedMs: Date.now() - start } };
       if (Date.now() - start >= timeoutMs) return { meta: { ok: false, channel: 'browser', action: 'wait_for', verification: 'timeout', elapsedMs: Date.now() - start } };
-      await delay(Math.max(10, intervalMs));
+      await this.untilPrompt(tab, () => delay(Math.max(10, intervalMs)));
     }
   }
-  async screenshot(tab, maxWidth = 1600) {
+  async screenshot(tab, maxWidth = 1600, request) {
+    await this.checkLocation(tab, request);
     const { data } = await this.connection.send('browsingContext.captureScreenshot', { context: tab.context, origin: 'viewport', format: { type: 'image/png' } });
     const png = Buffer.from(data, 'base64');
     if (png.length < 24 || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) fail('BROWSER_PROTOCOL', 'invalid screenshot PNG');

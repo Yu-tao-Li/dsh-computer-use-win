@@ -1,0 +1,43 @@
+// Real Chromium, a local page and an isolated profile. No desktop input.
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import {mkdtemp} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+import {BrowserLane} from '../mcp/browser.mjs';
+const site=http.createServer((_req,res)=>{res.setHeader('content-type','text/html; charset=utf-8');res.end('<title>Observation fixture</title><button onclick="this.textContent=\'Changed once\'">Change once</button>'+Array.from({length:650},(_,i)=>`<p>Stable row ${i}</p>`).join(''));});
+await new Promise(resolve=>site.listen(0,'127.0.0.1',resolve));
+const root=await mkdtemp(path.join(os.tmpdir(),'wcu-browser-observation-'));
+const lane=new BrowserLane({env:{...process.env,WCU_BROWSER_PROFILE:root,WCU_BROWSER_HEADLESS:'1',WCU_BROWSER_SIGNIN:'0',WCU_BROWSER_APP:'edge'}});
+try{
+  const opened=await lane.run('set_value',{elementId:'new-tab',value:`http://127.0.0.1:${site.address().port}/`},{});
+  const tab=lane.tabs.get(opened.meta.opened.id);
+  await lane.run('tree',{browserTab:tab.key,maxNodes:250},{});
+  assert.equal(tab.last.lines.size>600,true,'Baseline must retain content beyond the displayed 250 lines');
+  const button=(await lane.find(tab,{query:'Change once',maxResults:1})).meta.results[0];
+  const changed=await lane.run('click',{elementId:button.id,button:'left'},{});
+  assert.equal(changed.meta.pageChange,'diff');
+  assert.match(changed.text,/0 added, 1 changed, 0 removed/);
+  let axCalls=0;
+  const originalSend=lane.send.bind(lane);
+  lane.send=async(...args)=>{if(args[1]==='Accessibility.getFullAXTree')axCalls++;return originalSend(...args);};
+  const notFound=await lane.waitFor(tab,{condition:'text',query:'absent text',appear:true,timeoutMs:220,intervalMs:50},{});
+  assert.equal(notFound.meta.verification,'timeout');assert.equal(axCalls,0,'Text polling must not repeatedly download the AX tree');
+  const textPollAxCalls=axCalls;
+  await lane.send(tab,'Runtime.evaluate',{expression:"setTimeout(()=>alert('Untrusted dialog fixture'),200)"});
+  const started=Date.now();
+  const blocked=await lane.waitFor(tab,{condition:'element',query:'never appears',appear:true,timeoutMs:10000,intervalMs:50},{});
+  assert.equal(blocked.meta.verification,'blocked');assert(Date.now()-started<3000,'Dialog must interrupt a pending observation');
+  await lane.key(tab,['escape']);
+  const browser=tab.browser;
+  const stale=Date.now()-11*60*1000;
+  lane.lastUsed=stale;browser.lastActivity=stale;browser.headless=false;
+  await lane.closeIdleAgent();assert.equal(browser.cdp.closed,false,'A visible sign-in window survives 10 minutes without tool calls');
+  browser.headless=true;
+  lane.onEvent(browser,{method:'Target.targetInfoChanged',params:{targetInfo:{targetId:tab.targetId,title:'User login progress',url:tab.url}}});
+  await lane.closeIdleAgent();assert.equal(browser.cdp.closed,false,'Page activity extends idle lifetime');
+  lane.lastUsed=stale;browser.lastActivity=stale;
+  await lane.closeIdleAgent();await delay(300);assert.equal(browser.cdp.closed,true,'An actually idle headless browser still closes');
+  console.log(JSON.stringify({passed:true,completeDiffBaseline:true,textPollAxCalls,visibleIdleGrace:true,pageActivityExtendsIdle:true,root}));
+}finally{await lane.shutdown();await new Promise(resolve=>site.close(resolve));}

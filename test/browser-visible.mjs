@@ -29,8 +29,11 @@ assert.deepEqual([bridgeConfig({}).env.WCU_BROWSER_APP,bridgeConfig({}).env.WCU_
 assert.deepEqual([bridgeConfig({browserApp:'chrome',browserSignIn:true}).env.WCU_BROWSER_APP,bridgeConfig({browserApp:'chrome',browserSignIn:true}).env.WCU_BROWSER_SIGNIN],['chrome','1']);
 assert.match(browserRoutingInstructions({}),/isolated DSH browser without the user's sign-ins/);
 assert.match(browserRoutingInstructions({browserSignIn:true}),/DSH browser, whose profile is kept.*never type passwords.*sign in once in the DSH browser window.*ask the user unless/);
-assert.doesNotMatch(browserRoutingInstructions({browserSignIn:true}),/user's own browser|Show the browser window/);
-assert.match(browserRoutingInstructions({browserSignIn:true,browserVisible:false}),/window is hidden now.*Show the browser window/);
+const browserWindowLabel=JSON.parse(fs.readFileSync(new URL('../client/strings/en.json',import.meta.url),'utf8')).browserVisible;
+assert.doesNotMatch(browserRoutingInstructions({browserSignIn:true}),/user's own browser/);
+assert.equal(browserRoutingInstructions({browserSignIn:true}).includes(browserWindowLabel),false);
+assert.match(browserRoutingInstructions({browserSignIn:true,browserVisible:false}),/window is hidden now/);
+assert(browserRoutingInstructions({browserSignIn:true,browserVisible:false}).includes(browserWindowLabel));
 assert.match(browserRoutingInstructions({toolPreset:'lite'}),/new browser tab is unavailable/);
 assert.doesNotMatch(browserRoutingInstructions({browserFirst:false}),/Browser-first policy/);
 // The page records every mutation whose target is DSH's status element: the
@@ -90,7 +93,7 @@ try {
  const direct=(await lane.send(tab,'Page.captureScreenshot',{format:'png'})).data;
  check('pointer is drawn on the page',blueAt(direct,s.x,s.y,ratio));
  const shot=await lane.run('screenshot',{browserTab:tab.key,maxWidth:4000},{});
- check('screenshots leave the pointer out',!blueAt(shot.screenshot.base64,s.x,s.y,ratio)&&!(await state(tab)).capture);
+ check('screenshots leave the pointer out',!blueAt(shot.screenshot.base64,s.x,s.y,shot.screenshot.cssScale??1)&&!(await state(tab)).capture);
  check('page observers never see the indicator',(await main(tab,'__seen.join(",")'))==='');
  const pendingRequest={};
  const waiting=lane.run('wait_for',{browserTab:tab.key,query:'never-present',condition:'text',appear:true,timeoutMs:4000,intervalMs:100},pendingRequest).catch(e=>e);

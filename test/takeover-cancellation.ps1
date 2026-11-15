@@ -1,4 +1,8 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿# Input lease behavior is exercised across real processes in input-mutex.mjs.
+function Enter-DesktopInput { return $null }
+function Exit-DesktopInput { param($Lease) }
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/windows-uia.ps1'),[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Backend source did not parse'}
@@ -16,12 +20,13 @@ public static class WindowsComputerUseNative {
  public static void SetStopListener(int id){}
  public static bool SetCursorPos(int x,int y){Moves++;if(CancelAfterMove>0&&Moves>=CancelAfterMove)Cancelled=true;return true;}
  public static uint SendMouseEvent(int x,int y,uint flags,int value){if(flags==2)Presses++;if(flags==4)Releases++;return 1;}
+ public static uint SendClick(int x,int y,uint down,uint up){ThrowIfCancelled();Moves++;Presses++;Releases++;return 3;}
  public static bool PostMessageW(IntPtr hwnd,uint message,IntPtr wparam,IntPtr lparam){Characters++;if(Characters==2)Cancelled=true;return true;}
 }
 public class FixtureElement {public static int FocusCalls;public void SetFocus(){FocusCalls++;}}
 '@
 $env:WCU_CANCEL_EVENT='fixture-cancellation';$env:WCU_FAILSAFE='0'
-function Start-Sleep {param([int]$Milliseconds) if($script:CancelDuringPress -and $Milliseconds -eq 30){[WindowsComputerUseNative]::Cancelled=$true}}
+function Start-Sleep {param([int]$Milliseconds) if($script:CancelDuringPress -and $Milliseconds -eq 60){[WindowsComputerUseNative]::Cancelled=$true}}
 function Has-WindowTarget {param($InputObject) return $false}
 function Assert-TargetIsForeground {param($InputObject)}
 function Activate-TargetIfRequested {param($InputObject)}
@@ -30,6 +35,8 @@ function Resolve-Element {param($ElementId,$InputObject) [WindowsComputerUseNati
 # (less-takeover-contract.ps1); here it is a no-op.
 function Get-RootWindowAt {param([int]$X,[int]$Y) return [int64]0}
 function Get-ElementWindow {param($Element) return [int64]0}
+function Assert-NativeInputTarget {param($Hwnd)}
+function Assert-InputProcess {param($TargetProcessId)}
 function Start-Input {param($InputObject,[long]$Hwnd,[switch]$NoActivate) return @{moved=$null}}
 function Complete-Input {param($State,$Result)}
 function Expect-Cancel {param([scriptblock]$Body) $caught=$false;try{& $Body}catch{$caught=$true;if($_.Exception.Message -notmatch 'COMPUTER_USE_STOPPED_BY_USER'){throw}};if(-not $caught){throw 'Expected cooperative cancellation'}}

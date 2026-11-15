@@ -9,14 +9,15 @@ await mkdir(path.join(root,'mcp'));await mkdir(path.join(root,'scripts'));
 let server=await readFile(new URL('../mcp/server.mjs',import.meta.url),'utf8');
 server=server.replace('function runBackend(action, args = {}, timeoutMs = 30000, request) {','function runBackend(action, args = {}, timeoutMs = 30000, request) { timeoutMs = Math.min(timeoutMs, 1400);');
 await writeFile(path.join(root,'mcp/server.mjs'),server);
-for(const file of ['settings.mjs','takeover.mjs','overlay-strings.mjs','browser.mjs'])await writeFile(path.join(root,'mcp',file),await readFile(new URL('../mcp/'+file,import.meta.url)));
+for(const file of ['settings-schema.mjs','settings.mjs','takeover.mjs','overlay-strings.mjs','browser.mjs','browser-frames.mjs','browser-pipe.mjs','policy.mjs','page-values.mjs','catalog.mjs','protocol.mjs'])await writeFile(path.join(root,'mcp',file),await readFile(new URL('../mcp/'+file,import.meta.url)));
 const marker=path.join(root,'started.txt').replaceAll("'","''");
 await writeFile(path.join(root,'scripts/windows-uia.ps1'),`param([switch]$Persistent)
 [IO.File]::AppendAllText('${marker}', 'worker' + [Environment]::NewLine)
-while($null -ne ($line=[Console]::In.ReadLine())) {
+[Console]::WriteLine((@{type='ready';protocol=1;pid=$PID}|ConvertTo-Json -Compress));while($null -ne ($line=[Console]::In.ReadLine())) {
   $r=$line | ConvertFrom-Json
   $result=@{id=$r.id;ok=$true;action=$r.action;args=$r.args}
   if($r.action -eq 'wait'){Start-Sleep -Milliseconds $r.args.milliseconds}
+  if($r.action -eq 'keypress'){$result.deliveredTo=@{title='Fixture';via=$(if($r.args.keys[0] -eq 'f2'){'front window'}else{'window target'})}}
   if($r.action -eq 'tree' -or $r.action -eq 'snapshot'){$result.nodeCount=6;$result.tree=@{name='Fixture'}}
   if($r.action -eq 'find') {
     if($r.args.query -eq 'stall'){Start-Sleep -Seconds 10}
@@ -52,7 +53,10 @@ try{
   const timed=await call('find',{query:'stall',treeTimeoutMs:100});assert.equal(timed.isError,true);assert.equal(data(timed).truncationReason,'backendTimeout');assert.equal(timed.content[1].type,'image');
   assert.equal((await call('wait',{milliseconds:1})).isError,undefined);
   const sent=data(await call('click',{x:1,y:2}));assert.equal(sent.verification,'sent');
-  console.log('PASS schema/default validation before worker launch, queued deadlines, OCR hit/miss provenance, explicit opt-out, compact JSON, timed-out UIA screenshot and worker recovery');
+  // Issue #82: keys that went to whatever window was in front are not "sent".
+  const guessed=data(await call('keypress',{keys:['f2']}));assert.equal(guessed.verification,'unconfirmed');assert.match(guessed.verificationNote,/window in front/);assert.equal(guessed.deliveredTo.via,'front window');
+  const aimed=data(await call('keypress',{keys:['f3'],nativeWindowHandle:42}));assert.equal(aimed.verification,'sent');assert.equal(aimed.deliveredTo.via,'window target');
+  console.log('PASS schema/default validation before worker launch, queued deadlines, OCR hit/miss provenance, explicit opt-out, compact JSON, timed-out UIA screenshot, worker recovery and key delivery verification');
 }finally{
   client.child.stdin.end();const timer=setTimeout(()=>client.child.kill(),5000);
   if(client.child.exitCode===null)await new Promise(resolve=>client.child.once('exit',resolve));clearTimeout(timer);

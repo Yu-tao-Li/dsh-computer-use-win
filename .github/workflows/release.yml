@@ -1,0 +1,35 @@
+name: Release check
+
+# Verifies a release tag only. Publishing stays a maintainer step (PUBLISH.md):
+# a tag workflow that also ran `npm publish` would fail without an npm token
+# secret, or race the maintainer's own publish of the same version.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify tag matches package version
+        shell: pwsh
+        run: |
+          $pkg = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          if ($pkg -ne $tag) { throw "Tag $tag does not match package.json version $pkg" }
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify build and pack hygiene
+        run: npm run check:pack

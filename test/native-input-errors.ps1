@@ -17,6 +17,7 @@ foreach ($name in $names) {
 }
 Add-Type -TypeDefinition @'
 public static class WindowsComputerUseNative {
+ public static bool SendKeyChord(string[] keys){WcuTestSendKeys.SendWait("^"+keys[1]);return true;}
   public struct POINT { public int x, y; }
   public static bool MoveOk = true, CursorOk = true;
   public static uint PressResult = 1, ReleaseResult = 1;
@@ -24,8 +25,16 @@ public static class WindowsComputerUseNative {
   public const int MOUSEEVENTF_LEFTDOWN = 2, MOUSEEVENTF_LEFTUP = 4;
   public const int MOUSEEVENTF_RIGHTDOWN = 8, MOUSEEVENTF_RIGHTUP = 16;
   public const int MOUSEEVENTF_MIDDLEDOWN = 32, MOUSEEVENTF_MIDDLEUP = 64;
+  public static System.IntPtr GetForegroundWindow() { return System.IntPtr.Zero; }
+  public static System.IntPtr FocusedWindow(System.IntPtr hwnd) { return System.IntPtr.Zero; }
   public static bool SetCursorPos(int x, int y) { MoveCalls++; return MoveOk; }
   public static bool GetCursorPos(ref POINT point) { return CursorOk; }
+  public static uint SendClick(int x, int y, uint down, uint up) {
+    if (!MoveOk) return 0;
+    if (PressResult == 0) { Calls++; return 1; }
+    Calls += ReleaseResult == 0 ? 3 : 2;
+    return ReleaseResult == 0 ? 2U : 3U;
+  }
   public static uint SendMouseEvent(int x, int y, uint flags, int data) {
     Calls++; return flags == MOUSEEVENTF_LEFTDOWN ? PressResult : ReleaseResult;
   }
@@ -48,6 +57,15 @@ public static class WindowsComputerUseNative {
 '@
 $script:FailDelay = $false
 function Test-Failsafe { return $true }
+function Begin-ClipboardLease {
+  param($Text,$RestoreClipboard)
+  [WcuTestClipboard]::LastText=$Text
+  $lease=[pscustomobject]@{IsCompleted=$true;Restored=$true;RestorationFailed=$false;NativePasteCompleted=$false}
+  $lease|Add-Member ScriptMethod Complete {param($Timeout) return $true}
+  $lease|Add-Member ScriptMethod MarkPasteSent {param($Hwnd)}; $lease|Add-Member ScriptMethod Dispose {}
+  $lease|Add-Member ScriptMethod TryPasteNative {param($Hwnd) if($script:NativePasteFails){throw 'NATIVE_PASTE_TIMEOUT'};$this.NativePasteCompleted=[bool]$script:UseNativePaste;return $this.NativePasteCompleted}
+  return $lease
+}
 function Start-Sleep { param([int]$Milliseconds) if ($script:FailDelay -and $Milliseconds -eq 30) { throw 'SIMULATED_DELAY_FAILURE' } }
 function Assert-Error { param([scriptblock]$Body, [string]$Pattern)
   $caught = $false
@@ -62,6 +80,14 @@ if ([WindowsComputerUseNative]::Calls -ne 0) { throw 'Mouse input was sent after
 Type-Text 'test'
 if ([WindowsComputerUseNative]::MoveCalls -ne 0) { throw 'Typing must not reposition the shared pointer.' }
 if ([WcuTestClipboard]::LastText -ne 'test' -or [WcuTestSendKeys]::LastKeys -ne '^v') { throw 'Expected simulated paste without cursor movement.' }
+$script:UseNativePaste=$true
+[WcuTestSendKeys]::LastKeys='no keyboard input'
+Type-Text 'native test'
+if ([WcuTestSendKeys]::LastKeys -ne 'no keyboard input' -or -not $script:LastPasteInfo.clipboardPasteCompleted) { throw 'Native paste must complete without sending Ctrl+V again.' }
+$script:NativePasteFails=$true
+Assert-Error {Type-Text 'native timeout'} 'NATIVE_PASTE_TIMEOUT'
+if ([WcuTestSendKeys]::LastKeys -ne 'no keyboard input') { throw 'An ambiguous native timeout must never replay the paste through the keyboard.' }
+$script:UseNativePaste=$false;$script:NativePasteFails=$false
 [WindowsComputerUseNative]::MoveOk = $true
 [WindowsComputerUseNative]::CursorOk = $false
 Assert-Error { Type-Text 'test' } 'COMPUTER_USE_INPUT_UNAVAILABLE'
@@ -73,11 +99,6 @@ Assert-Error { Click-At 1 2 } 'Windows rejected mouse input'
 Assert-Error { Click-At 1 2 } 'Windows rejected mouse release'
 [WindowsComputerUseNative]::ReleaseResult = 1
 [WindowsComputerUseNative]::Calls = 0
-$script:FailDelay = $true
-Assert-Error { Click-At 1 2 } 'SIMULATED_DELAY_FAILURE'
-if ([WindowsComputerUseNative]::Calls -ne 2) { throw 'Mouse release was not attempted during exception cleanup.' }
-$script:FailDelay = $false
-[WindowsComputerUseNative]::Calls = 0
 Click-At 1 2
 if ([WindowsComputerUseNative]::Calls -ne 2) { throw 'Expected one successful press and release.' }
-Write-Output 'PASS positioning, input-desktop, press/release failures and finally cleanup; fake native API only'
+Write-Output 'PASS atomic click input/release failures without replay and clipboard input-desktop checks; fake native API only'

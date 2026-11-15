@@ -17,9 +17,9 @@ const show=async()=>{await control.command('progress',{enabled:true,settings,pro
 const layout=async(width,height)=>{await control.command('test_progress_layout',{x:80,y:80,width,height});await pause(35);return control.command('status');};
 const capture=async(name,screen=false)=>(await control.command('test_render_progress',{path:path.join(root,name),screen})).capture;
 try{
- const initial=await control.command('status');
  let status=await show();
- assert.equal(status.foreground,initial.foreground,'Opening the reading pane must not activate');
+ assert.ok(status.progressWindow>0);
+ assert.notEqual(status.foreground,status.progressWindow,'Opening the reading pane must not activate it');
  assert.equal(status.armed,false);assert.equal(status.progressReading.scrollbar,true);
  assert.equal(status.progressReading.resizeRedraw,true);
  assert.equal(status.progressBounds.width,360);assert.equal(status.progressBounds.height,240);
@@ -139,6 +139,20 @@ try{
  data={step:3,status:'waiting',tool:'',reasoning:'',reply:''};status=await show();
  assert.equal(status.progressReading.text,'Waiting for DSH…');
  assert.ok(!/[一-鿿]/.test(status.progressContent),'No Chinese is left in the English overlay');
+ // PR #81: Cyrillic reaches the real .NET reader/renderer on a live switch.
+ control.locale='ru';
+ const russian={...english,steps:[{step:1,actions:[{label:'Открыть новую вкладку',state:'done'}],reasoning:'Страница открыта.',reply:''},
+   {step:3,actions:[],reasoning:'Проверка завершена.',reply:'Готово. 😀'}]};
+ data=russian;status=await show();
+ // Russian plural forms: 1 шаг, 2–4 шага, 5+ шагов.
+ assert.ok(status.progressContent.startsWith('DSH · готово · 3 шага · 38 с'),status.progressContent.slice(0,90));
+ assert.equal(status.progressReading.text,'Шаг 1 · Открыть новую вкладку\nСтраница открыта.\nШаг 3\nПроверка завершена.\nОтвет\nГотово. 😀');
+ assert.notEqual(status.foreground,status.progressWindow,'Changing to Russian must not activate the overlay');
+ await capture('history-russian.png');
+ data={...russian,displayMode:'summary',summaries:[{step:3,text:'Результат подтверждён.',final:true}]};status=await show();
+ assert.equal(status.progressReading.text,'Сводка ИИ · результат\nРезультат подтверждён.');
+ data={step:3,status:'waiting',tool:'',reasoning:'',reply:''};status=await show();
+ assert.equal(status.progressReading.text,'Жду вывода DSH…');
  control.locale='zh';
  // The lock button. Resting the user's own pointer on the padlock unlocks the
  // window for adjusting; DSH's pointer never does (injected input, or a cursor
@@ -149,7 +163,7 @@ try{
  status=await show();assert.equal(status.progressClickThrough,true);
  assert.equal(status.pointerWatchActive,true,'A locked overlay installs the physical pointer watch');
  const lockCenter=value=>{const zone=value.progressHover.lockZone;return [value.progressBounds.x+zone.x+(zone.width>>1),value.progressBounds.y+zone.y+(zone.height>>1)];};
- const point=(x,y,hookFlags)=>control.command('test_progress_pointer',hookFlags===undefined?{x,y}:{x,y,hookFlags});
+ const point=(x,y,hookFlags,extra)=>control.command('test_progress_pointer',{x,y,...(hookFlags===undefined?{}:{hookFlags}),...(extra===undefined?{}:{extra})});
  let [bx,by]=lockCenter(status);
  await point(bx-150,by+150,0);await pause(80);
  await point(bx,by,1);await pause(700);
@@ -195,6 +209,31 @@ try{
  status=await control.command('status');assert.equal(status.progressVisible,true,'The overlay does not vanish under the pointer');
  await point(bx+900,by+600);await pause(2000);
  status=await control.command('status');assert.equal(status.progressVisible,false,'It goes once the pointer has left');
+ // Remote-desktop software sends injected, unmarked mouse movement. It is
+ // user input too; only the plugin's own marked movement must be ignored.
+ status=await show();
+ await control.command('begin',{indicatorEnabled:false,cursorIndicatorEnabled:false});
+ for(const flags of [1,3]){
+   [bx,by]=lockCenter(status);
+   await point(bx-150,by+150,flags,0);
+   await point(bx,by,flags,0);await pause(600);
+   status=await control.command('status');
+   assert.equal(status.armed,true);
+   assert.equal(status.progressLocked,false,'Remote mouse must unlock during a running operation (flags='+flags+')');
+   assert.equal(status.progressClickThrough,false);
+   status=await show();
+   assert.equal(status.progressHover.unlocked,true,'Streaming updates must preserve remote hover unlock');
+   await control.command('test_progress_lock_click');
+   status=await control.command('status');
+ }
+ // A recent user move at the same point must not turn an agent move into
+ // user input; the marked record invalidates that earlier pointer position.
+ [bx,by]=lockCenter(status);
+ await point(bx-150,by+150,0);await point(bx,by,0);
+ await point(bx,by,1);await pause(600);
+ status=await control.command('status');
+ assert.equal(status.progressLocked,true,'Agent movement must invalidate an earlier user hover at the same point');
+ await control.command('resume');
  // A window unlocked in the settings has no pointer watch; its padlock locks and saves.
  settings={...settings,progressOverlayLocked:false};status=await show();
  assert.equal(status.progressClickThrough,false);await pause(80);
@@ -215,12 +254,15 @@ try{
  status=await control.command('status');assert.equal(status.progressLocked,true,'A real run after the preview is locked again');
  assert.equal(status.progressClickThrough,true);
  await control.command('progress',{enabled:true,preview:true,settings,progress:data});
+ const layoutBeforeClose=await readFile(control.layoutFile,'utf8').catch(()=>'');
  await control.command('test_progress_close_click');
  status=await control.command('status');assert.equal(status.progressVisible,false);
- assert.equal(JSON.parse(await readFile(control.layoutFile,'utf8')).patch.progressOverlayEnabled,false);
+ assert.equal(await readFile(control.layoutFile,'utf8').catch(()=>''),layoutBeforeClose,'Closing the preview must not disable progressOverlayEnabled');
+ await control.command('progress',{enabled:true,settings,progress:{...data,startedAt:Date.now()+1000}});
+ status=await control.command('status');assert.equal(status.progressVisible,true,'A real turn shows the overlay normally after closing preview');
  console.log(JSON.stringify({passed:true,root,scrollbar:true,wheel:true,preservesReadingPosition:true,followsOnlyAtBottom:true,
    captionOnlyDrag:true,edgeResize:true,legacyTrailPixels:legacy.strayHeaderPixels,fixedTrailPixels:fixed.strayHeaderPixels,
    stressResizeChanges:76,minMaxSize:true,lockClickThrough:true,wholeLines:true,stepHistory:true,finishedHeader:true,compactSpacing:true,noRecentLabels:true,presetSurvivesUnlock:true,previewUnlockNotSaved:true,
-   hoverUnlock:true,injectedHoverIgnored:true,movedCursorIgnored:true,dwellBeforeUnlock:true,relocksWhenAway:true,lockClickHolds:true,hoverUnlockNotSaved:true,echoNoSnapBack:true,closeWaitsForAdjusting:true,lockButtonSavesWhenUnlocked:true,
+   hoverUnlock:true,ownInjectedHoverIgnored:true,remoteHoverUnlock:true,runningRemoteHoverUnlock:true,ownMoveInvalidatesUserHover:true,movedCursorIgnored:true,dwellBeforeUnlock:true,relocksWhenAway:true,lockClickHolds:true,hoverUnlockNotSaved:true,echoNoSnapBack:true,closeWaitsForAdjusting:true,lockButtonSavesWhenUnlocked:true,
    nativeCloseClick:true,perPixelAlpha:true,opaqueText:true,translucentScrollbar:true,thumbDragging:true,dpiScales:[1,1.25,1.5,2],physicalInputSent:false,paidApiCalls:0}));
 }finally{await control.close();}

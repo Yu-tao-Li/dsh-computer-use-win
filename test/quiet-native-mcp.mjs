@@ -19,12 +19,21 @@ try{
  const edit=await find('native needle');assert.equal((await call('set_value',{...target,elementId:edit.id,value:'quiet production'})).method,'EM_REPLACESEL');
  for(let i=0;i<40&&(state.clicks!==1||state.checked!==true||state.text!=='quiet production');i++)await delay(50);
  assert.equal(state.clicks,1);assert.equal(state.checked,true);assert.equal(state.text,'quiet production');
+ fs.writeFileSync(path.join(root,'native-command.json'),JSON.stringify({id:2,action:'focus-edit'}));
+ for(let i=0;i<40&&!state.focused;i++)await delay(50);assert.equal(state.focused,true);
+ // The fixture focuses its own edit. On a desktop without recent user input
+ // Windows lets that call activate the fixture (see uia-native-smoke), which
+ // is the fixture's doing, not the plugin's; background typing is checked
+ // either way.
+ await call('type_text',{...target,method:'background',text:' '});
+ for(let i=0;i<40&&state.text!=='quiet production ';i++)await delay(50);
+ assert.equal(state.text,'quiet production ','Whitespace-only input must reach the owned edit');
  const helpers=Number(execFileSync('powershell.exe',['-NoProfile','-Command',`@(Get-CimInstance Win32_Process -Filter "ParentProcessId=${c.child.pid}" | Where-Object { $_.CommandLine -like '*windows-takeover.ps1*' }).Count`],{encoding:'utf8',windowsHide:true}).trim());
  assert.equal(helpers,0,'background calls must not start a global Esc listener');
  const requestId=c.next,pending=c.call('windows_computer_use_wait',{milliseconds:10000});await delay(200);c.child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/cancelled',params:{requestId}})+'\n');
  const stopped=await pending;assert.equal(stopped.isError,true);assert.match(stopped.content[0].text,/CANCELLED|STOPPED/);
  await call('wait',{milliseconds:1});
- console.log(JSON.stringify({passed:true,productionStopWiring:true,backgroundEffects:3,stopListenerProcesses:helpers,cancellationPreserved:true,root}));
+ console.log(JSON.stringify({passed:true,productionStopWiring:true,backgroundEffects:4,whitespaceObserved:true,stopListenerProcesses:helpers,cancellationPreserved:true,root}));
 }finally{
  fs.writeFileSync(path.join(root,'results.json'),JSON.stringify({state,results,stderr},null,2));
  fs.writeFileSync(path.join(root,'native-command.json'),JSON.stringify({id:100,action:'quit'}));c.child.stdin.end();

@@ -1,5 +1,5 @@
 import {atomicJson} from './takeover.mjs';
-import {isQuietCall} from './browser.mjs';
+import {isQuietCall} from './catalog.mjs';
 import {createProgressSummarizer} from './progress-summary.mjs';
 import {formatText,overlayLocale,overlayStrings,systemLocale} from './overlay-strings.mjs';
 
@@ -21,7 +21,20 @@ const callArguments=value=>{
 };
 const shortName=name=>String(name??'').replace(/^(?:mcp__wincu__)?windows_computer_use_/,'');
 const cleanText=text=>text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'');
-const tail=(text,limit)=>text.length>limit?'…'+text.slice(-(limit-1)):text;
+// Keep UTF-16 limits while moving a cut away from a surrogate pair boundary.
+const high=code=>code>=0xD800&&code<=0xDBFF;
+const low=code=>code>=0xDC00&&code<=0xDFFF;
+const headText=(text,limit)=>{
+  let end=Math.min(text.length,limit);
+  if(end<text.length&&high(text.charCodeAt(end-1))&&low(text.charCodeAt(end)))end--;
+  return text.slice(0,end);
+};
+const lastText=(text,limit)=>{
+  let start=Math.max(0,text.length-limit);
+  if(start>0&&low(text.charCodeAt(start))&&high(text.charCodeAt(start-1)))start++;
+  return text.slice(start);
+};
+const tail=(text,limit)=>text.length>limit?'…'+lastText(text,limit-1):text;
 
 // Plain-language names for what a call does, in the overlay's language. They
 // come from the tool name and the shape of the call (page or window, which
@@ -55,8 +68,8 @@ export function actionLabel(name,args={},locale='zh'){
 export function readableAbort(exec,result){
   if(!result?.isError||!exec.signal?.aborted||result.error?.message!=='[object Object]')return result;
   const message=exec.signal.reason?.kind==='user'
-    ?'COMPUTER_USE_STOPPED_IN_DSH: The user stopped this call with the DSH stop button. Do not retry it in this turn. A new user turn, including a request to continue, can use the desktop again.'
-    :'COMPUTER_USE_CANCELLED: DSH cancelled this call before it finished.';
+    ?'COMPUTER_USE_STOPPED_IN_DSH: Stopped with the DSH stop button. Do not retry in this turn; a new user turn or continue request can use the desktop again.'
+    :'COMPUTER_USE_CANCELLED: DSH cancelled this call before completion.';
   return {...result,content:[{type:'text',text:'Error: '+message}],error:{...result.error,message}};
 }
 
@@ -95,7 +108,8 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
   const replyStarts=new WeakMap();
   const summaries=createProgressSummarizer(ctx,{...summaryOptions,getSettings,getLocale:locale,onChange:()=>{if(!closed)publish();}});
   const expireIdle=()=>{if(owner&&owner.pending===0&&Date.now()-owner.lastActive>=idleMs)owner=undefined;};
-  const publish=()=>{
+  let lastPublishWarning=0;
+  const publish=()=>{try{
     needsPublish=true;expireIdle();
     if(lingering&&(owner||Date.now()>=lingering.until))lingering=undefined;
     const shown=owner??lingering?.owner;
@@ -105,6 +119,12 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     atomicJson(file,{active:!!owner,sessionId:owner?.id??null,turn:owner?.turn??null,indicator:!!owner?.desktop,expiresAt:owner?Date.now()+5000:0,locale:locale(),
       ...(shown&&getSettings().progressOverlayEnabled!==false?{progress:shown.progress}:{}),...(!owner&&lingering?{lingerUntil:lingering.until}:{})});
     needsPublish=false;
+  }catch(error){
+    needsPublish=true;
+    // Display diagnostics must never turn an already completed action into a
+    // failed tool result or prevent pending counters from being released.
+    if (!closed && Date.now()-lastPublishWarning>10000) {lastPublishWarning=Date.now();try{ctx.logger.warn?.('Progress display unavailable: %s', error.message);}catch{}}
+  }
   };
   publish();
   const startOwner=(session,turn)=>{
@@ -113,7 +133,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     if(seed?.turn===turn&&seed.step){
       progress.step=seed.step;const entry=stepEntry(progress,seed.step);
       entry.reasoning=progress.reasoning=seed.reasoning;entry.reply=progress.reply=seed.reply;
-      if(seed.reasoning){progress.intent=seed.reasoning.slice(0,INTENT_TEXT);progress.intentStep=seed.step;}
+      if(seed.reasoning){progress.intent=headText(seed.reasoning,INTENT_TEXT);progress.intentStep=seed.step;}
     }
     return progress;
   };
@@ -126,10 +146,11 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
       const label=owner&&session?.id===owner.id&&turn===owner.turn?actionLabel(exec.name,callArguments(exec.arguments),locale()):'';
       if(!label)return next();
       const current=owner,progress=current.progress,action=addAction(progress,label);
-      progress.status='acting';needsPublish=true;
+      current.otherPending=(current.otherPending??0)+1;
+      progress.status='acting';needsPublish=true;if(getSettings().progressOverlayEnabled!==false)publish();
       try{const result=await next();action.state=result?.isError?'error':'done';return result;}
       catch(error){action.state='error';throw error;}
-      finally{current.lastActive=Date.now();if(current.pending===0&&progress.action===label){progress.status='waiting';progress.action='';}needsPublish=true;}
+      finally{current.otherPending=Math.max(0,(current.otherPending??1)-1);current.lastActive=Date.now();if(current.pending===0&&current.otherPending===0&&progress.action===label){progress.status='waiting';progress.action='';}if(owner===current&&getSettings().progressOverlayEnabled!==false)publish();needsPublish=true;}
     }
     if(exec.signal?.aborted)return readableAbort(exec,await next());
     if(session&&turn!==undefined){
@@ -147,7 +168,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
       current.pending++;current.progress.status='acting';current.progress.tool=tool;publish();
       try{const result=readableAbort(exec,await next());action.state=result?.isError?'error':'done';current.progress.lastAction={tool,status:result?.isError?'error':'returned'};return result;}
       catch(error){action.state='error';current.progress.lastAction={tool,status:'error'};throw error;}
-      finally{current.pending--;current.lastActive=Date.now();if(current.pending===0){current.progress.status='waiting';current.progress.tool='';current.progress.action='';}if(owner===current)publish();}
+      finally{current.pending--;current.lastActive=Date.now();if(current.pending===0&&!current.otherPending){current.progress.status='waiting';current.progress.tool='';current.progress.action='';}if(owner===current)publish();}
     }
     return readableAbort(exec,await next());
   },{global:true});
@@ -160,7 +181,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
         progress.status=kind==='aborted'?'stopped':kind==='error'?'failed':'done';
         progress.endedAt=Date.now();progress.tool='';progress.action='';
         const last=progress.steps.at(-1),start=last&&replyStarts.get(last);
-        if(start&&start.length>CURRENT_TEXT){last.reply=start.text.slice(0,CURRENT_TEXT-1)+'…';if(progress.step===last.step)progress.reply=last.reply;}
+        if(start&&start.length>CURRENT_TEXT){last.reply=headText(start.text,CURRENT_TEXT-1)+'…';if(progress.step===last.step)progress.reply=last.reply;}
         lingering=lingerMs>0?{owner,until:Date.now()+lingerMs}:undefined;owner=undefined;publish();
       }
       return;
@@ -226,7 +247,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     if(!text||turn===undefined)return;
     if(!owner||owner.id!==sessionId||owner.turn!==turn){
       const seed=early.get(sessionId);
-      if(seed?.turn===turn&&(step===undefined||seed.step===step))seed[field]=(seed[field]+text).slice(-CURRENT_TEXT);
+      if(seed?.turn===turn&&(step===undefined||seed.step===step))seed[field]=lastText(seed[field]+text,CURRENT_TEXT);
       return;
     }
     const progress=owner.progress;
@@ -235,14 +256,17 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     if(field==='reasoning'){
       const at=step??progress.step;
       if(progress.intentStep===undefined)progress.intentStep=at;
-      if(progress.intentStep===at&&(progress.intent??'').length<INTENT_TEXT)progress.intent=((progress.intent??'')+text).slice(0,INTENT_TEXT);
+      if(progress.intentStep===at&&(progress.intent??'').length<INTENT_TEXT)progress.intent=headText((progress.intent??'')+text,INTENT_TEXT);
     }
     if(step!==undefined&&step!==progress.step){progress.step=step;progress.reasoning='';progress.reply='';}
     const entry=stepEntry(progress,progress.step||1);
-    progress[field]=(progress[field]+text).slice(-CURRENT_TEXT);entry[field]=(entry[field]+text).slice(-CURRENT_TEXT);
+    const prev = progress[field];
+    const next = lastText(prev + text, CURRENT_TEXT);
+    progress[field] = next;
+    entry[field] = entry[field] === prev ? next : lastText(entry[field] + text, CURRENT_TEXT);
     if(field==='reply'){
       const start=replyStarts.get(entry)??{text:'',length:0};
-      if(start.text.length<CURRENT_TEXT)start.text=(start.text+text).slice(0,CURRENT_TEXT);
+      if(start.text.length<CURRENT_TEXT)start.text=headText(start.text+text,CURRENT_TEXT);
       start.length+=text.length;replyStarts.set(entry,start);
     }
     progress.status=field==='reasoning'?'thinking':'replying';

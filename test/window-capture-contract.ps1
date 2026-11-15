@@ -12,14 +12,19 @@ public static class WindowsComputerUseNative {
   public static long Foreground = 42;
   public static long[] Order = new long[] {42};
   public static Dictionary<long,RECT> Bounds = new Dictionary<long,RECT>();
+  public static Dictionary<long,long> Owners = new Dictionary<long,long>();
   public static HashSet<long> Hidden = new HashSet<long>();
   public static HashSet<long> Minimized = new HashSet<long>();
   public static int PrintCalls = 0, FrameShift = 0;
   public static IntPtr GetForegroundWindow() { return new IntPtr(Foreground); }
+  public static IntPtr GetWindow(IntPtr h,uint command) { long owner;return new IntPtr(Owners.TryGetValue(h.ToInt64(),out owner)?owner:0); }
   public static IntPtr[] TopLevelWindows() { return Array.ConvertAll(Order, h => new IntPtr(h)); }
   public static bool IsWindowVisible(IntPtr h) { return !Hidden.Contains(h.ToInt64()); }
   public static bool IsIconic(IntPtr h) { return Minimized.Contains(h.ToInt64()); }
-  public static bool GetWindowRect(IntPtr h, out RECT r) { return Bounds.TryGetValue(h.ToInt64(), out r); }
+  public static bool GetWindowRect(IntPtr h, out RECT r) {
+    if(h.ToInt64()==42){r=new RECT{left=93+FrameShift,top=91,right=507+FrameShift,bottom=409};return true;}
+    return Bounds.TryGetValue(h.ToInt64(), out r);
+  }
   public static bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags) { PrintCalls++; return false; }
   public static int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT r, int size) {
     r = new RECT {left=100+FrameShift,top=100,right=500+FrameShift,bottom=400}; return 0;
@@ -32,6 +37,8 @@ public static class WindowsComputerUseNative {
 $def = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-WindowScreenCapture' }, $true)
 if ($null -eq $def) { throw 'Missing screen capture guard' }
 . ([scriptblock]::Create($def.Extent.Text))
+$ownerDef=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-InputWindow'},$true)
+. ([scriptblock]::Create($ownerDef.Extent.Text))
 $bounds = @{x=100;y=100;width=400;height=300}
 $virtual = @{Left=0;Top=0;Right=1000;Bottom=800}
 function Check([bool]$Expected, [string]$Label, $TargetBounds=$bounds) {
@@ -47,7 +54,18 @@ Check $false 'Empty target' @{x=100;y=100;width=0;height=300}
 Check $false 'Unknown target geometry' $null
 [WindowsComputerUseNative]::Order = @(99,42)
 [WindowsComputerUseNative]::Overlay(120,120,300,250)
-Check $false 'Overlapping window above target, including an owned popup'
+Check $false 'Unowned overlapping window, even from the same process'
+[WindowsComputerUseNative]::Owners[99]=42
+[WindowsComputerUseNative]::Foreground=99
+Check $true 'Owned dialog remains visible in the target crop'
+[WindowsComputerUseNative]::Owners[99]=77
+[WindowsComputerUseNative]::Owners[77]=42
+Check $true 'Nested owned dialog remains visible'
+[WindowsComputerUseNative]::Owners.Remove(99)
+[WindowsComputerUseNative]::Foreground=77
+Check $false 'Foreign overlay above an owned foreground dialog still blocks the crop'
+[WindowsComputerUseNative]::Owners.Clear()
+[WindowsComputerUseNative]::Foreground=42
 [WindowsComputerUseNative]::Order = @(42,99)
 Check $true 'Window below target does not occlude it'
 [WindowsComputerUseNative]::Order = @(99,42)
@@ -109,7 +127,6 @@ foreach ($name in @('Get-Prop','Invoke-Safe','Get-ExtendedFrameBounds','Try-Prin
   $body = $body.Replace('[System.Windows.Forms.SystemInformation]::VirtualScreen', '([Drawing.Rectangle]::new(0,0,1000,800))')
   . ([scriptblock]::Create($body))
 }
-function Invoke-WgcCapture { throw 'Deterministic WGC unavailable fixture' }
 if ($env:TEMP -notmatch 'wcu-isolated-tests-') { throw 'Run bitmap routing through test/run-tests.mjs with an isolated TEMP directory' }
 $target = @{nativeWindowHandle=42}
 [WindowsComputerUseNative]::Foreground = 42
@@ -125,7 +142,7 @@ try {
 [WindowsComputerUseNative]::Foreground = 99
 $shot = Capture-Screenshot -WindowElement $target -MaxWidth 0
 if ($shot.method -ne 'screen-region' -or $shot.occludedPossible -ne $true -or
-    [WindowsComputerUseNative]::PrintCalls -ne 1) { throw 'Background PrintWindow failure plus unavailable WGC must reach flagged screen fallback' }
+    [WindowsComputerUseNative]::PrintCalls -ne 1) { throw 'Background PrintWindow failure must reach flagged screen fallback' }
 [WindowsComputerUseNative]::Foreground = 42
 [FixtureGraphics]::DuringCopy = { [WindowsComputerUseNative]::Foreground = 99 }
 $shot = Capture-Screenshot -WindowElement $target -MaxWidth 0
@@ -135,4 +152,21 @@ if ($shot.occludedPossible -ne $true -or [WindowsComputerUseNative]::PrintCalls 
 $shot = Capture-Screenshot -WindowElement $target -MaxWidth 0
 if ($shot.occludedPossible -ne $true -or [WindowsComputerUseNative]::PrintCalls -ne 3) { throw 'Geometry race must discard clear crop' }
 [FixtureGraphics]::DuringCopy = $null
+$script:WcuImageData = $false
+[WindowsComputerUseNative]::FrameShift = 0
+$fileOnly = Capture-Screenshot -WindowElement $target -MaxWidth 200
+if ($fileOnly.Contains('base64') -or $fileOnly.bytes -le 0 -or -not (Test-Path -LiteralPath $fileOnly.path)) { throw 'File delivery must save pixels without encoding image data' }
+$inline = Capture-Screenshot -WindowElement $target -MaxWidth 200 -IncludeImageData $true
+if (-not $inline.base64) { throw 'Inline delivery must retain image data' }
+$actual = [Convert]::ToBase64String([IO.File]::ReadAllBytes($fileOnly.path))
+if ($actual -ne $inline.base64) { throw 'File-only and inline modes must retain identical PNG pixels' }
+Write-Output 'PASS file-mode capture omits base64; explicit inline retains byte-identical PNG pixels'
+# Issue #82: a minimized window captures as its title strip, so say so.
+[void][WindowsComputerUseNative]::Minimized.Add(42)
+$shot = Capture-Screenshot -WindowElement $target -MaxWidth 0
+if ($shot.minimized -ne $true) { throw 'A capture of a minimized window must say minimized' }
+[void][WindowsComputerUseNative]::Minimized.Remove(42)
+$shot = Capture-Screenshot -WindowElement $target -MaxWidth 0
+if ($shot.Contains('minimized')) { throw 'A capture of a shown window carries no minimized flag' }
+Write-Output 'PASS a capture of a minimized window says minimized'
 Write-Output 'PASS actual capture routing: full lower-half pixels, scaling, failed PrintWindow/unavailable WGC fallback, focus and geometry races (synthetic pixels only)'

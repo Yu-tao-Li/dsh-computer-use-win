@@ -1,13 +1,27 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, statSync } from 'node:fs';
+import { mkdir, writeFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_SETTINGS, normalizeSettings } from './settings.mjs';
 import { helperStrings, indicatorText, overlayLocale, overlayStrings, systemLocale } from './overlay-strings.mjs';
 
-export const STOPPED = 'COMPUTER_USE_STOPPED_BY_USER: The user stopped this operation series with Esc or their custom shortcut. Do not retry desktop input in this turn. A new user turn, including a request to continue, can use the desktop automatically; no settings change is required.';
+export const STOPPED = 'COMPUTER_USE_STOPPED_BY_USER: Stopped by user (Esc or custom shortcut). Do not retry desktop input in this turn; the next user turn resumes automatically with no settings change needed.';
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function readControl(file) {
+  for (let attempt = 0; ; attempt++) {
+    try { return JSON.parse(readFileSync(file, 'utf8')); }
+    catch (error) {
+      if (!BUSY_CODES.has(error.code) || attempt >= 4) throw error;
+      await sleep(10 * (attempt + 1));
+    }
+  }
+}
 const helperScript = fileURLToPath(new URL('../scripts/windows-takeover.ps1', import.meta.url));
+export const DEFAULT_POWERSHELL=process.platform==='win32'
+  ? path.win32.join(process.env.SystemRoot||process.env.WINDIR||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe')
+  : 'powershell.exe';
 
 // WSL (#79): DSH and this server can run inside WSL and reach powershell.exe
 // through interop. A Windows process resolves a Linux path such as
@@ -71,22 +85,59 @@ function replaceFile(from, to) {
   }
 }
 
+const ensuredDirs = new Set();
+const wellFormedReplacer = (_key, item) => typeof item === 'string' ? item.toWellFormed() : item;
+const serializeJsonLine = value => JSON.stringify(value, wellFormedReplacer) + '\n';
+const statVersionKey = file => {
+  const st = statSync(file, { bigint: true, throwIfNoEntry: false });
+  return st ? `${st.mtimeNs}:${st.size}` : '';
+};
+
 export function atomicJson(file, value) {
   if (!file) return;
-  mkdirSync(path.dirname(file), { recursive: true });
+  const dir = path.dirname(file);
+  if (!ensuredDirs.has(dir)) { mkdirSync(dir, { recursive: true }); ensuredDirs.add(dir); }
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(temporary, JSON.stringify(value) + '\n', 'utf8');
+    // A stream may temporarily end with half an emoji. Keep its original
+    // buffer in memory, but send well-formed strings to the .NET JSON reader.
+    writeFileSync(temporary, serializeJsonLine(value), 'utf8');
     replaceFile(temporary, file);
   } catch (error) {
+    ensuredDirs.delete(dir);
     // This temporary file belongs to this failed write and has no further use.
     try { unlinkSync(temporary); } catch { }
     throw error;
   }
 }
 
+async function replaceFileAsync(from, to) {
+  for (let delay = 10, waited = 0; ; delay = Math.min(delay * 2, 100)) {
+    try { await rename(from, to); return; }
+    catch (error) {
+      if (!BUSY_CODES.has(error?.code) || waited >= 1000) throw error;
+      await sleep(delay); waited += delay;
+    }
+  }
+}
+
+export async function atomicJsonAsync(file, value) {
+  if (!file) return;
+  const dir = path.dirname(file);
+  if (!ensuredDirs.has(dir)) { await mkdir(dir, { recursive: true }); ensuredDirs.add(dir); }
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, serializeJsonLine(value), 'utf8');
+    await replaceFileAsync(temporary, file);
+  } catch (error) {
+    ensuredDirs.delete(dir);
+    try { await unlink(temporary); } catch { }
+    throw error;
+  }
+}
+
 export class TakeoverControl {
-  constructor({ powershell = 'powershell.exe', onStop = () => {}, configFile = process.env.WCU_CONFIG_FILE,
+  constructor({ powershell = DEFAULT_POWERSHELL, onStop = () => {}, configFile = process.env.WCU_CONFIG_FILE,
     stateFile = process.env.WCU_STATE_FILE, activityFile=process.env.WCU_ACTIVITY_FILE,testMode = false, config = {}, locale } = {}) {
     this.powershell = powershell; this.onStop = onStop; this.configFile = configFile; this.stateFile = stateFile;
     // The overlay's language: the DSH interface language the host writes into
@@ -94,7 +145,9 @@ export class TakeoverControl {
     this.fixedLocale = locale; this.locale = overlayLocale(locale ?? systemLocale());
     this.testMode = testMode; this.config = normalizeSettings(config); this.active = 0; this.shown = 0; this.paused = false;
     this.layoutFile=process.env.WCU_LAYOUT_FILE;
+    this.layoutWrite=Promise.resolve();
     this.progressPreviewToken=this.config.progressPreviewToken;
+    this.suppressedLingerKey=null;
     this.activityFile=activityFile;this.seriesHeld=false;this.seriesIndicator=false;this.seriesKey=null;this.stoppedSeriesKey=null;this.blockedSeries=new Map();
     this.eventName = `Local\\DSH-WCU-${randomUUID()}`; this.waiters = new Map(); this.nextId = 0;
     this.resumeToken = this.config.resumeToken; this.previewToken = this.config.previewToken; this.pauseMessage = STOPPED;
@@ -102,19 +155,38 @@ export class TakeoverControl {
     try {
       const saved = JSON.parse(readFileSync(this.stateFile, 'utf8'));
       this.paused = saved.paused === true;
+      this.stoppedAt = saved.stoppedAt ?? 0;
+      this.stopReported = saved.stopReported === true;
       this.pauseMessage = saved.pauseMessage ?? STOPPED;
       this.resumeToken = saved.resumeToken ?? this.resumeToken;
       this.stoppedSeriesKey=saved.stoppedSeriesKey??null;
       this.blockedSeries=new Map(Object.entries(saved.blockedSeries??(this.stoppedSeriesKey?{[this.stoppedSeriesKey]:this.pauseMessage}:{})));
     } catch (error) { if (this.stateFile && error.code !== 'ENOENT') throw error; }
     if (configFile||activityFile) {
-      this.poll = setInterval(() => { this.sync().catch(error => this.fail(error)); }, 250);
+      this.poll = setInterval(() => { this.sync().catch(error => this.presentationError(error)); }, 250);
       this.poll.unref();
     }
   }
   persist(reason) {
-    atomicJson(this.stateFile, { paused: this.paused, active: this.active, seriesActive:this.seriesHeld,reason: reason ?? null,
-      resumeToken: this.resumeToken,stoppedSeriesKey:this.stoppedSeriesKey,blockedSeries:Object.fromEntries(this.blockedSeries),pauseMessage: this.paused ? this.pauseMessage : null, updatedAt: new Date().toISOString() });
+    const body = {
+      paused: this.paused, active: this.active, seriesActive: this.seriesHeld, reason: reason ?? null,
+      stoppedAt: this.stoppedAt ?? 0, stopReported: this.stopReported === true, stoppedSeriesKey: this.stoppedSeriesKey,
+      blockedSeries: Object.fromEntries(this.blockedSeries), pauseMessage: this.paused ? this.pauseMessage : null,
+    };
+    const key = JSON.stringify(body);
+    if (this.lastStateKey === key) return;
+    try {
+      atomicJson(this.stateFile, { ...body, updatedAt: new Date().toISOString() });
+      this.lastStateKey = key;
+    } catch (error) {
+      this.lastStateKey = undefined;
+      this.presentationError(error);
+    }
+  }
+  presentationError(error) {
+    if (Date.now() - (this.lastPresentationWarning ?? 0) < 10000) return;
+    this.lastPresentationWarning = Date.now();
+    process.stderr.write('Computer Use display/state update failed: ' + error.message + '\n');
   }
   async resumeOperation(clearScope=true){
     if(this.child)await this.command('resume');
@@ -133,11 +205,23 @@ export class TakeoverControl {
     // One synchronous read each: an async read keeps the file open across
     // event-loop turns, and a writer in the same process (tests run the host's
     // publisher here) retrying its replace synchronously would wait it out.
-    if (this.configFile) this.config = normalizeSettings(JSON.parse(readFileSync(this.configFile, 'utf8')));
+    if (this.configFile) {
+      const configKey = statVersionKey(this.configFile);
+      if (!configKey || configKey !== this.configStatKey) {
+        this.config = normalizeSettings(await readControl(this.configFile));
+        this.configStatKey = configKey;
+      }
+    }
     if(this.activityFile){
-      const activity=JSON.parse(readFileSync(this.activityFile,'utf8'));
+      const activityKey = statVersionKey(this.activityFile);
+      if (!activityKey || activityKey !== this.activityStatKey) {
+        this.cachedActivity = await readControl(this.activityFile);
+        this.activityStatKey = activityKey;
+      }
+      const activity = this.cachedActivity;
       if(this.fixedLocale===undefined&&typeof activity.locale==='string')this.locale=overlayLocale(activity.locale);
-      const held=activity.active===true&&Number.isFinite(activity.expiresAt)&&activity.expiresAt>Date.now();
+      const now = Date.now();
+      const held=activity.active===true&&Number.isFinite(activity.expiresAt)&&activity.expiresAt>now;
       const key=held?JSON.stringify([activity.sessionId,activity.turn]):this.seriesKey;
       // A failure while this read is still under way belongs to this series:
       // blocking the previous one would let the next read resume and retry.
@@ -147,12 +231,17 @@ export class TakeoverControl {
       const indicator=held&&activity.indicator!==false;
       // After the turn ends the overlay keeps showing its final state for a
       // short time; that holds no series, indicator or stop key.
-      const lingering=!held&&!!activity.progress&&Number.isFinite(activity.lingerUntil)&&activity.lingerUntil>Date.now();
-      const progress=JSON.stringify({enabled:this.config.progressOverlayEnabled&&(held||lingering),remoteIndicatorVisible:this.config.remoteIndicatorVisible,locale:this.locale,settings:this.config,progress:{...activity.progress,status:this.paused&&held?'stopped':activity.progress?.status??'waiting'}});
+      const turnKey=`${activity.sessionId??''}:${activity.turn??''}:${activity.progress?.startedAt??0}`;
+      const rawLingering=!held&&!!activity.progress&&Number.isFinite(activity.lingerUntil)&&activity.lingerUntil>now;
+      if(this.config.progressPreviewToken!==this.progressPreviewToken&&this.config.progressPreviewToken>0&&rawLingering)this.suppressedLingerKey=turnKey;
+      const lingering=rawLingering&&turnKey!==this.suppressedLingerKey;
+      const progressPayload={enabled:this.config.progressOverlayEnabled&&(held||lingering),turnKey,remoteIndicatorVisible:this.config.remoteIndicatorVisible,locale:this.locale,settings:this.config,progress:{...activity.progress,status:this.paused&&held?'stopped':activity.progress?.status??'waiting'}};
+      const progress=JSON.stringify(progressPayload);
       // After the helper failed, the overlay does not start it again in this
       // series: the poll would launch PowerShell four times a second.
       if(!this.disabledForTest&&this.sentProgress!==progress&&(this.child||(!this.helperFailed&&this.config.progressOverlayEnabled&&(held||lingering)))){
-        await this.command('progress',JSON.parse(progress));this.sentProgress=progress;
+        try { await this.command('progress',progressPayload);this.sentProgress=progress; }
+        catch (error) { this.presentationError(error); }
       }
       if(held&&!this.blockedSeries.has(key)&&this.paused&&this.active===0)await this.resumeOperation();
       if(held!==this.seriesHeld||key!==this.seriesKey||indicator!==this.seriesIndicator){
@@ -171,19 +260,13 @@ export class TakeoverControl {
       this.sentPresentation=presentation;
       this.sentShortcut = this.config.stopShortcut; this.sentCursorIndicator = this.config.cursorIndicatorEnabled;this.sentRemoteVisible=this.config.remoteIndicatorVisible;
     }
-    if (this.config.resumeToken !== this.resumeToken && this.active === 0) {
-      if (this.child) await this.command('resume');
-      this.resumeToken = this.config.resumeToken; this.paused = false;this.stoppedSeriesKey=null;this.blockedSeries.clear(); this.persist('resumed-by-user');
-      if(this.seriesHeld&&this.seriesIndicator&&!this.disabledForTest)await this.command('begin',this.config);
-    }
     if (this.config.previewToken !== this.previewToken) {
       this.previewToken = this.config.previewToken;
-      if(this.paused&&this.active===0&&!this.seriesHeld)await this.resumeOperation(false);
       if (!this.paused && this.active === 0 && !this.disabledForTest) await this.command('preview', this.config);
     }
     if(this.config.progressPreviewToken!==this.progressPreviewToken){
       this.progressPreviewToken=this.config.progressPreviewToken;
-      if(!this.disabledForTest&&this.progressPreviewToken>0)await this.command('progress',{enabled:true,preview:true,settings:this.config,remoteIndicatorVisible:this.config.remoteIndicatorVisible,progress:previewProgress(this.locale)});
+      if(!this.disabledForTest&&this.progressPreviewToken>0)try { await this.command('progress',{enabled:true,preview:true,settings:this.config,remoteIndicatorVisible:this.config.remoteIndicatorVisible,progress:previewProgress(this.locale)}); } catch(error) { this.presentationError(error); }
     }
   }
   // The helper's Windows process id, which the backend watches during input.
@@ -197,18 +280,25 @@ export class TakeoverControl {
   async begin({ quiet = false } = {}) {
     // A read that found the helper failing has paused the series; the checks
     // below then decide.
-    try { await this.sync(); } catch (error) { if (!this.paused) throw error; }
+    try { await this.sync(); } catch (error) { this.presentationError(error); }
     const refuses = message => !(quiet && message !== STOPPED);
     if(this.seriesHeld&&this.blockedSeries.has(this.seriesKey)&&refuses(this.blockedSeries.get(this.seriesKey)))throw new Error(this.blockedSeries.get(this.seriesKey));
-    if(this.paused&&!this.activityFile&&this.active===0)await this.resumeOperation();
+    if(this.paused&&!this.activityFile&&this.active===0) {
+      const userStopped = this.pauseMessage === STOPPED;
+      const reported = this.stopReported === true;
+      if(userStopped) { this.stopReported=true; this.persist('stop-reported'); }
+      if(!userStopped || (reported && Date.now()-(this.stoppedAt??0)>=30000))await this.resumeOperation();
+    }
     if (this.paused&&refuses(this.pauseMessage)) throw new Error(this.pauseMessage);
     if (this.closed) throw new Error('COMPUTER_USE_STOPPING');
-    if (!quiet&&!this.disabledForTest&&(!this.seriesHeld||!this.seriesIndicator||!this.child)) {
+    this.active++; if (!quiet) this.shown++;
+    try { if (!quiet&&!this.disabledForTest&&(!this.seriesHeld||!this.seriesIndicator||!this.child)) {
       try { await this.command('begin', this.config); this.sentShortcut = this.config.stopShortcut; this.sentCursorIndicator = this.config.cursorIndicatorEnabled;this.sentRemoteVisible=this.config.remoteIndicatorVisible; }
       catch (error) { this.fail(error); throw new Error(this.paused ? this.pauseMessage : error.message); }
     }
     if (this.paused&&refuses(this.pauseMessage)) throw new Error(this.pauseMessage);
-    this.active++; if (!quiet) this.shown++; this.persist();
+    this.persist();
+    } catch(error) { this.active=Math.max(0,this.active-1);if(!quiet)this.shown=Math.max(0,this.shown-1);this.persist();throw error; }
   }
   async end({ quiet = false } = {}) {
     this.active = Math.max(0, this.active - 1); if (!quiet) this.shown = Math.max(0, this.shown - 1); this.persist(this.paused ? 'stopped-by-user' : null);
@@ -217,13 +307,14 @@ export class TakeoverControl {
   fail(error) {
     if (this.closed || this.paused) return;
     this.paused = true;
+    if(error?.message === STOPPED){this.stoppedAt=Date.now();this.stopReported=false;}
     const key=this.syncKey??this.seriesKey;
     this.stoppedSeriesKey=key;
-    this.pauseMessage = error?.message === STOPPED ? STOPPED : `COMPUTER_USE_PAUSED: ${error?.message ?? error}. Desktop input is paused for this operation series; reading the screen and browser-lane calls still work. Do not retry desktop input in this turn; a new user turn retries the desktop connection.`;
+    this.pauseMessage = error?.message === STOPPED ? STOPPED : `COMPUTER_USE_PAUSED: ${error?.message ?? error}. Desktop input is paused for this series (reading the screen and browser-lane calls still work). Do not retry desktop input in this turn; the next user turn reconnects automatically.`;
     if(key!==null)this.blockedSeries.set(key,this.pauseMessage);
     this.persist(String(error?.message ?? error));
     // This also covers a control-file or presentation failure while input runs.
-    this.child?.stdin.write(JSON.stringify({command:'stop'})+'\n',()=>{});
+    this.child?.stdin.write(JSON.stringify({command:'cancel_input'})+'\n'+JSON.stringify({command:'stop'})+'\n',()=>{});
     this.onStop(new Error(this.pauseMessage));
   }
   async start() {
@@ -234,7 +325,8 @@ export class TakeoverControl {
       this.helperPid = 0;
       const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-File', windowsScript(helperScript), '-CancelEvent', this.eventName];
       if (this.testMode) args.push('-TestMode');
-      const child = this.child = spawn(this.powershell, args, { cwd: path.dirname(helperScript), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      const helperEnv={...process.env};delete helperEnv.WCU_APPROVAL_SECRET;delete helperEnv.WCU_APPROVAL_LEDGER;
+      const child = this.child = spawn(this.powershell, args, { cwd: path.dirname(helperScript), env:windowsEnv(helperEnv,Object.keys(helperEnv).filter(name=>name.startsWith('WCU_'))), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       const deadline = setTimeout(() => { reject(new Error('Takeover stop listener startup timed out')); child.kill(); }, 15000);
       child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
       child.stderr.on('data', chunk => { diagnostic = (diagnostic + chunk).slice(-6000); });
@@ -244,25 +336,29 @@ export class TakeoverControl {
           const at = buffer.indexOf('\n'); if (at < 0) break;
           const line = buffer.slice(0, at).trim(); buffer = buffer.slice(at + 1); if (!line) continue;
           let message; try { message = JSON.parse(line); } catch { continue; }
-          if (message.kind === 'ready') { ready = true; this.helperPid = Number.isSafeInteger(message.pid) && message.pid > 0 ? message.pid : 0; clearTimeout(deadline); resolve(); }
+          if (message.kind === 'ready') {
+            if(message.hookActive!==true){clearTimeout(deadline);reject(Error('Takeover stop listener is not ready'));child.kill();continue;}
+            ready = true; this.helperFailed=false;this.helperPid = Number.isSafeInteger(message.pid) && message.pid > 0 ? message.pid : 0; clearTimeout(deadline); resolve(); }
           else if (message.kind === 'stopped') this.fail(new Error(STOPPED));
           else if (message.kind === 'progress-layout') {
-            if(this.layoutFile)try{atomicJson(this.layoutFile,{id:randomUUID(),patch:message.patch,base:message.base});}catch(error){process.stderr.write('Overlay settings sync failed: '+error.message+'\n');}
+            if(this.layoutFile){const entry={id:randomUUID(),patch:message.patch,base:message.base};this.layoutWrite=this.layoutWrite.then(()=>atomicJsonAsync(this.layoutFile,entry)).catch(error=>{process.stderr.write('Overlay settings sync failed: '+error.message+'\n');});}
           }
           else {
             const pending = this.waiters.get(message.id); if (!pending) continue;
             clearTimeout(pending.timer); this.waiters.delete(message.id);
-            message.ok ? pending.resolve(message) : pending.reject(new Error(message.error));
+            Promise.resolve(this.layoutWrite).then(() => message.ok ? pending.resolve(message) : pending.reject(new Error(message.error)));
           }
         }
       });
+      let handledDeath=false;
       const died = error => {
+        if(handledDeath)return;handledDeath=true;
         clearTimeout(deadline);
         if (this.child === child) this.child = null;
         const failure = error ?? new Error(`Takeover stop listener exited${diagnostic ? ': ' + diagnostic : ''}`);
         if (!ready) reject(failure);
         for (const [id, pending] of this.waiters) { clearTimeout(pending.timer); pending.reject(failure); this.waiters.delete(id); }
-        if (!this.closed) { this.helperFailed = true; this.fail(failure); }
+        if (!this.closed) { this.helperFailed = true; if(this.shown>0||this.seriesIndicator)this.fail(failure);else this.presentationError(failure); }
       };
       child.once('error', died); child.once('exit', () => died());
       child.stdin.on('error', () => {});
@@ -298,5 +394,6 @@ export class TakeoverControl {
       child.stdin.end();
       const force = setTimeout(() => { if (child.exitCode === null) child.kill(); }, 1000); force.unref();
     }
+    await this.layoutWrite;
   }
 }

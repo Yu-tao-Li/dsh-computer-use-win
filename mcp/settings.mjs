@@ -1,26 +1,13 @@
-export const TOOL_NAMES = Object.freeze(['health','snapshot','accessibility_tree','list_windows','find','element_info','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','wait','ocr','screenshot','wait_for','close_window','move_window','launch_app','batch','tools']);
-export const LITE_TOOL_NAMES = Object.freeze(['list_windows','find','click','scroll','type_text','keypress','ocr','screenshot','wait_for','launch_app','batch','tools']);
+import {TOOL_NAMES,LITE_TOOL_NAMES} from './catalog.mjs';
+export {TOOL_NAMES,LITE_TOOL_NAMES} from './catalog.mjs';
 export function normalizeEnabledTools(value) {
   if (!Array.isArray(value) || value.length > TOOL_NAMES.length || value.some(name => typeof name !== 'string' || !TOOL_NAMES.includes(name))) throw new Error('enabledTools must be an array of known tool names');
   const selected=new Set(value);
   return TOOL_NAMES.filter(name=>selected.has(name));
 }
 
-// browserApp: the browser Browser Use runs ('default' follows the Windows
-// default browser). browserSignIn: the DSH browser keeps its profile, so the
-// sites the user signs in to there stay signed in, instead of starting from a
-// temporary profile each time. The user's own browser is never used.
-export const BROWSER_APPS = Object.freeze(['default', 'edge', 'chrome', 'firefox']);
-
-export const DEFAULT_SETTINGS = Object.freeze({
-  browserFirst: true, browserVisible: true, browserApp: 'default', browserSignIn: false, browserAttachUser: false, progressOverlayEnabled: true, progressOverlayMode: 'source',
-  progressOverlayOpacity: 60, progressOverlayWidth: 360, progressOverlayHeight: 240, progressOverlayPosition: 'top-right', progressOverlayX: 80, progressOverlayY: 80, progressOverlayLocked: true, progressLockShortcut: '', progressPreviewToken: 0,
-  mode: 'full', toolPreset: 'auto', enabledTools: TOOL_NAMES, indicatorEnabled: true, cursorIndicatorEnabled: true, remoteIndicatorVisible: true, indicatorText: 'DSH 正在控制电脑',
-  indicatorPosition: 'top', indicatorIdleMs: 800, stopShortcut: '', communityNote: 'full',
-  resumeToken: 0, previewToken: 0
-});
-
-export const STOP_SHORTCUT_PATTERN = /^(?:(?:Ctrl\+)?(?:Alt\+)?(?:Shift\+)?(?:Win\+)?(?:[A-Z0-9]|F(?:[1-9]|1[0-9]|2[0-4])|Space|Enter|Tab|Backspace|Delete|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|Pause|CapsLock|NumLock|ScrollLock))?$/;
+import {DEFAULT_SETTINGS,SETTINGS_SCHEMA,BROWSER_APPS,SETTING_CHOICES,SETTING_SWITCHES,validateSetting} from './settings-schema.mjs';
+export {DEFAULT_SETTINGS,BROWSER_APPS,STOP_SHORTCUT_PATTERN} from './settings-schema.mjs';
 
 export function normalizeStopShortcut(value) {
   if (typeof value !== 'string') throw new Error('stopShortcut must be a string');
@@ -41,11 +28,6 @@ export function normalizeStopShortcut(value) {
 // back to their defaults and unknown tool names are dropped; each change is
 // returned so it can be reported. Values typed on the settings page (shortcut,
 // text, numbers) stay strict, so a mistyped one is still refused when saved.
-const SETTING_CHOICES = { mode: ['lite', 'full'], toolPreset: ['auto', 'full', 'lite', 'lazy', 'custom'], browserApp: BROWSER_APPS, indicatorPosition: ['top', 'bottom'], communityNote: ['full', 'link'] };
-const SETTING_SWITCHES = ['browserFirst', 'browserVisible', 'browserSignIn', 'browserAttachUser', 'progressOverlayEnabled', 'indicatorEnabled', 'cursorIndicatorEnabled', 'remoteIndicatorVisible'];
-SETTING_SWITCHES.push('progressOverlayLocked');
-SETTING_CHOICES.progressOverlayPosition = ['top-right','top-left','bottom-right','bottom-left','custom'];
-SETTING_CHOICES.progressOverlayMode = ['source','summary'];
 export function repairStaleSettings(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return { value: input, repaired: [] };
   const value = { ...input }, repaired = [];
@@ -66,32 +48,13 @@ export function repairStaleSettings(input) {
 
 export function normalizeSettings(input = {}) {
   const value = { ...DEFAULT_SETTINGS, ...Object.fromEntries(Object.entries(input).map(([key,value])=>[key,typeof value?.get === 'function' ? value.get() : value])) };
-  if (!['lite', 'full'].includes(value.mode)) throw new Error('mode must be lite or full');
+  for(const key of Object.keys(SETTINGS_SCHEMA))validateSetting(key,value[key]);
   value.enabledTools=normalizeEnabledTools(value.enabledTools);
-  if (!['auto','full','lite','lazy','custom'].includes(value.toolPreset)) throw new Error('toolPreset must be full, lite, lazy or custom');
-  if (value.toolPreset==='auto') value.toolPreset=value.enabledTools.length===TOOL_NAMES.length?'full':'custom';
-  for (const key of SETTING_SWITCHES) {
-    if (typeof value[key] !== 'boolean') throw new Error(`${key} must be boolean`);
-  }
-  if (!BROWSER_APPS.includes(value.browserApp)) throw new Error('browserApp must be default, edge, chrome or firefox');
-  if (value.browserApp === 'firefox') value.browserAttachUser = false;
-  if (typeof value.indicatorText !== 'string' || !value.indicatorText.trim() || value.indicatorText.length > 120 || /[\r\n\x00-\x1f]/.test(value.indicatorText)) {
-    throw new Error('indicatorText must be one line of 1–120 characters');
-  }
-  if (!['top', 'bottom'].includes(value.indicatorPosition)) throw new Error('indicatorPosition must be top or bottom');
-  if (!Number.isInteger(value.indicatorIdleMs) || value.indicatorIdleMs < 200 || value.indicatorIdleMs > 3000) throw new Error('indicatorIdleMs must be 200–3000');
-  value.stopShortcut = normalizeStopShortcut(value.stopShortcut);
-  value.progressLockShortcut = normalizeStopShortcut(value.progressLockShortcut);
-  if (value.progressLockShortcut && value.progressLockShortcut === value.stopShortcut) throw new Error('progressLockShortcut must differ from the stop shortcut');
-  for (const [key,min,max] of [['progressOverlayOpacity',20,100],['progressOverlayWidth',240,1600],['progressOverlayHeight',160,1600],['progressOverlayX',-32768,32767],['progressOverlayY',-32768,32767]]) {
-    if (!Number.isInteger(value[key]) || value[key] < min || value[key] > max) throw new Error(`${key} must be an integer between ${min} and ${max}`);
-  }
-  if (!SETTING_CHOICES.progressOverlayPosition.includes(value.progressOverlayPosition)) throw new Error('Invalid progressOverlayPosition');
-  if (!SETTING_CHOICES.progressOverlayMode.includes(value.progressOverlayMode)) throw new Error('Invalid progressOverlayMode');
-  if (!['full', 'link'].includes(value.communityNote)) throw new Error('communityNote must be full or link');
-  for (const key of ['resumeToken', 'previewToken', 'progressPreviewToken']) {
-    if (!Number.isSafeInteger(value[key]) || value[key] < 0) throw new Error(`${key} must be a nonnegative integer`);
-  }
+  if(value.toolPreset==='auto')value.toolPreset=value.enabledTools.length===TOOL_NAMES.length?'full':'custom';
+  if(value.browserApp==='firefox')value.browserAttachUser=false;
+  value.stopShortcut=normalizeStopShortcut(value.stopShortcut);
+  value.progressLockShortcut=normalizeStopShortcut(value.progressLockShortcut);
+  if(value.progressLockShortcut&&value.progressLockShortcut===value.stopShortcut)throw new Error('progressLockShortcut must differ from the stop shortcut');
   return Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map(key => [key, value[key]]));
 }
 
@@ -115,9 +78,9 @@ export function browserRoutingInstructions(settings = {}, allowed = enabledTools
     (allowed.includes('list_windows') ? 'Start with list_windows to identify the intended browser/tab. ' : 'Window discovery is disabled in this selection; do not invent browser/tab IDs. ') +
     (!allowed.includes('set_value') ? 'Opening a new browser tab is unavailable because set_value is disabled; explain this limitation instead of calling a disabled tool. '
       : browserSignIn ? 'For a new web task use set_value elementId "new-tab" with the URL; it opens a background tab in the DSH browser, whose profile is kept: sites the user signed in to there are still signed in. When a page asks to sign in, never type passwords or codes yourself: ask the user to sign in once in the DSH browser window (the window with the blue frame), wait until they say they are done, then read the page again. ' +
-        (browserVisible ? '' : 'The DSH browser window is hidden now, so first ask the user to turn on "Show the browser window" under Browser Use in DSH settings. ') +
+        (browserVisible ? '' : 'The DSH browser window is hidden now, so first ask the user to turn on "Show the DSH browser window" under Browser Use in DSH settings. ') +
         'Signed in, you act as the user: before sending, posting, buying, deleting or changing account settings, ask the user unless they asked for exactly that step. '
       : 'For a new public web task use set_value elementId "new-tab" with the URL; it opens an isolated DSH browser without the user\'s sign-ins. ') +
     'Use a connected user tab only when the task needs that existing session and the user authorized it; never substitute an unsigned-in agent tab for an authenticated workflow. Read the page with browserTab and use its element IDs for clicks, values and navigation. Screenshot when visual evidence is needed. Tool names still begin windows_computer_use_ but browserTab/page IDs route internally through CDP without moving the desktop pointer. ' +
-    'Fall back to desktop UIA, then screenshots/OCR and coordinates, for native applications, browser chrome/native dialogs, missing CDP connections or unsupported page content such as iframe contents and canvas coordinates. Before falling back, identify the same intended visible window and read fresh desktop state; never reuse page IDs or page pixels as desktop coordinates. Do not silently replay an action whose outcome is unknown: observe its result first. Stale IDs require re-reading the page; dialogs require handling the dialog; cancellation, user stop, permission refusal, disabled/read-only controls and invalid values are not reasons to bypass a refusal with desktop input. If the browser page is headless and desktop fallback is needed, explain that there is no visible window; do not operate an unrelated user window. Respect explicit user requests for a particular method, enabled-tool restrictions and approvals. Visible DSH browsers must not be activated or brought to the foreground unless the user asks; background page operations leave the user\'s mouse and foreground window alone during ordinary page actions. A browser-native JavaScript dialog may temporarily activate its window; report this limitation instead of promising that visible browser work can never affect focus.';
+    'Fall back to desktop UIA, then screenshots/OCR and coordinates, for native applications, browser chrome/native dialogs, missing CDP connections or content the page lane cannot handle. Before falling back, identify the same intended visible window and read fresh desktop state; never reuse page IDs or page pixels as desktop coordinates. Do not silently replay an action whose outcome is unknown: observe its result first. Stale IDs require re-reading the page; dialogs require handling the dialog; cancellation, user stop, permission refusal, disabled/read-only controls and invalid values are not reasons to bypass a refusal with desktop input. If the browser page is headless and desktop fallback is needed, explain that there is no visible window; do not operate an unrelated user window. Respect explicit user requests for a particular method, enabled-tool restrictions and approvals. Visible DSH browsers must not be activated or brought to the foreground unless the user asks; background page operations leave the user\'s mouse and foreground window alone during ordinary page actions. A browser-native JavaScript dialog may temporarily activate its window; report this limitation instead of promising that visible browser work can never affect focus.';
 }

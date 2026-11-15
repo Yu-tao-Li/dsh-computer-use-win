@@ -1,4 +1,7 @@
-﻿# Exercise the shipped OCR action with deterministic words and fake UIA hit tests.
+﻿# Input lease behavior is exercised across real processes in input-mutex.mjs.
+function Enter-DesktopInput { return $null }
+function Exit-DesktopInput { param($Lease) }
+# Exercise the shipped OCR action with deterministic words and fake UIA hit tests.
 # No screen capture, physical input, or desktop changes.
 param([string]$BackendPath = "$PSScriptRoot/../scripts/windows-uia.ps1")
 $ErrorActionPreference = 'Stop'
@@ -123,6 +126,38 @@ Assert-Equal ($null -eq $result.matched[0].control) $true 'Unavailable control s
 Assert-Box $result.matched[0].boundingBox 120 240 104 40
 [Fixture.Automation.AutomationElement]::ThrowOnHit = $false
 Write-Output 'PASS empty/absent/no-match output, match cap and UIA failure fallback'
+
+# #82: a query returns the matching lines, not the whole transcript. Without a
+# match, every line comes back with its text and box but no word boxes.
+$other = @{text='其 他 文 字';words=@(Words @('其','他','文','字'))}
+$result = Run-Ocr @($other,$lines[0],$other) '工作区'
+Assert-Equal $result.lineCount 3 'Every recognized line is counted'
+Assert-Equal $result.lines.Count 1 'Only the matching line comes back'
+Assert-Equal $result.lines[0].text '工 作 区' 'The matching line'
+Assert-Equal $result.lines[0].words.Count 3 'The matching line keeps its word boxes'
+Assert-Equal $result.Contains('text') $false 'No full transcript with a query'
+if ($result.note -notmatch 'without query') { throw 'Trimmed lines must say how to get everything' }
+$result = Run-Ocr @($other,$lines[0]) '不存在'
+Assert-Equal $result.lineCount 2 'A miss counts the lines'
+Assert-Equal $result.lines.Count 2 'A miss returns every line'
+Assert-Equal $result.lines[1].text '工 作 区' 'A miss keeps the line text'
+Assert-Box $result.lines[1].boundingBox 120 240 104 40
+Assert-Equal $result.lines[1].Contains('words') $false 'A miss leaves out word boxes'
+if ($result.note -notmatch 'without query') { throw 'A miss must say how to get word boxes' }
+$result = Run-Ocr @($other,$lines[0]) ''
+Assert-Equal $result.text 'Fixture OCR' 'No query keeps the transcript'
+Assert-Equal $result.lines[1].words.Count 3 'No query keeps every word box'
+Assert-Equal $result.Contains('lineCount') $false 'No query adds no lineCount'
+Write-Output 'PASS a query returns only the matching lines; a miss returns line texts and boxes without word boxes'
+
+# #82: a minimized window draws only its title strip, so there is nothing to read.
+$script:Ocr = @{text='Fixture OCR'; lines=@($lines[0])}
+$script:Shot = @{path='fixture.png'; bounds=@{x=100;y=200}; imageScale=1; minimized=$true}
+$threw = $false
+try { $null = Invoke-Action -Action 'ocr' -InputObject ([pscustomobject]@{scope='desktop'}) }
+catch { if ($_.Exception.Message -notmatch 'minimized') { throw }; $threw = $true }
+Assert-Equal $threw $true 'OCR of a minimized window fails with the reason'
+Write-Output 'PASS OCR of a minimized window fails and says to restore it'
 
 # #75: the capture is read at full size unless maxWidth says otherwise, the
 # requested language reaches the recognizer, and the result names both.

@@ -21,7 +21,7 @@ async function stopFixture(file){
   for(let i=0;i<30&&alive(info.pid);i++)await delay(100);
   assert.equal(alive(info.pid),false,'Own fixture did not exit after stop marker');
 }
-const env={...process.env,NODE_ENV:'test',WCU_TEST_NO_TAKEOVER:'1',WCU_INDICATOR:'0',WCU_BROWSER_HEADLESS:'1',ELECTRON_RUN_AS_NODE:'1',WCU_LAUNCH_TEST_POISON:'wcu-parent-only'};
+const env={...process.env,NODE_ENV:'test',WCU_TEST_NO_TAKEOVER:'1',WCU_INDICATOR:'0',WCU_BROWSER_HEADLESS:'1',ELECTRON_RUN_AS_NODE:'1',WCU_LAUNCH_TEST_POISON:'wcu-parent-only',WCU_ALLOW_LAUNCH_ARGUMENTS:'1'};
 const makeClient=extra=>new McpTestClient(process.execPath,[server],{env:{...env,...extra}});
 const quote=v=>'"'+v.replace(/(\\*)"/g,'$1$1\\"').replace(/(\\+)$/,'$1$1')+'"';
 
@@ -48,7 +48,7 @@ if(process.argv[2]==='--job-child'){
   const shortcut=path.join(root,'fixture shortcut.lnk'), shortcutConfig=path.join(root,'shortcut-config.json');
   await writeFile(shortcutConfig,JSON.stringify({target:exe,path:shortcut}));
   const shortcutScript=path.join(root,'create-shortcut.ps1');
-  await writeFile(shortcutScript,`param([string]$Config)\n$ErrorActionPreference='Stop'\n$c=Get-Content -LiteralPath $Config -Raw -Encoding UTF8 | ConvertFrom-Json\n$s=New-Object -ComObject WScript.Shell\n$l=$s.CreateShortcut($c.path)\n$l.TargetPath=$c.target\n$l.Save()\n[void][Runtime.InteropServices.Marshal]::ReleaseComObject($l)\n[void][Runtime.InteropServices.Marshal]::ReleaseComObject($s)\n`);
+  await writeFile(shortcutScript,`param([string]$Config)\n$ErrorActionPreference='Stop'\n$c=Get-Content -LiteralPath $Config -Raw -Encoding UTF8 | ConvertFrom-Json\n$s=New-Object -ComObject WScript.Shell\n$l=$s.CreateShortcut($c.path)\n$l.TargetPath=$c.target\nif($c.arguments){$l.Arguments=$c.arguments}\nif($c.workingDirectory){$l.WorkingDirectory=$c.workingDirectory}\n$l.Save()\n[void][Runtime.InteropServices.Marshal]::ReleaseComObject($l)\n[void][Runtime.InteropServices.Marshal]::ReleaseComObject($s)\n`);
   const made=spawnSync(powershell,['-NoProfile','-File',shortcutScript,'-Config',shortcutConfig],{windowsHide:true,encoding:'utf8'});
   assert.equal(made.status,0,made.stdout+made.stderr);assert.ok(existsSync(shortcut));
   const cmdShortcut=path.join(root,'cmd shortcut.lnk'), cmdConfig=path.join(root,'cmd-shortcut-config.json');
@@ -80,6 +80,20 @@ if(process.argv[2]==='--job-child'){
       {target:'cmd.exe',arguments:'/c echo refused'},{target:'%ComSpec%',arguments:'/c echo refused'},{target:'powershell',arguments:'-NoProfile -Command exit'},
       {target:'mshta.exe',arguments:'about:blank'},{target:cmdShortcut,arguments:'/c echo refused'}
     ]){const r=await client.call(prefix+'launch_app',args);assert.equal(r.isError,true,JSON.stringify({args,r}));assert.match(text(r),/LAUNCH_COMMAND_REFUSED/);results.push({name:'command-host-refused',args,error:text(r),passed:true});}
+    const createLink=async(name,target,argumentsValue,workingDirectory)=>{
+      const link=path.join(root,name+'.lnk'),config=path.join(root,name+'.link.json');
+      await writeFile(config,JSON.stringify({path:link,target,arguments:argumentsValue,workingDirectory}));
+      const made=spawnSync(powershell,['-NoProfile','-File',shortcutScript,'-Config',config],{windowsHide:true,encoding:'utf8'});assert.equal(made.status,0,made.stderr);return link;
+    };
+    const embeddedCommand=await createLink('embedded-command',process.env.ComSpec,'/c echo refused','');
+    assert.match(text(await client.call(prefix+'launch_app',{target:embeddedCommand,waitMs:0})),/LAUNCH_COMMAND_REFUSED/);
+    const networkDirectory=await createLink('network-directory',exe,'','\\\\127.0.0.1\\wcu-fixture-never-created');
+    assert.match(text(await client.call(prefix+'launch_app',{target:networkDirectory,waitMs:0})),/network shortcut working directories/);
+    const embeddedReady=path.join(root,'embedded-ready.json');fixtures.push(embeddedReady);
+    const embedded=await createLink('embedded-arguments',exe,[embeddedReady,'embedded value'].map(quote).join(' '),root);
+    data(await client.call(prefix+'launch_app',{target:embedded,waitMs:0}));
+    assert.deepEqual((await readReady(embeddedReady)).args.slice(1),['embedded value']);await stopFixture(embeddedReady);
+    results.push({name:'shortcut-embedded-arguments-and-UNC-working-directory',passed:true});
     const pathKey=Object.keys(process.env).find(key=>key.toLowerCase()==='path') || 'PATH';
     for(const [name,target,extra] of [['absolute',exe,{}],['shortcut',shortcut,{}],['PATH',path.basename(exe),{[pathKey]:root+path.delimiter+process.env[pathKey]}],['environment','%WCU_LAUNCH_FIXTURE_EXE%',{WCU_LAUNCH_FIXTURE_EXE:exe}]]){
       client.close();client=makeClient(extra);await client.init();

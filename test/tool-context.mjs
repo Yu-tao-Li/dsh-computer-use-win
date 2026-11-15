@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {cp,mkdir,mkdtemp,writeFile,readFile,access} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import {McpTestClient} from './mcp-test-client.mjs';
 import {TOOL_NAMES,LITE_TOOL_NAMES,normalizeEnabledTools,normalizeSettings,enabledToolsForSettings} from '../mcp/settings.mjs';
 const root=await mkdtemp(path.join(os.tmpdir(),'wcu-tool-context-'));
@@ -12,7 +13,7 @@ const marker=path.join(root,'started.txt').replaceAll("'","''");
 await writeFile(path.join(root,'scripts/windows-uia.ps1'),`param([switch]$Persistent)
 Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop
 [IO.File]::AppendAllText('${marker}','started')
-while($null -ne ($line=[Console]::In.ReadLine())) {
+[Console]::WriteLine((@{type='ready';protocol=1;pid=$PID}|ConvertTo-Json -Compress));while($null -ne ($line=[Console]::In.ReadLine())) {
   $r=$line | ConvertFrom-Json
   [Console]::WriteLine((@{id=$r.id;ok=$true;action=$r.action;args=$r.args} | ConvertTo-Json -Depth 20 -Compress))
 }
@@ -58,10 +59,10 @@ for(const mode of ['lite','full']) {
   } finally {client.close()}
 }
 const ui=await readFile(new URL('../mcp/client.js',import.meta.url),'utf8');
-assert.deepEqual(ui.match(/const allToolNames='([^']+)'/)[1].split(' '),TOOL_NAMES,'UI and backend must use the same catalogue');
-const lazyCounts=ui.match(/(?<=lazyCount:)[^,]+/g);
-assert.equal(lazyCounts.length,2,'Lazy count text in both languages');
-for(const count of lazyCounts)assert.match(new Function('allToolNames',`return ${count}`)({length:999}),/999/,'The lazy count must follow the catalogue');
+let definition;
+vm.runInNewContext(ui.replace('return {apply,inject:','return {apply,allToolNames,inject:'),{window:{__ModuleLoader__:{load:d=>definition=d}}});
+assert.deepEqual(Array.from(definition.factory(()=>({})).allToolNames),TOOL_NAMES,'UI and backend must use the same catalogue');
+assert.ok(ui.includes("t('lazyCount')+' '+allToolNames.length"),'Lazy count follows the catalogue');
 assert.deepEqual(normalizeSettings({mode:'lite'}).enabledTools,TOOL_NAMES,'Legacy profiles default to all tools');
 assert.equal(normalizeSettings({}).toolPreset,'full');
 assert.equal(normalizeSettings({enabledTools:['wait']}).toolPreset,'custom','Migrate saved .11 selections');

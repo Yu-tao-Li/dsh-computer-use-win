@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import {RpcFramer,negotiateProtocolVersion,validateRpcEnvelope} from '../mcp/protocol.mjs';
+import {McpTestClient} from './mcp-test-client.mjs';
+const messages=[],errors=[];
+const parser=new RpcFramer({onMessage:x=>messages.push(x),onError:x=>errors.push(x.message)});
+const unicode={jsonrpc:'2.0',id:1,method:'ping',params:{text:'中文🙂'}};
+const bytes=Buffer.from(JSON.stringify(unicode)+'\n');
+for(const byte of bytes)parser.push(Buffer.from([byte]));assert.deepEqual(messages,[unicode]);
+parser.push(Buffer.from('{broken}\n'+JSON.stringify({id:2})+'\n'));
+assert.equal(errors.length,1);assert.deepEqual(messages.at(-1),{id:2});
+const body=Buffer.from(JSON.stringify(unicode));
+const framed=Buffer.concat([Buffer.from('content-length: '+body.length+'\r\n\r\n'),body]);
+for(let i=0;i<framed.length;i+=3)parser.push(framed.subarray(i,i+3));
+assert.deepEqual(messages.at(-1),unicode);assert.equal(parser.mode,'headers');
+parser.push(Buffer.from('Content-Length: -1\r\n\r\n'));assert.equal(errors.length,2);
+parser.push(Buffer.from(JSON.stringify({id:3})+'\n'));assert.deepEqual(messages.at(-1),{id:3});
+assert.equal(negotiateProtocolVersion('2099-unimplemented'),'2025-06-18');
+assert.equal(negotiateProtocolVersion('2024-11-05'),'2024-11-05');
+assert.equal(validateRpcEnvelope({jsonrpc:'2.0',method:'ping',id:true}),false);
+assert.equal(validateRpcEnvelope([]),false);
+const client=new McpTestClient(process.execPath,[path.resolve(import.meta.dirname,'../mcp/server.mjs')],{env:{...process.env,NODE_ENV:'test',WCU_TEST_NO_TAKEOVER:'1'}});
+let output='';client.child.stdout.on('data',data=>output+=data);
+try{
+ const initialized=await client.request('initialize',{protocolVersion:'2099-unimplemented'});assert.equal(initialized.protocolVersion,'2025-06-18');
+ const before=output.length;
+ client.child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/unknown'})+'\n');
+ client.child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'tools/call',params:{name:'windows_computer_use_launch_app',arguments:{target:'must-never-launch.exe'}}})+'\n');
+ await client.request('ping');
+ const responses=output.slice(before).trim().split('\n').filter(Boolean).map(JSON.parse);
+ assert.equal(responses.length,1);assert(!responses[0].error);
+ client.child.stdin.write('{broken}\n');
+ await client.request('ping');
+ assert(output.includes('"code":-32700'));
+ await assert.rejects(client.request('unknown/request'),/-32601/);
+ console.log(JSON.stringify({passed:true,utf8Fragmentation:true,headerAndLineFraming:true,parseRecovery:true,unknownNotificationsSilent:true,notificationCannotLaunchTools:true,versionNegotiation:true}));
+}finally{client.close()}

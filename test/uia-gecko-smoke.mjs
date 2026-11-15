@@ -43,7 +43,8 @@ await writeFile(path.join(profile, 'user.js'), [
   ['termsofuse.acceptedVersion', 999], ['termsofuse.acceptedDate', '1735689600000'], ['browser.shell.checkDefaultBrowser', false],
   ['browser.startup.homepage_override.mstone', 'ignore'], ['startup.homepage_welcome_url', ''], ['datareporting.policy.dataSubmissionEnabled', false],
   ['datareporting.policy.dataSubmissionPolicyBypassNotification', true], ['toolkit.telemetry.reportingpolicy.firstRun', false],
-  ['app.update.disabledForTesting', true], ['browser.tabs.warnOnClose', false], ['browser.sessionstore.resume_from_crash', false]
+  ['app.update.disabledForTesting', true], ['browser.tabs.warnOnClose', false], ['browser.sessionstore.resume_from_crash', false],
+  ['accessibility.force_disabled', -1], ['accessibility.uia.enable', 1]
 ].map(([name, value]) => `user_pref(${JSON.stringify(name)}, ${JSON.stringify(value)});`).join('\n') + '\n');
 if (process.env.WCU_TEST_WINDOW_X) await writeFile(path.join(profile, 'xulstore.json'), JSON.stringify({ 'chrome://browser/content/browser.xhtml': { 'main-window': { screenX: String(process.env.WCU_TEST_WINDOW_X), screenY: '60', width: '1200', height: '820', sizemode: 'normal' } } }));
 const env = { ...process.env, WCU_INDICATOR: '0' };
@@ -56,7 +57,11 @@ const results = [];
 async function call(action, args) {
   for (let attempt = 1; ; attempt++) {
     const response = await client.call('windows_computer_use_' + action, args);
-    assert.ok(!response.isError, JSON.stringify(response));
+    if(response.isError){
+      const diagnostic=response.content.filter(part=>part.type==='text').map(part=>part.text).join('\n');
+      results.push({action,args,error:diagnostic,images:response.content.filter(part=>part.type==='image').map(part=>({mimeType:part.mimeType,base64Length:part.data?.length??0}))});
+      assert.fail(diagnostic.slice(0,3000));
+    }
     const result = JSON.parse(response.content.find(part => part.type === 'text').text);
     results.push({ action, args, result });
     if (result.truncationReason !== 'targetUnresponsive' || attempt === 10) return result;
@@ -78,8 +83,8 @@ try {
   // runner (4.9 s, once 11 s, for one tree read), so tree reads and wait_for
   // (1 s per poll, 5 s in all by default) get room to finish; the depth under
   // test stays the default.
-  const budget = { treeTimeoutMs: 20000 };
-  const waitBudget = { ...budget, timeoutMs: 20000 };
+  const budget = { treeTimeoutMs: 30000 };
+  const waitBudget = { ...budget, timeoutMs: 30000 };
   let tree;
   // The document title arrives with the page; wait for it once, then use defaults.
   for (let i = 0; i < 50; i++) { tree = await call('accessibility_tree', { ...target, ...budget }); if (names(tree.tree).includes(issue)) break; await delay(200); }

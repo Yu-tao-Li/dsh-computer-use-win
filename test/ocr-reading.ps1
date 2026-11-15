@@ -16,7 +16,7 @@ $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]
 if ($parseErrors.Count) { throw 'Backend source did not parse.' }
 $helper = $ast.Find({param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$script:WcuOcrCs'}, $true)
 Invoke-Expression $helper.Extent.Text
-foreach ($name in @('Get-CsHash', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Get-OcrHelper', 'Invoke-Ocr')) {
+foreach ($name in @('Get-CsHash', 'Get-HelperCacheDir', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Get-OcrHelper', 'Invoke-Ocr')) {
   $function = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name}, $true)
   Invoke-Expression $function.Extent.Text
 }
@@ -111,6 +111,8 @@ function Render { param([string[]]$Lines, [int]$Px, [string]$Path, [string]$Font
 $png = Join-Path $env:TEMP 'wcu-ocr-reading-latin.png'
 Render -Lines @('Settings', 'Display scale') -Px 12 -Path $png
 $read = Invoke-Ocr -PngPath $png
+$memoryRead = Invoke-Ocr -PngBytes ([IO.File]::ReadAllBytes($png))
+Assert-Equal ($memoryRead | ConvertTo-Json -Depth 20 -Compress) ($read | ConvertTo-Json -Depth 20 -Compress) 'In-memory OCR must return identical real text, language, scale and word boxes'
 $latinScale = $read.readScale
 Assert-Equal ($installed -contains $read.language) $true 'The recognizer language is reported'
 if ($read.readScale -le 1.2) { throw "12 px text must be read enlarged (scale $($read.readScale))" }
