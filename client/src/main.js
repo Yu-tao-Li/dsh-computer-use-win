@@ -535,7 +535,7 @@ window.__ModuleLoader__.load({
                 button(recording?'cancelRecord':draft.stopShortcut?'rerecord':'record',{className:'wcu-small',disabled:saving||!writable,onClick:()=>{setRecordMessage('');setRecording(!recording);}})))),
           recordMessage&&h('p',{role:'status',className:'wcu-hint'},t(recordMessage))),
         !writable&&h('p',{role:'status','data-tone':'error'},t(available?'unavailable':'notLoaded')),
-        h('footer',{className:'wcu-footer'},h('span',{className:'wcu-status',role:'status','aria-live':'polite','data-tone':message?tone:undefined},[message,dirty?dirtyStatus:!message?t('clean'):''].filter(Boolean).join(' ')),
+        h('footer',{className:'wcu-footer'},h('span',{className:'wcu-status',role:'status','aria-live':'polite','data-tone':message?tone:undefined},[message,dirty?dirtyStatus:!message?t('clean'):''].filter(Boolean).join(' · ')),
           h('div',{className:'wcu-actions'},button('discard',{disabled:!dirty||saving||recording,onClick:()=>{setDraft(saved);setDirty(false);setMessage('');setRecordMessage('');}}),button('save',{className:'wcu-primary',disabled:!dirty||disabled,onClick:save}))));
     }
     const actionKeys={snapshot:'see',screenshot:'see',accessibility_tree:'read',list_windows:'windows',find:'findControl',element_info:'read',click:'clickAction',double_click:'doubleClick',move:'movePointer',drag:'dragAction',scroll:'scrollAction',type_text:'typeAction',keypress:'keyAction',focus:'focusAction',invoke:'invokeAction',set_value:'valueAction',activate_window:'windowAction',wait:'waitAction',ocr:'ocrAction',wait_for:'verifyAction',close_window:'closeAction',move_window:'moveWindowAction',launch_app:'launchAction',health:'healthAction',tools:'toolsAction'};

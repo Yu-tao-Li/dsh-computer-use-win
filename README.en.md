@@ -104,7 +104,7 @@ While DSH works on the computer, a translucent overlay in a corner of the screen
 
 ![Two frames of the progress overlay, redrawn by the plugin's overlay code from the record of a real task (open a browser, search for 晴天 and scroll to the end). Left, during the task: the heading reads DSH · step 3 · acting, the subheading reads run 7 actions: scroll the page, wait, and below it is the model's reasoning for that step, in English. Right, after the task: the heading reads DSH · done · 10 steps · 41 s, followed by the start of the reply. Both overlays have the padlock button in the top-right corner](assets/desktop-progress-overlay-hd.png)
 
-The overlay is locked by default, so the mouse passes through it and it never blocks a click by you or by DSH. To move or resize it, rest the pointer on the padlock in its top-right corner: the overlay unlocks for a moment, you can drag the title or the edges, and it locks again after the pointer leaves. Only your own mouse unlocks it, never the pointer DSH moves. By default the overlay shows DSH's own output and costs no extra tokens. You can switch it to AI summary in the settings; the conversation's model then writes a sentence or two about the progress every so often, which uses extra tokens.
+The overlay is locked by default, so the mouse passes through it and it never blocks a click by you or by DSH. To move or resize it, rest the pointer on the padlock in its top-right corner: the overlay unlocks for a moment, you can drag the title or the edges, and it locks again after the pointer leaves. Only your mouse unlocks it, including a mouse you use through a remote-control tool such as UU Remote; the pointer DSH moves never does. By default the overlay shows DSH's own output and costs no extra tokens. You can switch it to AI summary in the settings; the conversation's model then writes a sentence or two about the progress every so often, which uses extra tokens.
 
 #### 2.4 Settings page
 
@@ -217,7 +217,7 @@ They appear the first time a turn uses the mouse or keyboard and stay on through
 #### 5.4 Good to know
 
 - The plugin operates controls in the background when it can, without moving the mouse or the foreground. Clicks at screen positions, pasting text and key presses still need the real mouse and keyboard: the plugin brings the target window forward, checks that no other window covers the click point, and afterwards puts the mouse back and returns the foreground to the window you had in front. If the action opened a menu, drop-down list or dialog, the window stays in front; if you switched windows or moved the mouse meanwhile, the plugin leaves them as you set them. Avoid using the mouse and keyboard during these steps.
-- After the foreground goes back to you, later actions and screenshots that name no window still aim at the window the agent was working in, never at the one you are using. Text DSH pastes stays out of your clipboard history (Win+V). Your clipboard is restored only after the target program has read the text; if it never reads it, the text stays on the clipboard and the result says so, so a slow program never pastes your old content.
+- After the foreground goes back to you, later actions and screenshots that name no window still aim at the window the agent was working in, never at the one you are using. Text DSH pastes stays out of your clipboard history (Win+V). Native edit boxes such as Notepad and WordPad paste directly, and your clipboard comes back as soon as the paste is done. Other programs get your clipboard back only after they have read the text; if one never reads it, the text stays on the clipboard and the result says so, so a slow program never pastes your old content.
 - Only one conversation can use the desktop at a time. Others get a “busy” result.
 - DSH asks you first, and acts only after you agree, before it launches a program with arguments or through a shortcut, opens a local file in a page, uploads a local file to a page, connects to your own open browser, or acts for the first time on one of your own browser tabs. An approval covers that one call with those arguments; refusing or cancelling runs nothing. The agent cannot operate DSH's own windows, so it cannot click Allow for you. Under DSH's Full access preset, which shows no approval prompts, these calls run without asking, since that preset already lets the agent run any command unasked; Workspace Write, Read Only and the other presets ask first. The standalone MCP server has no such prompt and refuses these calls unless environment variables allow them; see [Safety](docs/wiki/safety.md).
 - Inside DSH, a screenshot reaches the agent as the path of a PNG file and the image data stays out of the conversation, so several screenshots no longer fill the context. To send a screenshot over IM, have the IM tool send that file.
@@ -270,7 +270,7 @@ Through the `tools` entry, the agent can read a tool's description, and unload o
 
 #### 7.3 Tips
 
-When UIA can find a control, operate it directly with `invoke` or `set_value`; both run in the background. With `action`, `invoke` can also expand or collapse a control or scroll it into view, and `scroll` on an element ID scrolls in the background first. When UIA finds nothing, or very little, read the screen text with OCR, and let a model that can see images read the screenshot for icons and layout. OCR returns only text and screen positions; it never makes up control IDs. Look again after a window moves or a control changes.
+When UIA can find a control, operate it directly with `invoke` or `set_value`; both run in the background. With `action`, `invoke` can also expand or collapse a control or scroll it into view, and `scroll` on an element ID scrolls in the background first. Send an Excel Ribbon sequence such as Alt, H, O, W (Column Width) as one `keypress` with `thenKeys`, so the foreground is not handed back between the keys. When UIA finds nothing, or very little, read the screen text with OCR, and let a model that can see images read the screenshot for icons and layout. OCR returns only text and screen positions; it never makes up control IDs. Look again after a window moves or a control changes.
 
 Electron apps, Chrome and Edge are all built on Chromium. Such an app builds the controls of a page only once another program reads the page. So the first time the plugin reads one of these windows, it turns the page's control tree on, and the page's buttons and input boxes usually become readable within half a second. `webContent` in the result tells you whether the page is ready. If it says `starting`, wait a moment and read again.
 
@@ -439,7 +439,7 @@ DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示�
 
 ![思考与操作浮窗的两个画面，取自一次真实的“打开浏览器搜索晴天并下滑到底”任务，由插件的浮窗程序按记录重新画出：左边是执行中，标题“DSH · 第 3 步 · 执行中”，副标题“连续执行 7 个操作：滚动页面、等待”，下面是模型这一步的思考（这个模型用英文思考）；右边是结束后，标题“DSH · 已完成 · 10 步 · 41 秒”，下面从回复开头显示“已完成：我打开了一个新的浏览器标签页，在必应上搜索「晴天」，并一直下滑到页面最底部。”；两个浮窗的右上角都是锁形按钮](assets/desktop-progress-overlay-hd.png)
 
-浮窗默认锁定，鼠标从它上面穿过，不会挡住你或 DSH 的点击。想换位置或大小时，把光标移到右上角的锁上停一下，浮窗就会临时解锁：拖标题移动，拖边缘缩放，光标离开后自动锁回。这个按钮只认你自己的鼠标，DSH 操作时移动的光标不会触发它。浮窗默认直接显示 DSH 的输出，不额外消耗 token；也可以在设置里改成“AI 总结当前操作”，让当前对话的模型每隔一段时间写一两句进度说明，这会额外消耗 token。
+浮窗默认锁定，鼠标从它上面穿过，不会挡住你或 DSH 的点击。想换位置或大小时，把光标移到右上角的锁上停一下，浮窗就会临时解锁：拖标题移动，拖边缘缩放，光标离开后自动锁回。这个按钮只认你的鼠标，通过 UU 远程等远程控制软件操作的鼠标也算；DSH 操作时移动的光标不会触发它。浮窗默认直接显示 DSH 的输出，不额外消耗 token；也可以在设置里改成“AI 总结当前操作”，让当前对话的模型每隔一段时间写一两句进度说明，这会额外消耗 token。
 
 #### 2.4 设置页
 
@@ -552,7 +552,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 #### 5.4 使用须知
 
 - 能在后台操作控件时，插件会优先这样做，不动鼠标、不抢前台。按坐标点击、粘贴文字和按键还是要用真实的鼠标键盘：插件先把目标窗口提到前面，点击前检查落点没有被别的窗口挡住，做完把鼠标放回原处、把前台还给你原来的窗口。动作打开了菜单、下拉列表或对话框时，窗口留在前面；你中途换了窗口或移了鼠标，插件不再改回去。这几步进行时最好别同时动鼠标键盘。
-- 前台还给你之后，不指定窗口的后续操作和截图仍对准 agent 刚操作的那个窗口，不会打进或读你正在用的窗口。DSH 粘贴的文字不进剪贴板历史（Win+V）；目标程序把文字读走以后，才恢复你原来的剪贴板。目标一直没来读，这次的文字就留在剪贴板上，结果里会注明，以免慢一点的程序粘进你原来的内容。
+- 前台还给你之后，不指定窗口的后续操作和截图仍对准 agent 刚操作的那个窗口，不会打进或读你正在用的窗口。DSH 粘贴的文字不进剪贴板历史（Win+V）。记事本、写字板这类原生输入框直接粘贴，粘完就恢复你原来的剪贴板；其他程序要等它把文字读走以后才恢复，一直没来读，这次的文字就留在剪贴板上，结果里会注明，以免慢一点的程序粘进你原来的内容。
 - 同一时间只有一段对话能操作桌面，其他对话会收到“忙碌”的结果。
 - 这几类操作，DSH 会先弹窗问你，同意后才执行：带参数启动程序、通过快捷方式启动程序、在网页里打开本机文件、把本机文件上传到网页、连接你自己已打开的浏览器、第一次操作你自己浏览器里的标签页。同意只对这一次、这组参数有效；拒绝或取消就不执行。agent 不能操作 DSH 自己的窗口，所以也没法替你点“同意”。在 DSH 的“完全权限”方案下（不弹审批），这几类操作不再询问、直接执行，因为这时 DSH 本来就允许 agent 不经确认运行任何命令；“工作区内修改”“仅可查看”等方案照常先问你。单独运行的 MCP 服务没有这个确认框，这几类操作默认拒绝，可以用环境变量放开，见[安全说明](docs/wiki/safety.md)。
 - 在 DSH 里，截图以 PNG 文件路径交给 agent，图片数据不进对话，多截几张也不会撑满上下文。要把截图发到 IM，就让 IM 工具按这个路径发送文件。
@@ -605,7 +605,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 
 #### 7.3 使用建议
 
-能用 UIA 找到控件时，用 `invoke` / `set_value` 直接操作，它们在后台完成；`invoke` 的 `action` 还能展开、折叠控件，或把它滚到可见处，`scroll` 给元素 ID 时也先在后台滚动。UIA 找不到，或者只找到很少的控件时，用 OCR 读屏幕上的文字；图标和布局交给能看图的模型读截图。OCR 只返回文字和屏幕坐标，不会编造控件 ID。窗口移动或控件变化后，要重新观察。
+能用 UIA 找到控件时，用 `invoke` / `set_value` 直接操作，它们在后台完成；`invoke` 的 `action` 还能展开、折叠控件，或把它滚到可见处，`scroll` 给元素 ID 时也先在后台滚动。Excel 功能区这类连续按键（比如依次按 Alt、H、O、W 打开“列宽”），用一次 `keypress` 加 `thenKeys` 发完，中间不会把前台还回去。UIA 找不到，或者只找到很少的控件时，用 OCR 读屏幕上的文字；图标和布局交给能看图的模型读截图。OCR 只返回文字和屏幕坐标，不会编造控件 ID。窗口移动或控件变化后，要重新观察。
 
 Electron 程序、Chrome 和 Edge 都用 Chromium 内核。这类程序要等有程序来读网页，才会生成网页里的控件。所以插件第一次读这类窗口时，会先替它打开网页的控件树，一般不到半秒就能读到网页里的按钮和输入框。结果里的 `webContent` 说明网页是否就绪；如果显示 `starting`，稍等再读一次。
 

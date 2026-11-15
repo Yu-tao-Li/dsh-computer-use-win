@@ -146,7 +146,8 @@ export function bridgeConfig(config = {}, runtime = {}) {
 export async function apply(ctx, config) {
   const bridge = await import('@deepseek-ai/dsh-mcp-client');
   const root = mkdtempSync(path.join(os.tmpdir(), `${CONTROL_PREFIX}${process.pid}-`));
-  const releaseControlDir=await holdControlDir(root);
+  // Without the pipe the directory falls back to the PID rule; never block loading.
+  const releaseControlDir=await holdControlDir(root).catch(error=>{ctx.logger.warn('dsh-computer-use-win: control directory pipe unavailable: %s',error?.message??error);return ()=>{};});
   ctx.effect(()=>releaseControlDir);
   const runtime = { configFile: path.join(root,'settings.json'), stateFile: path.join(root,'state.json'), activityFile:path.join(root,'activity.json'), layoutFile:path.join(root,'overlay-layout.json'), userTabsFile:path.join(root,'user-tabs.json'), getLocale: () => getLocale() };
   runtime.approvalSecret = randomBytes(32).toString('base64url');

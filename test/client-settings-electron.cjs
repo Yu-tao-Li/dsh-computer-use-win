@@ -141,7 +141,7 @@ app.whenReady().then(async()=>{
   // #74: an unchanged banner text shows in the interface language.
   assert.equal(await evaluate("window.snapshot.value.indicatorText==='DSH 正在控制电脑'&&document.getElementById('wincu-page-text').value"),'DSH is controlling your computer');
   await evaluate("window.renderPage('zh')");
-  assert.equal(await evaluate("document.getElementById('wincu-page-text').value"),'DSH 正在控制电脑');
+  await until("document.getElementById('wincu-page-text').value==='DSH 正在控制电脑'");
   await evaluate("document.getElementById('wincu-page-browserSignIn').click()");
   await until("!document.querySelector('[data-wincu-signin-notice]')");
   await chooseApp('default');

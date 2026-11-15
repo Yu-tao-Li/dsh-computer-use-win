@@ -560,7 +560,7 @@ const conciseDescriptions = {
   drag: 'Drag across SCREEN points (brings target forward).',
   scroll: 'Scroll elementId or SCREEN x/y (positive deltaY scrolls down).',
   type_text: 'Type into focus (Win32 background or clipboard-preserving paste).',
-  keypress: 'Send keys chord; optional thenKeys sends further chords in the same desktop foreground lease (Excel Ribbon). Win key blocked.',
+  keypress: 'Send a key chord (e.g. ["ctrl","a"]); thenKeys adds chords in the same foreground lease (Excel Ribbon). Win key blocked; background: 1 printable char.',
   focus: 'Focus a UIA element.',
   invoke: 'Invoke/toggle/select/expand a UIA element in background (optional click fallback).',
   set_value: 'Set value in background (page IDs fill fields; <tab>:address navigates; new-tab opens background tab).',

@@ -73,7 +73,7 @@ public sealed class WcuClipboardLease : IDisposable {
     pasteTarget=targetWindowHandle;
     IntPtr result;
     if(SendMessageTimeout(targetWindowHandle,0x0302,IntPtr.Zero,IntPtr.Zero,0x0002,1500,out result)==IntPtr.Zero)
-      throw new TimeoutException("Native paste did not finish; no keyboard retry sent");
+      throw new TimeoutException("COMPUTER_USE_PASTE_UNCONFIRMED: the native paste did not finish within 1.5 s and was not sent again; check the field before retrying.");
     nativePasteCompleted=true;pasteSent=true;
     var form=owner;if(form!=null)form.Poke();
     return true;

@@ -1,27 +1,27 @@
 {
-  "schemaVersion": 1,
-  "version": "0.6.0",
-  "runtime": "netfx-clr4",
-  "helpers": {
-    "native": {
-      "file": "wcu-native-netfx.dll",
-      "sourceHash": "940e107f4add454d",
-      "sha256": "605c2e859000b6aef72c0b597f16a539b944dde4a50bbe8e1f3a43b6635d4036"
-    },
-    "ocr": {
-      "file": "wcu-ocr-netfx.dll",
-      "sourceHash": "4be4c00822f73e47",
-      "sha256": "85c4a82775bebc83b4265a38e901653c762fd23fae674fcb9a37aec53cc06aab"
-    },
-    "clipboard": {
-      "file": "wcu-clipboard-netfx.dll",
-      "sourceHash": "1276926e4ae8285e",
-      "sha256": "96c57679ffbaf442ace60adbaa0b74779ab8b9c30ecf6bc8bbaa09048c095642"
-    },
-    "takeover": {
-      "file": "wcu-takeover-netfx.dll",
-      "sourceHash": "748391be66f7f053",
-      "sha256": "857fa080f3309be9e546d51797527eff63046b1789d4496ccbd3840ea7df5f11"
-    }
-  }
+    "schemaVersion":  1,
+    "version":  "0.6.0",
+    "runtime":  "netfx-clr4",
+    "helpers":  {
+                    "native":  {
+                                   "file":  "wcu-native-netfx.dll",
+                                   "sourceHash":  "940e107f4add454d",
+                                   "sha256":  "605c2e859000b6aef72c0b597f16a539b944dde4a50bbe8e1f3a43b6635d4036"
+                               },
+                    "ocr":  {
+                                "file":  "wcu-ocr-netfx.dll",
+                                "sourceHash":  "4be4c00822f73e47",
+                                "sha256":  "85c4a82775bebc83b4265a38e901653c762fd23fae674fcb9a37aec53cc06aab"
+                            },
+                    "clipboard":  {
+                                      "file":  "wcu-clipboard-netfx.dll",
+                                      "sourceHash":  "e49a20f758f807f5",
+                                      "sha256":  "d5bd6c1ded97433fc460e342ba28b54b670d685d25570d087b22f73176b21661"
+                                  },
+                    "takeover":  {
+                                     "file":  "wcu-takeover-netfx.dll",
+                                     "sourceHash":  "748391be66f7f053",
+                                     "sha256":  "7f4af571fd886b862032dac6632612b94ab642fd1acd245b9fd31399a3de99ca"
+                                 }
+                }
 }
