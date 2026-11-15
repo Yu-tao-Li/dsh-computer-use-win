@@ -5,15 +5,15 @@
     {
       "mode": "full",
       "tools": 26,
-      "utf16CodeUnits": 27278,
-      "utf8Bytes": 27278,
+      "utf16CodeUnits": 27350,
+      "utf8Bytes": 27350,
       "instructionsUtf16CodeUnits": 2653
     },
     {
       "mode": "lite",
       "tools": 12,
-      "utf16CodeUnits": 13275,
-      "utf8Bytes": 13275,
+      "utf16CodeUnits": 13305,
+      "utf8Bytes": 13305,
       "instructionsUtf16CodeUnits": 2653
     },
     {

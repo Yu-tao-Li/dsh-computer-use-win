@@ -435,7 +435,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_activate_window",
-    description: "Bring a top-level window to the foreground by title substring, process id, or native HWND. This tool always activates its target; the shared activate flag cannot suppress it. With browserTab, bring that tab to the front of its browser window.",
+    description: "Bring a top-level window to the foreground by title substring, process id, or native HWND. A minimized window is restored first; the result then says restored:true, and window describes the window after the call. If Windows leaves it minimized, activated is false and a warning says so. This tool always activates its target; the shared activate flag cannot suppress it. With browserTab, bring that tab to the front of its browser window.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -455,7 +455,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_ocr",
-    description: "Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns text, lines and word boxes in SCREEN coordinates. Best effort: small or faint text can still be misread and there is no confidence score, so prefer UIA names and values when the app exposes them. query is literal text matching, not semantic recognition; inspect lines if 'search' misses a placeholder. Click matched.word.x/y using foreground dispatch, then type_text with focusMode:'preserve'. Optional resolveControl performs a potentially blocking UIA hit-test; its control may be the whole page rather than the text input.",
+    description: "Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns text, lines and word boxes in SCREEN coordinates. With query, only the lines with a match come back (lineCount counts all lines); without a match, every line's text and box but no word boxes. Best effort: small or faint text can still be misread and there is no confidence score, so prefer UIA names and values when the app exposes them. query is literal text matching, not semantic recognition; inspect lines if 'search' misses a placeholder. Click matched.word.x/y using foreground dispatch, then type_text with focusMode:'preserve'. Optional resolveControl performs a potentially blocking UIA hit-test; its control may be the whole page rather than the text input.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -468,14 +468,14 @@ const tools = [
         includeScreenshot: { type: "boolean", default: false },
         query: {
           type: "string",
-          description: "Optional literal text query, case-insensitive and ignoring whitespace. Returns up to 3 matched word runs with screen boundingBox and center in word.x/y. control is null unless resolveControl:true opts into a UIA hit-test. Supports character-segmented CJK text."
+          description: "Optional literal text query, case-insensitive and ignoring whitespace. Returns up to 3 matched word runs with screen boundingBox and center in word.x/y, and the matching lines instead of the whole text. control is null unless resolveControl:true opts into a UIA hit-test. Supports character-segmented CJK text."
         }
       }
     }
   },
   {
     name: "windows_computer_use_screenshot",
-    description: "Capture a window or desktop without querying UIA. Returns an image plus bounds and imageScale for mapping image pixels to SCREEN coordinates: screen = bounds origin + image / imageScale. Use when the accessibility provider is unavailable, or to locate icons visually. Capture does not prove an action succeeded; inspect the resulting state. With browserTab, capture that tab's viewport inside the browser, also in the background; its pixels are page pixels, not screen coordinates.",
+    description: "Capture a window or desktop without querying UIA. Returns an image plus bounds and imageScale for mapping image pixels to SCREEN coordinates: screen = bounds origin + image / imageScale. Use when the accessibility provider is unavailable, or to locate icons visually. Capture does not prove an action succeeded; inspect the resulting state. A minimized window shows only its title strip; the result then says minimized:true with a warning (activate_window restores it). With browserTab, capture that tab's viewport inside the browser, also in the background; its pixels are page pixels, not screen coordinates.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       ...windowTargetProperties,
       ...browserTabProperty,
@@ -564,9 +564,9 @@ const conciseDescriptions = {
   focus: 'Focus a UIA element.',
   invoke: 'Invoke/toggle/select/expand a UIA element in background (optional click fallback).',
   set_value: 'Set value in background (focus moves only in some apps: focus first if Enter must follow); page IDs fill fields; <tab>:address navigates; new-tab opens background tab.',
-  activate_window: 'Bring target window to foreground.',
+  activate_window: 'Bring target window to foreground; restores a minimized one (restored:true).',
   wait: 'Pause briefly before next observation.',
-  ocr: 'Read visible text via OCR; literal query; word x/y are SCREEN coordinates.',
+  ocr: 'Read visible text via OCR; a literal query returns only matching lines; word x/y are SCREEN coordinates.',
   screenshot: 'Capture window/screen; SCREEN = origin + px / imageScale. browserTab: viewport pixels.',
   wait_for: 'Wait for window, UIA element, or literal OCR text.',
   close_window: 'Post WM_CLOSE in background.',

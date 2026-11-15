@@ -104,3 +104,45 @@ Assert-Equal @((Get-NativeWindowList -IncludeInvisible $true).ToArray())[1].mini
 Assert-Equal (Select-TargetWindow ([pscustomobject]@{processId=4242})).nativeWindowHandle 42 'A minimized twin does not make the shown window ambiguous'
 [WindowsComputerUseNative]::Minimized = $false
 Write-Output 'PASS title/PID resolution preserves homing, explicit observations refresh cache, HWND ids validate viewMode, minimized windows listed and marked without a homing baseline (fake native API only)'
+
+# Issue #82: bringing a minimized window forward restores it first, with
+# ShowWindow and then the Restore command of its system menu; a window that
+# stays minimized is not reported as activated. The shipped function runs on
+# its own fake type, since WindowsComputerUseNative above is fixed.
+Add-Type -TypeDefinition @'
+using System;
+public static class RestoreFixture {
+  public static bool Iconic, ObeyShow, ObeyRestore;
+  public static int ShowCalls, RestorePosts, ForegroundCalls;
+  public static bool IsIconic(IntPtr hwnd) { return Iconic; }
+  public static bool ShowWindow(IntPtr hwnd, int command) { ShowCalls++; if (command == 9 && ObeyShow) Iconic = false; return true; }
+  public static bool PostMessageW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam) {
+    if (message == 0x0112 && wParam.ToInt64() == 0xF120) { RestorePosts++; if (ObeyRestore) Iconic = false; }
+    return true;
+  }
+  public static bool GiveForeground(IntPtr hwnd) { ForegroundCalls++; return true; }
+  public static void ThrowIfCancelled() {}
+  public static void Reset(bool iconic, bool obeyShow, bool obeyRestore) {
+    Iconic = iconic; ObeyShow = obeyShow; ObeyRestore = obeyRestore; ShowCalls = RestorePosts = ForegroundCalls = 0;
+  }
+}
+'@
+$definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Set-WindowForeground' }, $true)
+if ($null -eq $definition) { throw 'Missing backend function: Set-WindowForeground' }
+. ([scriptblock]::Create($definition.Extent.Text.Replace('[WindowsComputerUseNative]', '[RestoreFixture]')))
+function Assert-NativeInputTarget { param($Hwnd) }
+function Start-Sleep { param($Milliseconds) }
+$window = @{ nativeWindowHandle = 42 }
+[RestoreFixture]::Reset($false, $true, $true)
+Assert-Equal (Set-WindowForeground $window) $true 'A shown window comes forward'
+Assert-Equal ([RestoreFixture]::ShowCalls) 0 'A window that is not minimized is not restored (SW_RESTORE would un-maximize it)'
+[RestoreFixture]::Reset($true, $true, $false)
+Assert-Equal (Set-WindowForeground $window) $true 'ShowWindow restores a minimized window'
+Assert-Equal ([RestoreFixture]::RestorePosts) 0 'No system-menu Restore after ShowWindow worked'
+[RestoreFixture]::Reset($true, $false, $true)
+Assert-Equal (Set-WindowForeground $window) $true 'The system-menu Restore restores a window that ignores ShowWindow'
+Assert-Equal ([RestoreFixture]::RestorePosts) 1 'System-menu Restore posted once'
+[RestoreFixture]::Reset($true, $false, $false)
+Assert-Equal (Set-WindowForeground $window) $false 'A window left minimized is not reported as activated'
+Assert-Equal ([RestoreFixture]::ForegroundCalls) 0 'No foreground switch to a window left minimized'
+Write-Output 'PASS minimized windows are restored by ShowWindow, else by the system-menu Restore, else reported as not activated (fake native API only)'

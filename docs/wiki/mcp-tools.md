@@ -319,7 +319,7 @@ Set a value in the background (EM_REPLACESEL on a Win32 edit, else the UI Automa
 
 ### activate_window
 
-Bring a top-level window to the foreground by title substring, process id, or native HWND. This tool always activates its target; the shared activate flag cannot suppress it.
+Bring a top-level window to the foreground by title substring, process id, or native HWND. A minimized window is restored first; the result then says `restored: true`, and `window` describes the window after the call, not the -32000,-32000 position it had while minimized. If Windows leaves it minimized, `activated` is false and a warning says so. This tool always activates its target; the shared activate flag cannot suppress it.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -338,7 +338,7 @@ Wait for a short period before observing the UI again.
 
 ### ocr
 
-Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns text, lines and word boxes in SCREEN coordinates. Best effort: small or faint text can still be misread and there is no confidence score, so prefer UIA names and values when the app exposes them. query is literal text matching, not semantic recognition; inspect lines if 'search' misses a placeholder. Click matched.word.x/y using foreground dispatch, then type_text with focusMode:'preserve'. Optional resolveControl performs a potentially blocking UIA hit-test; its control may be the whole page rather than the text input.
+Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns text, lines and word boxes in SCREEN coordinates. With query, only the lines with a match come back (lineCount counts all lines); without a match, every line's text and box but no word boxes. Best effort: small or faint text can still be misread and there is no confidence score, so prefer UIA names and values when the app exposes them. query is literal text matching, not semantic recognition; inspect lines if 'search' misses a placeholder. Click matched.word.x/y using foreground dispatch, then type_text with focusMode:'preserve'. Optional resolveControl performs a potentially blocking UIA hit-test; its control may be the whole page rather than the text input.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -355,9 +355,11 @@ Read visible text with Windows.Media.Ocr, independent of UIA by default. Returns
 
 The capture is read at full size unless maxWidth shrinks it. Windows OCR misreads small text, so when the median word is under 30 px tall the image is read a second time enlarged toward 36 px, at most 3x (`ocrScale` in the result; word boxes stay in SCREEN coordinates). `language` picks an installed recognizer by tag or prefix (`zh-Hans` reads with zh-Hans-CN); without it the Windows user languages decide, and the result names the recognizer in `language`. Chinese and Japanese lines come back without spaces between characters; Latin words and digits keep theirs. Windows OCR gives no confidence score, so a misread cannot be detected here: when the app exposes the text through UIA (find or accessibility_tree names and values), that text is exact.
 
+Word boxes are most of a full result: a 1500 × 900 window of text reads as about 50,000 characters. A query asks for one piece of text, so its result keeps the matching lines with their word boxes and leaves out `text`; when nothing matches, `lines` holds every line's text and box to reformulate from. A minimized window has nothing to read (Windows draws only its title strip), so OCR of one fails and says to restore it with activate_window.
+
 ### screenshot
 
-Capture a window or desktop without querying UIA. Returns an image plus bounds and imageScale for mapping image pixels to SCREEN coordinates: screen = bounds origin + image / imageScale. Use when the accessibility provider is unavailable, or to locate icons visually. Capture does not prove an action succeeded; inspect the resulting state.
+Capture a window or desktop without querying UIA. Returns an image plus bounds and imageScale for mapping image pixels to SCREEN coordinates: screen = bounds origin + image / imageScale. Use when the accessibility provider is unavailable, or to locate icons visually. Capture does not prove an action succeeded; inspect the resulting state. A minimized window shows only its title strip; the result then says `minimized: true` with a warning (activate_window restores it).
 
 | Argument | Type | Default / bounds |
 |---|---|---|

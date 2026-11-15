@@ -847,6 +847,15 @@ function Set-WindowForeground {
   if ([WindowsComputerUseNative]::IsIconic($ptr)) {
     if ($env:WCU_CANCEL_EVENT) { [WindowsComputerUseNative]::ThrowIfCancelled() }
     [WindowsComputerUseNative]::ShowWindow($ptr, 9) | Out-Null
+    # Wait until it is restored. A window that ignores ShowWindow still takes
+    # the Restore command of its system menu (WM_SYSCOMMAND, SC_RESTORE).
+    for ($i = 0; $i -lt 10 -and [WindowsComputerUseNative]::IsIconic($ptr); $i++) {
+      if ($i -eq 4) { [void][WindowsComputerUseNative]::PostMessageW($ptr, 0x0112, [IntPtr]0xF120, [IntPtr]::Zero) }
+      Start-Sleep -Milliseconds 50
+    }
+    # A minimized window can still take the foreground, but nobody sees it and
+    # input would go to it unseen: report the activation as failed.
+    if ([WindowsComputerUseNative]::IsIconic($ptr)) { return $false }
     Start-Sleep -Milliseconds 80
   }
   # First without a key press: joining the input of the thread in front lets
@@ -2644,9 +2653,13 @@ function Capture-Screenshot {
   $occludedPossible = $false
   $windowCaptureFailed = $false
   $bx = $vs.Left; $by = $vs.Top; $bw = $vs.Width; $bh = $vs.Height
+  $minimized = $false
 
   if ($null -ne $WindowElement) {
     $hwnd = if (Get-Prop $WindowElement 'nativeWindowHandle' 0) { [int64]$WindowElement.nativeWindowHandle } else { Invoke-Safe { [int64]$WindowElement.Current.NativeWindowHandle } 0 }
+    # Windows parks a minimized window at -32000,-32000 and draws only its
+    # title strip there: the capture works but shows nothing of the app (#82).
+    $minimized = [bool]($hwnd -and [WindowsComputerUseNative]::IsIconic([IntPtr]$hwnd))
     $rect = $null
     if ($hwnd -and $hwnd -ne 0) { $rect = Get-ExtendedFrameBounds -Hwnd $hwnd }
     if ($null -eq $rect) { $rect = Convert-Rect (Invoke-Safe { $WindowElement.Current.BoundingRectangle } $null) }
@@ -2754,6 +2767,7 @@ function Capture-Screenshot {
   }
   if ($method -eq "screen-region") { $meta["occludedPossible"] = $occludedPossible }
   if ($windowCaptureFailed) { $meta["windowCaptureFailed"] = $true }
+  if ($minimized) { $meta["minimized"] = $true }
   if ($scale -ne 1.0) {
     $meta["imageScale"] = [Math]::Round($scale, 4)
     $meta["origin"] = [ordered]@{ x = $bx; y = $by }
@@ -3209,6 +3223,9 @@ function Invoke-Action {
         $treeResult.screenshot = Capture-Screenshot -WindowElement $winEl -MaxWidth $maxWidth
         if ($treeResult.screenshot.occludedPossible) {
           $treeResult["warning"] = (([string]$treeResult.warning + " The window capture may include an occluding window; inspect screenshot.occludedPossible.").Trim())
+        }
+        if ($treeResult.screenshot.minimized) {
+          $treeResult["warning"] = (([string]$treeResult.warning + " The window is minimized: the capture shows only its title strip. Call activate_window to restore it.").Trim())
         }
       }
       return $treeResult
@@ -3763,14 +3780,24 @@ function Invoke-Action {
         $result["warning"] = "The target window is unresponsive; activation was skipped. Do not retry tree or input calls until the target recovers."
         return $result
       }
+      $hwnd = [int64]$window.nativeWindowHandle
+      $wasMinimized = [WindowsComputerUseNative]::IsIconic([IntPtr]$hwnd)
       $result.activated = [bool](Set-WindowForeground $window)
-      Update-WindowCache $window
+      # Report the window as it is now. The entry above was read before the
+      # activation, so a window just restored would still show its minimized
+      # -32000 box and read as "nothing happened" (issue #82).
+      foreach ($now in (Get-NativeWindowList -IncludeInvisible $true -MaxWindows 4096)) {
+        if ([int64]$now.nativeWindowHandle -eq $hwnd) { $result.window = $now; break }
+      }
+      $stillMinimized = [WindowsComputerUseNative]::IsIconic([IntPtr]$hwnd)
+      if ($wasMinimized) { $result['restored'] = -not $stillMinimized }
+      if ($stillMinimized) { $result.activated = $false } else { Update-WindowCache $result.window }
       Update-WindowIdentity $inputObject $window
       # Kept in front by request; typing without a target goes here too.
-      if ($result.activated) { $script:InputWindow = @{ series = $script:WcuSeries; hwnd = [int64]$window.nativeWindowHandle; at = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() } }
+      if ($result.activated) { $script:InputWindow = @{ series = $script:WcuSeries; hwnd = $hwnd; at = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() } }
       if (-not $result.activated) {
         $result["targetResponsive"] = Get-WindowResponsive $window
-        $result["warning"] = if ($result.targetResponsive) { "The window could not be brought to the foreground (Windows foreground lock)." } else { "The target window became unresponsive; avoid repeated activation, tree or input calls." }
+        $result["warning"] = if ($stillMinimized) { "The window is still minimized: Windows did not restore it. Try again; if it stays minimized, ask the user to restore it." } elseif ($result.targetResponsive) { "The window could not be brought to the foreground (Windows foreground lock)." } else { "The target window became unresponsive; avoid repeated activation, tree or input calls." }
       }
       return $result
     }
@@ -3887,6 +3914,7 @@ function Invoke-Action {
       $responsive = Get-WindowResponsive $window
       $shot = Capture-Screenshot -WindowElement $(if ($responsive -eq $false) { $null } else { $window }) -MaxWidth ([int](Get-Prop $inputObject 'maxWidth' 1600))
       $result=[ordered]@{ok=$true;action='screenshot';source='win32';targetResponsive=$responsive;screenshot=$shot;degraded=($responsive -eq $false)}
+      if ($shot.minimized) { $result['warning'] = 'The window is minimized: Windows draws only its title strip. Call activate_window to restore it, then capture again.' }
       if ($null -ne $window) { $result['windowObservation']=$script:WindowCache[[string]$window.nativeWindowHandle] }
       return $result
     }
@@ -3923,6 +3951,7 @@ function Invoke-Action {
       $internalOcr = [bool](Get-Prop $inputObject '_wcuInternalOcr' $false)
       $shot = Capture-Screenshot -WindowElement $winEl -MaxWidth $maxWidth -InMemory:$internalOcr
       if ($shot.windowCaptureFailed) { throw "OCR target has no capturable surface (minimized/hidden?). Restore the window and retry." }
+      if ($shot.minimized) { throw "OCR target window is minimized: Windows draws only its title strip, so there is no text to read. Call activate_window to restore it, then read again." }
       $origX = [int]$shot.bounds.x
       $origY = [int]$shot.bounds.y
       $scale = 1.0
@@ -3946,6 +3975,7 @@ function Invoke-Action {
       # OCR -> control upgrade: ignore OCR whitespace when matching, then
       # hit-test the center of the matching word run's union box with UIA.
       $matched = New-Object System.Collections.Generic.List[object]
+      $matchedLines = New-Object System.Collections.Generic.List[object]
       if ($query.Length -gt 0 -and $lines.Count -gt 0) {
         if ([bool](Get-Prop $inputObject 'resolveControl' $false) -and $null -ne $winEl) {
           if ($winEl.className -eq 'MozillaWindowClass') { [void](Initialize-GeckoPages $winEl @{ watch = [Diagnostics.Stopwatch]::StartNew(); budgetMs = 2000 }) }
@@ -3971,6 +4001,7 @@ function Invoke-Action {
             }
           }
           $matched.Add([ordered]@{ source = "ocr"; line = $lineText; word = [ordered]@{ text = $hit.text; x = $wx; y = $wy }; boundingBox = $hit.boundingBox; control = $ctl })
+          $matchedLines.Add($line)
         }
       }
       $result = [ordered]@{
@@ -3994,7 +4025,19 @@ function Invoke-Action {
       if ($query.Length -gt 0) {
         $result["query"] = $query
         $result["matched"] = $matched.ToArray()
-        if ($matched.Count -eq 0) { $result["note"] = "No OCR word sequence matched the query (case-insensitive, ignoring whitespace). Inspect 'lines' for the recognized text and word boxes." }
+        # A query asks for that text, not the whole transcript. Word boxes of
+        # every line are most of a result (about 50,000 characters for a
+        # 1500x900 window of text), so keep the matching lines whole and,
+        # without a match, line texts and boxes to reformulate from (#82).
+        $result.Remove('text')
+        $result["lineCount"] = $lines.Count
+        if ($matchedLines.Count -gt 0) {
+          $result["lines"] = $matchedLines.ToArray()
+          $result["note"] = "'lines' holds only the lines with a match; lineCount counts every recognized line. Call ocr without query for all text and word boxes."
+        } else {
+          $result["lines"] = @($lines | ForEach-Object { [ordered]@{ text = $_.text; boundingBox = $_.boundingBox } })
+          $result["note"] = "No OCR word sequence matched the query (case-insensitive, ignoring whitespace). 'lines' holds every recognized line with its box; call ocr without query for word boxes."
+        }
       }
       if ($activationRefused) {
         $result["warning"] = "activate:true was requested but the window could not be brought to the foreground (Windows foreground lock); the capture may show overlapping content."

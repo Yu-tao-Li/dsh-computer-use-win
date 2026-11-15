@@ -161,4 +161,12 @@ if (-not $inline.base64) { throw 'Inline delivery must retain image data' }
 $actual = [Convert]::ToBase64String([IO.File]::ReadAllBytes($fileOnly.path))
 if ($actual -ne $inline.base64) { throw 'File-only and inline modes must retain identical PNG pixels' }
 Write-Output 'PASS file-mode capture omits base64; explicit inline retains byte-identical PNG pixels'
+# Issue #82: a minimized window captures as its title strip, so say so.
+[void][WindowsComputerUseNative]::Minimized.Add(42)
+$shot = Capture-Screenshot -WindowElement $target -MaxWidth 0
+if ($shot.minimized -ne $true) { throw 'A capture of a minimized window must say minimized' }
+[void][WindowsComputerUseNative]::Minimized.Remove(42)
+$shot = Capture-Screenshot -WindowElement $target -MaxWidth 0
+if ($shot.Contains('minimized')) { throw 'A capture of a shown window carries no minimized flag' }
+Write-Output 'PASS a capture of a minimized window says minimized'
 Write-Output 'PASS actual capture routing: full lower-half pixels, scaling, failed PrintWindow/unavailable WGC fallback, focus and geometry races (synthetic pixels only)'
