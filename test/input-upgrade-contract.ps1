@@ -60,7 +60,8 @@ function Begin-ClipboardLease {
 function Has-WindowTarget {param($InputObject) return -not [string]::IsNullOrWhiteSpace((Get-Prop $InputObject 'windowTitle' ''))}
 function Activate-TargetIfRequested {param($InputObject)}
 function Start-Input {param($InputObject,$Hwnd,[switch]$NoActivate) $script:GuardCalls++; return @{moved=$null}}
-function Resolve-InputWindow {param($InputObject) return 0}
+function Resolve-InputWindow {param($InputObject) $script:InputWindowVia='front window'; return 0}
+function Get-KeyDestination {param($Hwnd,$Via) $script:DestinationReads++; return [ordered]@{nativeWindowHandle=$Hwnd;via=$Via}}
 function Assert-InFront {param($State)}
 function Complete-Input {param($State,$Result) $script:CompleteCalls++}
 function Get-RootWindowAt {param($X,$Y) return 7}
@@ -72,7 +73,7 @@ function Get-PointFromArgs {param($InputObject) return @{x=1;y=2;elementId=$null
 function Get-ObservationWindow {param($InputObject,$Scope) return $null}
 function Capture-Screenshot {param($WindowElement,$MaxWidth) return @{path='fake.png';bounds=@{x=0;y=0};imageScale=1;method='fixture';occludedPossible=$script:Occluded}}
 function Invoke-Ocr {param($PngPath) return @{text='NEEDLE42';lines=@(@{text='NEEDLE42';words=@(@{text='NEEDLE42';x=10;y=20;width=100;height=20})})}}
-function Get-NativeWindowList {param($IncludeInvisible,$MaxWindows) return @(@{name='Fixture';nativeWindowHandle=42;processId=1})}
+function Get-NativeWindowList {param($IncludeInvisible,$MaxWindows,[switch]$RecordObservation,$IncludeMinimized) $script:ListedMinimized=$IncludeMinimized;$script:WindowListTruncated=$script:FixtureTruncated;$list=New-Object System.Collections.Generic.List[object];$list.Add([ordered]@{name='Fixture';nativeWindowHandle=42;processId=1;boundingBox=@{x=1;y=2};isOffscreen=$false});if($IncludeMinimized){$list.Add([ordered]@{id='uia:hwnd:43:pid:1';name='Parked';className='Fixture';nativeWindowHandle=43;processId=1;boundingBox=@{x=-32000;y=-32000};isOffscreen=$true;minimized=$true})};return ,$list}
 function Get-TreeResult {param($Scope,$MaxDepth,$MaxNodes,$InputObject) return @{tree=@{};nodeCount=6;truncated=$script:Truncated;durationMs=1;treeTimeoutMs=100;targetResponsive=$true}}
 function Search-Tree {param($Node,$Query,$ControlType,$MaxResults,$Results) if($script:ElementFound){$Results.Add(@{name=$Query})}}
 function Assert-Equal {param($Actual,$Expected) if($Actual -ne $Expected){throw "Expected $Expected, actual $Actual"}}
@@ -85,9 +86,12 @@ Assert-Equal (Convert-KeyChord @('Enter')) '{ENTER}'
 $sequenceArgs=[pscustomobject]@{keys=@('alt','h');thenKeys=@(@('o'),@('w'));intervalMs=0}
 $script:GuardCalls=0;$script:CompleteCalls=0
 [WindowsComputerUseNative]::Chords.Clear()
+$script:DestinationReads=0
 $sequenceResult=Invoke-Action 'keypress' $sequenceArgs
 Assert-Equal ([WindowsComputerUseNative]::Chords -join ',') 'alt+h,o,w'
 Assert-Equal $sequenceResult.chordsSent 3
+# Where the keys went is part of the result (issue #82), read once per call.
+Assert-Equal $sequenceResult.deliveredTo.via 'front window';Assert-Equal $script:DestinationReads 1
 Assert-Equal $script:GuardCalls 1;Assert-Equal $script:CompleteCalls 1
 [WindowsComputerUseNative]::Chords.Clear();[WindowsComputerUseNative]::FailChordAt=2
 $script:GuardCalls=0;$script:CompleteCalls=0
@@ -145,6 +149,16 @@ Assert-Equal $result.verification 'observed'
 $script:Truncated=$true;$script:ElementFound=$true
 $result=Invoke-Action 'wait_for' ([pscustomobject]@{condition='element';query='present';timeoutMs=100})
 Assert-Equal $result.verification 'observed';Assert-Equal $result.found $true
+# Issue #82: list_windows lists minimized windows without their parking box, and
+# says when maxWindows left windows out; batch's internal call can opt out.
+$script:FixtureTruncated=$true
+$listing=Invoke-Action 'list_windows' ([pscustomobject]@{})
+Assert-Equal $script:ListedMinimized $true;Assert-Equal $listing.windows.Count 2;Assert-Equal $listing.truncated $true
+Assert-Equal $listing.windows[1].minimized $true;Assert-Equal $listing.windows[1].isOffscreen $true;Assert-Equal $listing.windows[1].Contains('boundingBox') $false
+Assert-Equal $listing.windows[0].Contains('boundingBox') $true
+$script:FixtureTruncated=$false
+$listing=Invoke-Action 'list_windows' ([pscustomobject]@{includeMinimized=$false})
+Assert-Equal $script:ListedMinimized $false;Assert-Equal $listing.windows.Count 1;Assert-Equal $listing.Contains('truncated') $false
 function Get-PointFromArgs {param($InputObject) return @{x=1;y=2;elementId='uia:fixture';element=[pscustomobject]@{Current=[pscustomobject]@{NativeWindowHandle=0}}}}
 function Invoke-ElementPattern {param($Element) return $null}
 function Get-ElementWindow {param($Element) return 42}

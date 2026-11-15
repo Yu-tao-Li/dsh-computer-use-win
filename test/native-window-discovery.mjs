@@ -20,7 +20,8 @@ try{
     assert.equal(result.isError,undefined);
     const data=JSON.parse(result.content.find(x=>x.type==='text').text);
     assert.equal(data.ok,true);assert.ok(data.windows.length<=1);
-    for(const win of data.windows){assert.match(win.id,/^uia:hwnd:\d+:pid:\d+$/);assert.equal(win.isOffscreen,false);sample=win;}
+    // Minimized windows are listed too (issue #82), marked and offscreen.
+    for(const win of data.windows){assert.match(win.id,/^uia:hwnd:\d+:pid:\d+$/);assert.equal(win.isOffscreen,win.minimized===true);if(!win.minimized)sample=win;}
   }
   assert.ok(sample,'An interactive desktop with a visible window is required');
   const wrongOwner=sample.id.replace(/:pid:\d+$/,':pid:0');

@@ -203,12 +203,12 @@ const tools = [
   },
   {
     name: "windows_computer_use_list_windows",
-    description: "List top-level windows visible to Windows UI Automation. The result field browserLane (not an argument) lists the tabs of connected Chromium browsers with ids for browserTab, and explains how to open a background tab (set_value elementId new-tab).",
+    description: "List top-level windows visible to Windows UI Automation. Minimized windows are listed too, marked minimized:true; activate_window restores them. The result field browserLane (not an argument) lists the tabs of connected Chromium browsers with ids for browserTab, and explains how to open a background tab (set_value elementId new-tab).",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        includeInvisible: { type: "boolean", default: false },
+        includeInvisible: { type: "boolean", default: false, description: "Also list hidden windows (not shown at all, such as tray and helper windows). Minimized windows are listed either way." },
         maxWindows: { type: "integer", minimum: 1, maximum: 200, default: 50 }
       }
     }
@@ -367,7 +367,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_keypress",
-    description: "Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. The keys go to the target (or active) window, which comes forward for them and then gives the foreground back, unless a menu or dialog they opened is showing. dispatch:'background' supports only a single printable character (posted as WM_CHAR to the focused control of the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendKeys). With browserTab, the key goes to that page inside the browser: Alt+Left/Alt+Right/F5 go back/forward/reload, Enter/Escape answer an open JavaScript dialog, and browser-window shortcuts such as Ctrl+L or Ctrl+T are refused.",
+    description: "Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. The keys go to the target window, else the window DSH last worked in this turn, else the window in front; it comes forward for them and then gives the foreground back, unless a menu or dialog they opened is showing. The result's deliveredTo names the window and its focused control that received the keys. dispatch:'background' supports only a single printable character (posted as WM_CHAR to the focused control of the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendInput). With browserTab, the key goes to that page inside the browser: Alt+Left/Alt+Right/F5 go back/forward/reload, Enter/Escape answer an open JavaScript dialog, and browser-window shortcuts such as Ctrl+L or Ctrl+T are refused.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -418,7 +418,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_set_value",
-    description: "Set a value in the background (EM_REPLACESEL on a Win32 edit, else the UI Automation ValuePattern), or focus and type as fallback. Browser lane: a page element id fills that field, selects that option or sets that checkbox inside the page; <tab>:address (for example t1a2b:address) navigates the tab to a web address; new-tab opens the address in a background tab, in a separate DSH browser without sign-ins or, when the user turned on sign-ins, in their own browser; <browser>:new-tab opens it in that connected browser.",
+    description: "Set a value in the background (EM_REPLACESEL on a Win32 edit, else the UI Automation ValuePattern), or focus and type as fallback. Whether the keyboard focus moves to the element depends on the app (Chromium moves it, a Win32 edit keeps it where it was): when a key must follow in that field, such as Enter in a search box, call focus on the element first. Browser lane: a page element id fills that field, selects that option or sets that checkbox inside the page; <tab>:address (for example t1a2b:address) navigates the tab to a web address; new-tab opens the address in a background tab, in a separate DSH browser without sign-ins or, when the user turned on sign-ins, in their own browser; <browser>:new-tab opens it in that connected browser.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -551,7 +551,7 @@ const conciseDescriptions = {
   health: 'Check Windows backend and browser lane status.',
   snapshot: 'Screenshot and bounded UIA tree (use OCR if UIA is sparse). browserTab: page outline and viewport.',
   accessibility_tree: 'Read bounded UIA tree (partial tree does not prove absence). browserTab: page outline with element IDs.',
-  list_windows: 'List native top-level windows (HWND/PID/responsiveness) and browserLane tabs.',
+  list_windows: 'List native top-level windows (HWND/PID/responsiveness; minimized ones marked minimized:true) and browserLane tabs.',
   find: 'Find UIA controls; sparse misses fall back to OCR (OCR hits use SCREEN x/y, not elementId).',
   element_info: 'Inspect a UIA elementId, page elementId, or SCREEN x/y.',
   click: 'Click elementId (background) or SCREEN x/y (real pointer, then restores). Page IDs act inside the page.',
@@ -563,7 +563,7 @@ const conciseDescriptions = {
   keypress: 'Send a key chord (e.g. ["ctrl","a"]); thenKeys adds chords in the same foreground lease (Excel Ribbon). Win key blocked; background: 1 printable char.',
   focus: 'Focus a UIA element.',
   invoke: 'Invoke/toggle/select/expand a UIA element in background (optional click fallback).',
-  set_value: 'Set value in background (page IDs fill fields; <tab>:address navigates; new-tab opens background tab).',
+  set_value: 'Set value in background (focus moves only in some apps: focus first if Enter must follow); page IDs fill fields; <tab>:address navigates; new-tab opens background tab.',
   activate_window: 'Bring target window to foreground.',
   wait: 'Pause briefly before next observation.',
   ocr: 'Read visible text via OCR; literal query; word x/y are SCREEN coordinates.',
@@ -574,6 +574,7 @@ const conciseDescriptions = {
 };
 const concisePropertyDescriptions = {
   windowTitle: 'Title substring.', processId: 'Target PID.', nativeWindowHandle: 'Target HWND.',
+  includeInvisible: 'Also list hidden windows.',
   activate: 'Bring forward and keep on top.',
   viewMode: 'UIA view (runtime IDs bypass filter).',
   includeOffscreen: 'Include offscreen nodes.', detailLevel: 'compact omits empty/heavy fields.',
@@ -1264,7 +1265,9 @@ async function runBatch(args, request) {
   batchOwner = request; request.batchSuppressObservation = true;
   const state = async () => {
     if (target.browserTab) return browserLane.batchState(target, request);
-    const listed = await runBackend('list_windows', { maxWindows: 200 }, 10000, request);
+    // Shown windows only, as before minimized windows were listed: a minimized
+    // twin must not make the target ambiguous or count as a new window.
+    const listed = await runBackend('list_windows', { maxWindows: 200, includeMinimized: false }, 10000, request);
     const windows = listed.windows ?? [];
     const matches = windows.filter(window => nativeHandle ? String(window.nativeWindowHandle) === nativeHandle : target.nativeWindowHandle ? String(window.nativeWindowHandle) === String(target.nativeWindowHandle) : target.processId ? window.processId === target.processId : String(window.name ?? window.title ?? '').toLowerCase().includes(target.windowTitle.toLowerCase()));
     // Once resolved the target is pinned to its HWND, so no match means it closed.
@@ -1341,8 +1344,12 @@ const inputActions = INPUT_ACTIONS;
 async function backendText(action, args, timeoutMs, request) {
   const result = await runBackend(action, args, timeoutMs, request);
   if (inputActions.has(action)) {
-    result.verification = result.moved === false || result.posted === false || result.activated === false ? "unconfirmed" : "sent";
-    result.verificationNote = result.verification === "sent" ? "The action was dispatched. Use wait_for or a fresh observation to verify the expected effect." : "Windows did not confirm dispatch. Inspect the warning and observe the target before retrying.";
+    // Keys and text without a window target, before DSH has worked in any
+    // window this turn, reach whatever window is in front (issue #82).
+    const guessed = result.deliveredTo?.via === "front window";
+    result.verification = guessed || result.moved === false || result.posted === false || result.activated === false ? "unconfirmed" : "sent";
+    result.verificationNote = guessed ? "No window target was given and DSH had not worked in a window this turn, so this went to the window in front (deliveredTo). If another window was meant, pass its nativeWindowHandle and check that window."
+      : result.verification === "sent" ? "The action was dispatched. Use wait_for or a fresh observation to verify the expected effect." : "Windows did not confirm dispatch. Inspect the warning and observe the target before retrying.";
   }
   return imageResult(result, false);
 }

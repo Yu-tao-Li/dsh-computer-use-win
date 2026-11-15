@@ -1022,15 +1022,28 @@ function Get-WorkWindow {
   return [WindowsComputerUseNative]::GetForegroundWindow().ToInt64()
 }
 
+# A background element action (set_value, invoke, a pattern click, an element
+# scroll) works in a window too: input without a window target goes there next,
+# as after real input. set_value on a field, then keypress Enter, issue #82.
+function Set-WorkWindow {
+  param([long]$Hwnd)
+  if ($Hwnd) { $script:InputWindow = @{ series = $script:WcuSeries; hwnd = [int64]$Hwnd; at = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() } }
+}
+
 # The window that input for this call goes to: the requested target, else the
-# window DSH works in.
+# window DSH works in. $script:InputWindowVia says which, so a result can tell
+# when the keys went to whatever window happened to be in front.
 function Resolve-InputWindow {
   param([object]$InputObject)
   if (Has-WindowTarget $InputObject) {
     $target = Get-ObservationWindow $InputObject
     if ($null -eq $target) { throw 'No native target window found.' }
     $hwnd=[int64]$target.nativeWindowHandle
-  } else { $hwnd=Get-WorkWindow }
+    $script:InputWindowVia = 'window target'
+  } else {
+    $hwnd=Get-WorkWindow
+    $script:InputWindowVia = if ($script:InputWindow.hwnd -and $hwnd -eq [int64]$script:InputWindow.hwnd) { 'last DSH window' } else { 'front window' }
+  }
   Assert-NativeInputTarget $hwnd
   return $hwnd
 }
@@ -1098,6 +1111,30 @@ function Complete-Input {
   if ([WindowsComputerUseNative]::InMenuMode([IntPtr]$State.target) -or $opened.Count) { $Result['foreground'] = 'kept in front: a menu, list or dialog it opened is showing'; return }
   if (-not ([WindowsComputerUseNative]::IsWindow([IntPtr]$State.user) -and [WindowsComputerUseNative]::IsWindowVisible([IntPtr]$State.user))) { $Result['foreground'] = 'kept in front: the window that was in front is gone'; return }
   $Result['foreground'] = if ([WindowsComputerUseNative]::GiveForeground([IntPtr]$State.user)) { 'returned' } else { 'kept in front: Windows refused to switch back' }
+}
+
+# Where keys or text go: a window and, while it is in front, the control with
+# the keyboard focus there. The control is read through UI Automation only when
+# the window answers messages, so a hung app cannot hold the call. $Via says how
+# the window was chosen (Resolve-InputWindow). Title and name are app text.
+function Get-KeyDestination {
+  param([long]$Hwnd, [string]$Via)
+  $title = New-Object System.Text.StringBuilder 256
+  [void][WindowsComputerUseNative]::GetWindowText([IntPtr]$Hwnd, $title, 256)
+  $text = $title.ToString()
+  if ($text.Length -gt 80) { $text = $text.Substring(0, 80) + '...' }
+  $info = [ordered]@{ nativeWindowHandle = $Hwnd; processId = (Get-WindowProcessId $Hwnd); title = $text }
+  if ($Via) { $info['via'] = $Via }
+  if ([WindowsComputerUseNative]::GetForegroundWindow().ToInt64() -eq $Hwnd -and [WindowsComputerUseNative]::IsResponsive([IntPtr]$Hwnd)) {
+    $focused = Invoke-Safe { [System.Windows.Automation.AutomationElement]::FocusedElement } $null
+    if ($null -ne $focused) {
+      $type = Get-ControlTypeName (Invoke-Safe { $focused.Current.ControlType } $null)
+      $name = [string](Invoke-Safe { $focused.Current.Name } '')
+      if ($name.Length -gt 60) { $name = $name.Substring(0, 60) + '...' }
+      if ($type) { $info['focus'] = if ($name) { "$type '$name'" } else { $type } }
+    }
+  }
+  return $info
 }
 
 # A background element action whose UIA provider may take the foreground or
@@ -1839,9 +1876,13 @@ function Find-OcrWordRun {
   return [ordered]@{text=($hitTexts.ToArray() -join ' ');boundingBox=$bounds}
 }
 
+# Shown top-level windows in Z order; -IncludeMinimized adds minimized ones
+# (minimized: true; list_windows lists them, issue #82), -IncludeInvisible hidden
+# ones too. $script:WindowListTruncated says whether MaxWindows left some out.
 function Get-NativeWindowList {
-  param([bool]$IncludeInvisible = $false, [int]$MaxWindows = 50, [switch]$RecordObservation)
+  param([bool]$IncludeInvisible = $false, [int]$MaxWindows = 50, [switch]$RecordObservation, [bool]$IncludeMinimized = $false)
   $items = New-Object System.Collections.Generic.List[object]
+  $script:WindowListTruncated = $false
   $foreground = [WindowsComputerUseNative]::GetForegroundWindow()
   $title = New-Object System.Text.StringBuilder 2048
   $class = New-Object System.Text.StringBuilder 256
@@ -1849,24 +1890,27 @@ function Get-NativeWindowList {
   foreach ($handle in [WindowsComputerUseNative]::TopLevelWindows()) {
     $visible = [WindowsComputerUseNative]::IsWindowVisible($handle)
     $iconic = [WindowsComputerUseNative]::IsIconic($handle)
-    if (-not $IncludeInvisible -and (-not $visible -or $iconic)) { continue }
+    if (-not $IncludeInvisible -and (-not $visible -or ($iconic -and -not $IncludeMinimized))) { continue }
     $ownerId = [uint32]0
     [void][WindowsComputerUseNative]::GetWindowThreadProcessId($handle, [ref]$ownerId)
     if (-not $ownerId) { continue }
     if (-not [WindowsComputerUseNative]::GetWindowRect($handle, [ref]$rect)) { continue }
+    if ($items.Count -ge $MaxWindows) { $script:WindowListTruncated = $true; break }
     $title.Length = 0
     [void][WindowsComputerUseNative]::GetWindowText($handle, $title, $title.Capacity)
     $class.Length = 0
     [void][WindowsComputerUseNative]::GetClassName($handle, $class, $class.Capacity)
     $hwnd = $handle.ToInt64()
     $box = [ordered]@{ x=$rect.left; y=$rect.top; width=$rect.right-$rect.left; height=$rect.bottom-$rect.top; centerX=($rect.left+$rect.right)/2; centerY=($rect.top+$rect.bottom)/2 }
-    $items.Add([ordered]@{id="uia:hwnd:${hwnd}:pid:${ownerId}"; depth=1; name=$title.ToString(); className=$class.ToString(); controlType='Window'; processId=$ownerId; nativeWindowHandle=$hwnd; boundingBox=$box; isEnabled=[WindowsComputerUseNative]::IsWindowEnabled($handle); isOffscreen=(-not $visible -or $iconic); hasKeyboardFocus=($foreground -eq $handle); source='win32'})
+    $entry = [ordered]@{id="uia:hwnd:${hwnd}:pid:${ownerId}"; depth=1; name=$title.ToString(); className=$class.ToString(); controlType='Window'; processId=$ownerId; nativeWindowHandle=$hwnd; boundingBox=$box; isEnabled=[WindowsComputerUseNative]::IsWindowEnabled($handle); isOffscreen=(-not $visible -or $iconic); hasKeyboardFocus=($foreground -eq $handle); source='win32'}
+    if ($iconic) { $entry['minimized'] = $true }
+    $items.Add($entry)
     # Target lookup must not replace the coordinates used by Home-Point.
-    # Only explicit observations establish a new coordinate baseline.
-    if ($RecordObservation) {
+    # Only explicit observations establish a new coordinate baseline. A
+    # minimized window sits at -32000,-32000, so it sets no baseline.
+    if ($RecordObservation -and -not $iconic) {
       Update-WindowCache $items[$items.Count - 1]
     }
-    if ($items.Count -ge $MaxWindows) { break }
   }
   return ,$items
 }
@@ -3178,8 +3222,16 @@ function Invoke-Action {
     "list_windows" {
       $includeInvisible = [bool](Get-Prop $inputObject "includeInvisible" $false)
       $maxWindows = [int](Get-Prop $inputObject "maxWindows" 50)
-      $windows = Get-NativeWindowList -IncludeInvisible $includeInvisible -MaxWindows $maxWindows -RecordObservation
-      return ([ordered]@{ ok = $true; windows = @($windows.ToArray()) })
+      # Minimized windows are listed: they are still there and can be targeted
+      # (activate_window restores them). batch keeps to shown ones.
+      $includeMinimized = [bool](Get-Prop $inputObject "includeMinimized" $true)
+      $windows = Get-NativeWindowList -IncludeInvisible $includeInvisible -MaxWindows $maxWindows -RecordObservation -IncludeMinimized $includeMinimized
+      # A minimized window's box is the -32000,-32000 parking spot: leave it out
+      # rather than let it read as a position.
+      $listed = @($windows.ToArray() | ForEach-Object { if ($_.Contains('minimized')) { [ordered]@{ id = $_.id; name = $_.name; className = $_.className; processId = $_.processId; nativeWindowHandle = $_.nativeWindowHandle; isOffscreen = $true; minimized = $true } } else { $_ } })
+      $listing = [ordered]@{ ok = $true; windows = $listed }
+      if ($script:WindowListTruncated) { $listing['truncated'] = $true; $listing['truncationReason'] = "maxWindows ($maxWindows) reached; pass a larger maxWindows (up to 200) to list the rest." }
+      return $listing
     }
     "find" {
       $query = Get-Prop $inputObject "query" ""
@@ -3272,6 +3324,7 @@ function Invoke-Action {
           if ($null -ne $patternMethod) {
             $result["method"] = "background:$patternMethod"
             Add-BackgroundReport $result
+            Set-WorkWindow (Get-ElementWindow $point.element)
             return $result
           }
         }
@@ -3436,6 +3489,7 @@ function Invoke-Action {
         if ($null -ne $scrolled) {
           foreach ($key in $scrolled.Keys) { $result[$key] = $scrolled[$key] }
           Add-BackgroundReport $result
+          Set-WorkWindow (Get-ElementWindow $point.element)
           return $result
         }
         Assert-InputAllowed 'Scrolling this element'
@@ -3476,6 +3530,7 @@ function Invoke-Action {
         if ((Get-Prop $inputObject 'focusMode' 'preserve') -ne 'main' -and -not [bool](Get-Prop $inputObject 'activate' $false)) {
           if (Has-WindowTarget $inputObject) { Assert-WindowIdentity $inputObject (Get-ObservationWindow $inputObject) }
           $window = Resolve-InputWindow $inputObject
+          $via = $script:InputWindowVia
           $typed = Set-FocusedEditText $window $text
           if ($null -ne $typed) {
             $script:InputWindow = @{ series = $script:WcuSeries; hwnd = [int64]$window; at = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() }
@@ -3483,7 +3538,7 @@ function Invoke-Action {
             # now holds it.
             $value = Get-ValueText (Invoke-Safe { [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$typed.hwnd) } $null)
             $verified = $typed.grew -eq $text.Length -or ($null -ne $value -and $value.Contains($text))
-            $result = [ordered]@{ ok = $true; action = "type_text"; length = $text.Length; method = "background:EM_REPLACESEL"; verified = $verified }
+            $result = [ordered]@{ ok = $true; action = "type_text"; length = $text.Length; method = "background:EM_REPLACESEL"; verified = $verified; deliveredTo = (Get-KeyDestination $window $via) }
             if ($null -ne $value) { $result["verifyValue"] = if ($value.Length -gt 200) { $value.Substring(0, 200) + "..." } else { $value } }
             if (-not $verified) { $result["note"] = "The field's length changed by $($typed.grew), not by the length of the text: it may limit its length or drop some characters. Check the field." }
             return $result
@@ -3525,7 +3580,9 @@ function Invoke-Action {
         Assert-WindowIdentity $inputObject $target
       }
       $result = [ordered]@{ ok = $true; action = "type_text"; length = $text.Length; focusedControl = $null }
-      $state = Start-Input -InputObject $inputObject -Hwnd (Resolve-InputWindow $inputObject)
+      $inputHwnd = Resolve-InputWindow $inputObject
+      $via = $script:InputWindowVia
+      $state = Start-Input -InputObject $inputObject -Hwnd $inputHwnd
       try {
         if ($null -ne $target -and (Get-Prop $inputObject 'focusMode' 'preserve') -eq 'main') {
           $uiaTarget = Resolve-TargetWindow $inputObject
@@ -3533,7 +3590,9 @@ function Invoke-Action {
           if ($null -eq $focusedControl) { throw 'Could not focus the requested main text control; no text sent.' }
           $result["focusedControl"] = $focusedControl
         }
+        $destination = Get-KeyDestination ([WindowsComputerUseNative]::GetForegroundWindow().ToInt64()) $via
         Assert-InFront $state
+        $result["deliveredTo"] = $destination
         if ($method -eq "sendinput") {
           $ok = [bool][WindowsComputerUseNative]::SendUnicodeText($text)
           if (-not $ok) { throw "method:'sendinput' dropped some key events (input queue full). Retry, or use method:'clipboard'." }
@@ -3601,13 +3660,19 @@ function Invoke-Action {
       $chords = @($sequence | ForEach-Object { Convert-KeyChord -Keys $_ })
       $result = [ordered]@{ ok = $true; action = "keypress"; keys = $keys; sendKeys = $chords[0]; method = "sendinput" }
       if($sequence.Count -gt 1){$result['thenKeys']=@(Get-Prop $inputObject 'thenKeys' @());$result['chordsSent']=0}
-      $state = Start-Input -InputObject $inputObject -Hwnd (Resolve-InputWindow $inputObject)
+      $inputHwnd = Resolve-InputWindow $inputObject
+      $via = $script:InputWindowVia
+      $state = Start-Input -InputObject $inputObject -Hwnd $inputHwnd
       try {
         for($i=0;$i -lt $sequence.Count;$i++){
           if($i -gt 0){Start-Sleep -Milliseconds ([int](Get-Prop $inputObject 'intervalMs' 60))}
           [void](Test-Failsafe)
+          # The keys reach the focused control of the window in front: name both
+          # (deliveredTo), so a result shows where they went, not only "sent".
+          if($i -eq 0){$destination=Get-KeyDestination ([WindowsComputerUseNative]::GetForegroundWindow().ToInt64()) $via}
           Assert-InFront $state
           if (-not [WindowsComputerUseNative]::SendKeyChord([string[]]$sequence[$i])) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected the key chord.' }
+          if($i -eq 0){$result['deliveredTo']=$destination}
           if($sequence.Count -gt 1){$result['chordsSent']=$i+1}
         }
       } finally { Complete-Input $state $result }
@@ -3632,11 +3697,13 @@ function Invoke-Action {
       if ($kind -ne 'default') {
         $result = [ordered]@{ ok = $true; action = "invoke"; elementId = $elementId; elementAction = $kind; method = (Invoke-ElementAction $el $kind) }
         Add-BackgroundReport $result
+        Set-WorkWindow (Get-ElementWindow $el)
         return $result
       }
       $method = Invoke-ElementPattern $el
       $result = [ordered]@{ ok = $true; action = "invoke"; elementId = $elementId; method = $method }
       Add-BackgroundReport $result
+      if ($null -ne $method) { Set-WorkWindow (Get-ElementWindow $el) }
       if ($null -eq $method -and $fallback) {
         $rect = Convert-Rect (Invoke-Safe { $el.Current.BoundingRectangle } $null)
         if ($null -eq $rect) { throw "Element has no invokable pattern and no bounding box for fallback click." }
@@ -3665,6 +3732,7 @@ function Invoke-Action {
       $method = Set-ElementValue $el -Value $value
       $result = [ordered]@{ ok = $true; action = "set_value"; elementId = $elementId; method = $method; length = $value.Length }
       Add-BackgroundReport $result
+      if ($null -ne $method) { Set-WorkWindow (Get-ElementWindow $el) }
       if ($null -eq $method -and $fallback) {
         Assert-InputAllowed 'This element has no ValuePattern; typing into it'
         [void](Test-Failsafe)

@@ -17,6 +17,7 @@ await writeFile(path.join(root,'scripts/windows-uia.ps1'),`param([switch]$Persis
   $r=$line | ConvertFrom-Json
   $result=@{id=$r.id;ok=$true;action=$r.action;args=$r.args}
   if($r.action -eq 'wait'){Start-Sleep -Milliseconds $r.args.milliseconds}
+  if($r.action -eq 'keypress'){$result.deliveredTo=@{title='Fixture';via=$(if($r.args.keys[0] -eq 'f2'){'front window'}else{'window target'})}}
   if($r.action -eq 'tree' -or $r.action -eq 'snapshot'){$result.nodeCount=6;$result.tree=@{name='Fixture'}}
   if($r.action -eq 'find') {
     if($r.args.query -eq 'stall'){Start-Sleep -Seconds 10}
@@ -52,7 +53,10 @@ try{
   const timed=await call('find',{query:'stall',treeTimeoutMs:100});assert.equal(timed.isError,true);assert.equal(data(timed).truncationReason,'backendTimeout');assert.equal(timed.content[1].type,'image');
   assert.equal((await call('wait',{milliseconds:1})).isError,undefined);
   const sent=data(await call('click',{x:1,y:2}));assert.equal(sent.verification,'sent');
-  console.log('PASS schema/default validation before worker launch, queued deadlines, OCR hit/miss provenance, explicit opt-out, compact JSON, timed-out UIA screenshot and worker recovery');
+  // Issue #82: keys that went to whatever window was in front are not "sent".
+  const guessed=data(await call('keypress',{keys:['f2']}));assert.equal(guessed.verification,'unconfirmed');assert.match(guessed.verificationNote,/window in front/);assert.equal(guessed.deliveredTo.via,'front window');
+  const aimed=data(await call('keypress',{keys:['f3'],nativeWindowHandle:42}));assert.equal(aimed.verification,'sent');assert.equal(aimed.deliveredTo.via,'window target');
+  console.log('PASS schema/default validation before worker launch, queued deadlines, OCR hit/miss provenance, explicit opt-out, compact JSON, timed-out UIA screenshot, worker recovery and key delivery verification');
 }finally{
   client.child.stdin.end();const timer=setTimeout(()=>client.child.kill(),5000);
   if(client.child.exitCode===null)await new Promise(resolve=>client.child.once('exit',resolve));clearTimeout(timer);

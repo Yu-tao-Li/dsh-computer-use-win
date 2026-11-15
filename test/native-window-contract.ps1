@@ -11,11 +11,12 @@ using System.Text;
 public static class WindowsComputerUseNative {
   public struct RECT { public int left, top, right, bottom; }
   public static int X = 100, Y = 200;
-  public static IntPtr[] TopLevelWindows() { return new[] {new IntPtr(42)}; }
+  public static bool Minimized;
+  public static IntPtr[] TopLevelWindows() { return Minimized ? new[] {new IntPtr(42), new IntPtr(43)} : new[] {new IntPtr(42)}; }
   public static IntPtr GetForegroundWindow() { return new IntPtr(42); }
   public static bool IsWindow(IntPtr hwnd) { return hwnd.ToInt64() == 42; }
   public static bool IsWindowVisible(IntPtr hwnd) { return true; }
-  public static bool IsIconic(IntPtr hwnd) { return false; }
+  public static bool IsIconic(IntPtr hwnd) { return hwnd.ToInt64() == 43; }
   public static bool IsWindowEnabled(IntPtr hwnd) { return true; }
   public static bool GetWindowRect(IntPtr hwnd, out RECT rect) {
     rect = new RECT { left = X, top = Y, right = X + 400, bottom = Y + 300 }; return true;
@@ -85,4 +86,21 @@ $rejected = $false
 try { $null = Resolve-Element 'uia:hwnd:42:pid:4242' ([pscustomobject]@{viewMode='invalid'}) }
 catch { if ($_.Exception.Message -notmatch 'viewMode must be one of') { throw }; $rejected = $true }
 Assert-Equal $rejected $true 'HWND ids validate viewMode'
-Write-Output 'PASS title/PID resolution preserves homing, explicit observations refresh cache, and HWND ids validate viewMode (fake native API only)'
+# Issue #82: a minimized window is listed on request (list_windows asks by
+# default), marked minimized, and sets no homing baseline at -32000,-32000.
+[WindowsComputerUseNative]::Minimized = $true
+$script:WindowCache = @{};$script:WindowObservations=@{}
+$shown = @((Get-NativeWindowList -RecordObservation).ToArray())
+Assert-Equal $shown.Count 1 'Shown windows only by default'
+Assert-Equal $shown[0].Contains('minimized') $false 'A shown window carries no minimized flag'
+$all = @((Get-NativeWindowList -RecordObservation -IncludeMinimized $true).ToArray())
+Assert-Equal $all.Count 2 'Minimized window listed on request'
+Assert-Equal $all[1].nativeWindowHandle 43 'Minimized window keeps its place'
+Assert-Equal $all[1].minimized $true 'Minimized window marked'
+Assert-Equal $all[1].isOffscreen $true 'Minimized window is offscreen'
+Assert-Equal $script:WindowCache.ContainsKey('43') $false 'Minimized window sets no homing baseline'
+Assert-Equal $all[1].Contains('observationToken') $false 'Minimized window gets no observation token'
+Assert-Equal @((Get-NativeWindowList -IncludeInvisible $true).ToArray())[1].minimized $true 'Hidden-window listing marks minimized windows too'
+Assert-Equal (Select-TargetWindow ([pscustomobject]@{processId=4242})).nativeWindowHandle 42 'A minimized twin does not make the shown window ambiguous'
+[WindowsComputerUseNative]::Minimized = $false
+Write-Output 'PASS title/PID resolution preserves homing, explicit observations refresh cache, HWND ids validate viewMode, minimized windows listed and marked without a homing baseline (fake native API only)'

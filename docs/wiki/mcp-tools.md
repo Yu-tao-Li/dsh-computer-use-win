@@ -38,7 +38,9 @@ Each action uses the least intrusive way that works. Reads (snapshot, accessibil
 
 Real input (coordinate clicks, pastes, key presses, drags, wheel scrolls) borrows the foreground: the target comes forward for the action, a coordinate click is refused with POINT_COVERED when its point shows a window of another process, and afterwards the pointer goes back where the user left it and the foreground goes back to the window that was in front. The target stays in front while a menu, list or dialog the action opened is showing, with activate:true, and when the user switched windows meanwhile; a pointer the user moved is left where they put it. Keys are sent only after a last check that the target (or a window of its process) is still in front. Bringing a window forward first joins the input of the thread in front, which needs no key press, and falls back to the Alt-key method.
 
-Without a window target, the active window is the window the operation series last gave input to, while it is open, else the foreground window. Input and observations without a target use it, so after the foreground went back to the user they keep to DSH's window; snapshot captures that window when it is behind another one. health.activeWindow still reports the real foreground window.
+Without a window target, the active window is the window the operation series last gave input to, while it is open, else the foreground window. Background element actions count too: after set_value, invoke, a pattern click or an element scroll, that element's window is the one a following targetless keypress or type_text goes to. Input and observations without a target use it, so after the foreground went back to the user they keep to DSH's window; snapshot captures that window when it is behind another one. health.activeWindow still reports the real foreground window.
+
+keypress and type_text report `deliveredTo`: the window that got the input (`nativeWindowHandle`, `processId`, `title`), `via` (how it was chosen: `window target`, `last DSH window` or `front window`) and, when that window was in front and answered messages, `focus`, the control with the keyboard focus, such as `Edit 'Address and search bar'`. With `via: front window` (no window target, and DSH had not worked in a window this turn) the result's verification is `unconfirmed`.
 
 Reads, list_windows, wait, background dispatch and element actions that start in the background take a quiet lease: they honour a stopped series but show no indicator and arm no global Esc. An element action (invoke, set_value, scroll on an element) or type_text in auto mode that turns out to need real input fails in the background attempt with WCU_NEEDS_INPUT before anything is sent, and the server runs it again with the indicator and Esc. Text DSH pastes carries the clipboard formats that keep it out of clipboard history and the cloud clipboard, and the previous clipboard is restored.
 
@@ -100,11 +102,11 @@ Read the UI Automation tree without taking a screenshot. In a Chromium-based win
 
 ### list_windows
 
-List top-level windows visible to Windows UI Automation.
+List top-level windows visible to Windows UI Automation, in Z order. Minimized windows are listed too, with `minimized: true` and `isOffscreen: true` and without a bounding box (Windows parks them at -32000,-32000); activate_window, or any input with that window as target, restores them. When more windows exist than `maxWindows`, the result has `truncated: true`.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
-| includeInvisible | boolean | default: false |
+| includeInvisible | boolean | default: false; also lists hidden windows (tray, helper windows) |
 | maxWindows | integer | default: 50; min: 1; max: 200 |
 
 ### find
@@ -245,7 +247,7 @@ Type text into the focused control of the target (or active) window. method:'aut
 
 ### keypress
 
-Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. The keys go to the target (or active) window, which comes forward for them and then gives the foreground back, unless a menu or dialog they opened is showing. dispatch:'background' supports only a single printable character (posted as WM_CHAR to the focused control of the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendKeys).
+Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windows key is blocked by design. The keys go to the target window, else the window DSH last worked in this turn, else the window in front; it comes forward for them and then gives the foreground back, unless a menu or dialog they opened is showing. The result's `deliveredTo` names the window and its focused control that received the keys (see "Foreground, pointer and the takeover indicator"). dispatch:'background' supports only a single printable character (posted as WM_CHAR to the focused control of the target window, no foreground steal); chords and functional keys must use dispatch:'foreground' (SendInput).
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -300,7 +302,7 @@ Invoke a UI Automation element in the background: BM_CLICK on a Win32 button, el
 
 ### set_value
 
-Set a value in the background (EM_REPLACESEL on a Win32 edit, else the UI Automation ValuePattern), or focus and type as fallback.
+Set a value in the background (EM_REPLACESEL on a Win32 edit, else the UI Automation ValuePattern), or focus and type as fallback. Whether the keyboard focus moves to the element depends on the app: Chromium moves it (measured on the Chrome address bar and a page field), a Win32 edit keeps it where it was. When a key must follow in that field, such as Enter in a search box, call focus on the element first; a targetless keypress afterwards goes to this element's window.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
