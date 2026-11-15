@@ -49,6 +49,7 @@
   "listening": "Press your shortcut…",
   "unsupportedKey": "Use a letter, number, function key or common key, optionally with Ctrl, Alt, Shift or Win.",
   "recordCancelled": "Recording cancelled",
+  "recordUnavailable": "Could not pause desktop shortcuts. Start recording again.",
   "recordTimedOut": "Recording timed out. Click the button to try again.",
   "starTitle": "Star this project on GitHub (opens in a new window)",
   "issueTitle": "Open a GitHub issue (opens in a new window)",

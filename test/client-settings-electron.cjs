@@ -20,6 +20,7 @@ app.whenReady().then(async()=>{
     "window.__ModuleLoader__={load:entry=>{window.clientModule=entry.factory(name=>name==='react'?React:nativeRequire(name))}};void 0;"
   );
   await evaluate(fs.readFileSync(path.join(__dirname,'../mcp/client.js'),'utf8'));
+  await evaluate("window.nativeRecording=false;window.failNativeRecording=false;window.recordingCalls=[];window.hostEsc=0;window.dshDesktop={shortcuts:{recording:async active=>{window.recordingCalls.push(active);if(active&&window.failNativeRecording)throw Error('fixture native recording failure');window.nativeRecording=active}}};void 0");
   await evaluate(
     "window.writes=[];window.listeners=new Set();window.snapshot={value:{mode:'lite',indicatorEnabled:true,indicatorText:'DSH 正在控制电脑',indicatorPosition:'top',indicatorIdleMs:800,stopShortcut:''},revision:1,writable:true};window.failSave=false;window.entries=[];"+
     "window.scope={getSnapshot:()=>window.snapshot,subscribe:fn=>{window.listeners.add(fn);return ()=>window.listeners.delete(fn)},load:async()=>{},set:async(field,value)=>{window.writes.push({field,value});window.snapshot={...window.snapshot,value:{...window.snapshot.value,[field]:value}};for(const fn of window.listeners)fn()}};"+
@@ -46,6 +47,7 @@ app.whenReady().then(async()=>{
   await until("window.snapshot.value.progressPreviewToken>0&&window.snapshot.value.progressOverlayEnabled===true");
   assert.equal(await evaluate("document.getElementById('wincu-page-browserVisible').checked"),false,'Keep the unrelated draft visible');
   assert.notEqual(await evaluate("window.snapshot.value.browserVisible"),false,'Opening applies overlay fields only');
+  assert.match(await evaluate("document.querySelector('.wcu-status').textContent"),/未保存/,'A section save must still show unrelated unsaved changes');
   await evaluate("window.clickButton('放弃更改')");
   await evaluate("document.getElementById('wincu-page-progressOverlayEnabled').click()");
   await evaluate("window.clickButton('保存更改')");
@@ -294,16 +296,24 @@ app.whenReady().then(async()=>{
   await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('26 / 26')");
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.toolPreset==='custom'&&window.snapshot.value.enabledTools.length===26");
+  await evaluate("document.getElementById('wincu-page-browserVisible').click()");
   await evaluate("window.clickButton('预览')");
   await until("window.snapshot.value.previewToken>0");
+  assert.match(await evaluate("document.querySelector('.wcu-status').textContent"),/未保存/,'Preview must still show unrelated unsaved changes');
+  assert.match(await evaluate("document.querySelector('.wcu-status').textContent"),/预览/,'The preview result remains visible');
+  assert.equal(await evaluate("document.getElementById('wincu-page-browserVisible').checked"),false);
+  assert.notEqual(await evaluate("window.snapshot.value.browserVisible"),false,'Preview must not save browser settings');
+  await evaluate("window.clickButton('放弃更改')");
   assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='恢复桌面控制')"),false,'A new task resumes automatically; no settings resume button is needed');
-  await evaluate("window.key=init=>window.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,cancelable:true,...init}));window.clickButton('录制快捷键')");
+  await evaluate("window.key=init=>{if(!window.nativeRecording&&['Escape','F8'].includes(init.code)){if(init.code==='Escape')window.hostEsc++;return false}return window.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,cancelable:true,...init}))};window.clickButton('录制快捷键')");
   await until("document.querySelector('[data-recording=true]')!==null");
+  assert.equal(await evaluate('window.nativeRecording'),true,'Suspend native Desktop shortcuts before recording');
   assert.equal(await evaluate("window.key({key:'Control',code:'ControlLeft',ctrlKey:true})"),false,'Recording must consume modifier keys');
   await evaluate("window.key({key:'F8',code:'F8',repeat:true})");
   assert.equal(await evaluate("!!document.querySelector('[data-recording=true]')"),true,'Auto-repeat must not record');
   await evaluate("window.key({key:'F8',code:'F8'})");
   await until("document.querySelector('.wcu-shortcut-value').textContent==='F8'");
+  assert.equal(await evaluate('window.nativeRecording'),false,'Release native shortcuts after capture');
   assert.equal(await evaluate('window.snapshot.value.stopShortcut'),'','Recorded shortcut remains a draft');
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.stopShortcut==='F8'");
@@ -318,11 +328,14 @@ app.whenReady().then(async()=>{
   await until("!!document.querySelector('[data-recording=true]')");
   await evaluate("window.key({key:'Escape',code:'Escape'})");
   await until("!document.querySelector('[data-recording=true]')");
+  assert.equal(await evaluate('window.hostEsc'),0,'Escape cancels the recorder without reaching the native modal shortcut');
+  assert.equal(await evaluate('window.nativeRecording'),false);
   assert.equal(await evaluate("document.querySelector('.wcu-shortcut-value').textContent"),'Ctrl + Alt + K');
   await evaluate("window.clickButton('重新录制')");
   await until("!!document.querySelector('[data-recording=true]')");
   await evaluate("window.dispatchEvent(new Event('blur'))");
   await until("!document.querySelector('[data-recording=true]')");
+  assert.equal(await evaluate('window.nativeRecording'),false,'Release native shortcuts after blur');
   assert.equal(await evaluate("window.key({key:'z',code:'KeyZ'})"),true,'Blur must remove recording listeners');
   await evaluate("window.clickButton('恢复默认（Esc）')");
   await until("document.querySelector('.wcu-shortcut-value').textContent==='Esc（默认）'");
@@ -480,6 +493,20 @@ app.whenReady().then(async()=>{
   await until("document.querySelector('.wcu-shortcut-value').textContent==='Esc（默认）'");
   await evaluate("window.setOverlayInput('progressLockShortcut','Ctrl+Alt+P');window.clickButton('保存更改')");
   await until("window.snapshot.value.progressLockShortcut==='Ctrl+Alt+P'");
+  await evaluate("window.failNativeRecording=true;window.clickButton('录制快捷键')");
+  await until("document.body.textContent.includes('无法暂停桌面快捷键')&&!document.querySelector('[data-recording=true]')");
+  assert.equal(await evaluate('window.nativeRecording'),false,'A failed native lease must cancel recording');
+  await evaluate("window.failNativeRecording=false;window.desktopBridge=window.dshDesktop;delete window.dshDesktop;window.clickButton('录制快捷键')");
+  await until("!!document.querySelector('[data-recording=true]')");
+  await evaluate("window.key({key:'x',code:'KeyX'})");
+  await until("document.querySelector('.wcu-shortcut-value').textContent==='X'");
+  await evaluate("window.clickButton('放弃更改');window.dshDesktop=window.desktopBridge;void 0");
+  await evaluate("window.clickButton('录制快捷键')");
+  await until("window.nativeRecording===true");
+  await evaluate("window.root.render(React.createElement('span',null,'unmounted recorder'))");
+  await until("window.nativeRecording===false");
+  await evaluate("window.renderPage('zh')");
+  await until("!!document.querySelector('[data-wincu-settings]')&&!document.querySelector('[data-recording=true]')");
   await evaluate("window.renderPage('en')");
   await until("document.body.textContent.includes('Press Esc to stop')");
   await evaluate("window.snapshot={...window.snapshot,writable:false};for(const fn of window.listeners)fn()");

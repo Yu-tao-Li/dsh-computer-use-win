@@ -380,6 +380,8 @@ const tools = [
           minItems: 1,
           items: { type: "string" }
         },
+        thenKeys: { type: "array", minItems: 1, maxItems: 19, items: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } }, description: 'Desktop foreground only: chords sent after keys while retaining the same foreground lease, e.g. keys:["alt","h"], thenKeys:[["o"],["w"]] opens Excel Column Width.' },
+        intervalMs: { type: "integer", minimum: 0, maximum: 500, default: 60, description: 'Pause between ordered chords for application menus to update.' },
         dispatch: { type: "string", enum: ["foreground", "background"], default: "foreground" }
       }
     }
@@ -558,7 +560,7 @@ const conciseDescriptions = {
   drag: 'Drag across SCREEN points (brings target forward).',
   scroll: 'Scroll elementId or SCREEN x/y (positive deltaY scrolls down).',
   type_text: 'Type into focus (Win32 background or clipboard-preserving paste).',
-  keypress: 'Send key/chord (e.g. ["ctrl","a"]); Win key blocked; background supports 1 printable char only.',
+  keypress: 'Send keys chord; optional thenKeys sends further chords in the same desktop foreground lease (Excel Ribbon). Win key blocked.',
   focus: 'Focus a UIA element.',
   invoke: 'Invoke/toggle/select/expand a UIA element in background (optional click fallback).',
   set_value: 'Set value in background (page IDs fill fields; <tab>:address navigates; new-tab opens background tab).',
@@ -625,8 +627,9 @@ const capabilityInstructions = 'Windows Computer Use reads and operates Windows 
 const managementOnly = initialNames.length === 1 && initialNames[0] === discoveryName
   && [...allowedTools].some(name => name !== discoveryName);
 const routingInstructions = browserRoutingInstructions(process.env.WCU_SETTINGS_JSON ? JSON.parse(process.env.WCU_SETTINGS_JSON) : {}, [...allowedTools].map(name => name.slice(prefix.length)));
+const desktopInstructions = allowedTools.has(prefix+'keypress') ? '\n\nExcel: select an exact range with Ctrl+G and enter its address in the observed Go To dialog, not a worksheet cell or formula bar. For Ribbon key tips use one keypress with keys and thenKeys, e.g. keys:["alt","h"], thenKeys:[["o"],["w"]] opens Column Width without returning focus between chords. Prefer numeric column widths or AutoFit to dragging boundaries. For long text, set bounded widths, enable Wrap Text in Format Cells > Alignment, then AutoFit Row Height; inspect the saved result.' : '';
 const serverInstructions = [...allowedTools].some(name => name !== discoveryName)
-  ? (managementOnly ? capabilityInstructions + '\n\n' : '') + routingInstructions : undefined;
+  ? (managementOnly ? capabilityInstructions + '\n\n' : '') + routingInstructions + desktopInstructions : undefined;
 // Saved settings the DSH adapter reset to their defaults (dsh-plugin.mjs)
 // surface in health and the tools list (#39).
 let adapterNotices = null;
@@ -1073,7 +1076,10 @@ function validateActionArguments(actionName, args) {
     if (args.condition === "window" && !browser && !args.windowTitle?.trim() && !args.processId && !args.nativeWindowHandle) throw new Error("INVALID_ARGUMENTS: window wait requires a target");
     if (args.condition !== "window" && !args.query?.trim()) throw new Error("INVALID_ARGUMENTS: text/element wait requires query");
   }
-  if (actionName === "keypress" && args.keys.filter(key => !/^(ctrl|control|alt|option|shift)$/i.test(key)).length !== 1) throw new Error("INVALID_ARGUMENTS: keypress needs exactly one non-modifier key");
+  if (actionName === 'keypress') {
+    if(args.thenKeys&&(browser||args.dispatch==='background'))throw Error('INVALID_ARGUMENTS: thenKeys requires desktop foreground dispatch');
+    for(const keys of [args.keys,...(args.thenKeys??[])])if(keys.filter(key=>!/^(ctrl|control|alt|option|shift)$/i.test(key)).length!==1)throw Error('INVALID_ARGUMENTS: keypress needs exactly one non-modifier key per chord');
+  }
 }
 
 async function callTool(name, args, request) {

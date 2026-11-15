@@ -60,9 +60,10 @@ function Test-Failsafe { return $true }
 function Begin-ClipboardLease {
   param($Text,$RestoreClipboard)
   [WcuTestClipboard]::LastText=$Text
-  $lease=[pscustomobject]@{IsCompleted=$true;Restored=$true;RestorationFailed=$false}
+  $lease=[pscustomobject]@{IsCompleted=$true;Restored=$true;RestorationFailed=$false;NativePasteCompleted=$false}
   $lease|Add-Member ScriptMethod Complete {param($Timeout) return $true}
   $lease|Add-Member ScriptMethod MarkPasteSent {param($Hwnd)}; $lease|Add-Member ScriptMethod Dispose {}
+  $lease|Add-Member ScriptMethod TryPasteNative {param($Hwnd) if($script:NativePasteFails){throw 'NATIVE_PASTE_TIMEOUT'};$this.NativePasteCompleted=[bool]$script:UseNativePaste;return $this.NativePasteCompleted}
   return $lease
 }
 function Start-Sleep { param([int]$Milliseconds) if ($script:FailDelay -and $Milliseconds -eq 30) { throw 'SIMULATED_DELAY_FAILURE' } }
@@ -79,6 +80,14 @@ if ([WindowsComputerUseNative]::Calls -ne 0) { throw 'Mouse input was sent after
 Type-Text 'test'
 if ([WindowsComputerUseNative]::MoveCalls -ne 0) { throw 'Typing must not reposition the shared pointer.' }
 if ([WcuTestClipboard]::LastText -ne 'test' -or [WcuTestSendKeys]::LastKeys -ne '^v') { throw 'Expected simulated paste without cursor movement.' }
+$script:UseNativePaste=$true
+[WcuTestSendKeys]::LastKeys='no keyboard input'
+Type-Text 'native test'
+if ([WcuTestSendKeys]::LastKeys -ne 'no keyboard input' -or -not $script:LastPasteInfo.clipboardPasteCompleted) { throw 'Native paste must complete without sending Ctrl+V again.' }
+$script:NativePasteFails=$true
+Assert-Error {Type-Text 'native timeout'} 'NATIVE_PASTE_TIMEOUT'
+if ([WcuTestSendKeys]::LastKeys -ne 'no keyboard input') { throw 'An ambiguous native timeout must never replay the paste through the keyboard.' }
+$script:UseNativePaste=$false;$script:NativePasteFails=$false
 [WindowsComputerUseNative]::MoveOk = $true
 [WindowsComputerUseNative]::CursorOk = $false
 Assert-Error { Type-Text 'test' } 'COMPUTER_USE_INPUT_UNAVAILABLE'

@@ -5,23 +5,23 @@
     {
       "mode": "full",
       "tools": 26,
-      "utf16CodeUnits": 26875,
-      "utf8Bytes": 26875,
-      "instructionsUtf16CodeUnits": 2029
+      "utf16CodeUnits": 27104,
+      "utf8Bytes": 27104,
+      "instructionsUtf16CodeUnits": 2522
     },
     {
       "mode": "lite",
       "tools": 12,
-      "utf16CodeUnits": 12937,
-      "utf8Bytes": 12937,
-      "instructionsUtf16CodeUnits": 2029
+      "utf16CodeUnits": 13166,
+      "utf8Bytes": 13166,
+      "instructionsUtf16CodeUnits": 2522
     },
     {
       "mode": "lazy",
       "tools": 1,
       "utf16CodeUnits": 703,
       "utf8Bytes": 703,
-      "instructionsUtf16CodeUnits": 2501
+      "instructionsUtf16CodeUnits": 2994
     }
   ]
 }

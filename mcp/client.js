@@ -362,6 +362,7 @@ window.__ModuleLoader__.load({
     "listening": "请按下快捷键…",
     "unsupportedKey": "请使用字母、数字、功能键或常用按键，可搭配 Ctrl、Alt、Shift、Win。",
     "recordCancelled": "已取消录制",
+    "recordUnavailable": "无法暂停桌面快捷键，请重新录制。",
     "recordTimedOut": "录制已超时，请点击按钮重试。",
     "starTitle": "在 GitHub 上给项目 Star（在新窗口打开）",
     "issueTitle": "在 GitHub 上提 Issue（在新窗口打开）",
@@ -607,6 +608,7 @@ window.__ModuleLoader__.load({
     "listening": "Press your shortcut…",
     "unsupportedKey": "Use a letter, number, function key or common key, optionally with Ctrl, Alt, Shift or Win.",
     "recordCancelled": "Recording cancelled",
+    "recordUnavailable": "Could not pause desktop shortcuts. Start recording again.",
     "recordTimedOut": "Recording timed out. Click the button to try again.",
     "starTitle": "Star this project on GitHub (opens in a new window)",
     "issueTitle": "Open a GitHub issue (opens in a new window)",
@@ -1152,6 +1154,8 @@ window.__ModuleLoader__.load({
       React.useEffect(()=>{
         if(!recording)return;
         if(!writable||saving){setRecording(false);return;}
+        const native=window.dshDesktop?.shortcuts;
+        let disposed=false,timer;
         const cancel=()=>{setRecording(false);setRecordMessage('recordCancelled');};
         const keydown=event=>{
           if(event.isComposing)return;
@@ -1162,9 +1166,17 @@ window.__ModuleLoader__.load({
           if(!shortcut){setRecordMessage('unsupportedKey');return;}
           change('stopShortcut',shortcut);setRecordMessage('');setRecording(false);
         };
-        const timer=setTimeout(()=>{setRecording(false);setRecordMessage('recordTimedOut');},15000);
-        window.addEventListener('keydown',keydown,true);window.addEventListener('blur',cancel);
-        return ()=>{clearTimeout(timer);window.removeEventListener('keydown',keydown,true);window.removeEventListener('blur',cancel);};
+        const start=()=>{
+          if(disposed)return;
+          timer=setTimeout(()=>{setRecording(false);setRecordMessage('recordTimedOut');},15000);
+          window.addEventListener('keydown',keydown,true);
+        };
+        window.addEventListener('blur',cancel);
+        // Desktop intercepts reserved keys before DOM delivery, including Esc.
+        // Use the same native recording lease as the host's shortcut editor.
+        if(native?.recording)native.recording(true).then(start,()=>{if(!disposed){setRecording(false);setRecordMessage('recordUnavailable');}});
+        else start();
+        return ()=>{disposed=true;clearTimeout(timer);window.removeEventListener('keydown',keydown,true);window.removeEventListener('blur',cancel);if(native?.recording)native.recording(false).catch(console.error);};
       },[recording,writable,saving,savedKey]);
       const run = async (patch,success) => {
         setSaving(true);setMessage('');
@@ -1220,6 +1232,7 @@ window.__ModuleLoader__.load({
       const disabled = saving||!writable||recording,indicatorDisabled=disabled||!draft.indicatorEnabled;
       const activeTools=draft.toolPreset==='lazy'?['tools']:draft.toolPreset==='full'?allToolNames:draft.toolPreset==='lite'?liteToolNames:draft.enabledTools;
       const customDisabled=disabled||draft.toolPreset!=='custom';
+      const dirtyStatus=[t('dirty'),['browserVisible','browserApp','browserSignIn','browserAttachUser'].some(key=>draft[key]!==saved[key])?t('browserChange'):'',['toolPreset','enabledTools','mode'].some(key=>!equal(draft[key],saved[key]))?t('toolsChange'):''].filter(Boolean).join(' ');
       const radio=(field,value,label)=>h('label',{key:value},h('input',{type:'radio',name:idPrefix+'-'+field,id:idPrefix+'-'+field+'-'+value,value,checked:draft[field]===value,disabled:indicatorDisabled,onChange:()=>change(field,value)}),label);
       const button=(label,props)=>h('button',{type:'button',...props},t(label));
       const linkIcon=kind=>kind==='github'?h('svg',{viewBox:'0 0 16 16','aria-hidden':true,focusable:false},h('path',{fill:'currentColor',stroke:'none',d:'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'})):h('svg',{viewBox:'0 0 24 24','aria-hidden':true,focusable:false},h('path',{d:kind==='star'?'m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L2.9 9.6l6.3-.9L12 3Z':kind==='issue'?'M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 4 11.5a8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9H13a8.5 8.5 0 0 1 8 8v.5Z':'M14 3h7v7M21 3 10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5'}));
@@ -1318,7 +1331,7 @@ window.__ModuleLoader__.load({
                 button(recording?'cancelRecord':draft.stopShortcut?'rerecord':'record',{className:'wcu-small',disabled:saving||!writable,onClick:()=>{setRecordMessage('');setRecording(!recording);}})))),
           recordMessage&&h('p',{role:'status',className:'wcu-hint'},t(recordMessage))),
         !writable&&h('p',{role:'status','data-tone':'error'},t(available?'unavailable':'notLoaded')),
-        h('footer',{className:'wcu-footer'},h('span',{className:'wcu-status',role:'status','aria-live':'polite','data-tone':message?tone:undefined},message||(dirty?[t('dirty'),['browserVisible','browserApp','browserSignIn','browserAttachUser'].some(key=>draft[key]!==saved[key])?t('browserChange'):'',['toolPreset','enabledTools','mode'].some(key=>JSON.stringify(draft[key])!==JSON.stringify(saved[key]))?t('toolsChange'):''].filter(Boolean).join(' '):t('clean'))),
+        h('footer',{className:'wcu-footer'},h('span',{className:'wcu-status',role:'status','aria-live':'polite','data-tone':message?tone:undefined},[message,dirty?dirtyStatus:!message?t('clean'):''].filter(Boolean).join(' ')),
           h('div',{className:'wcu-actions'},button('discard',{disabled:!dirty||saving||recording,onClick:()=>{setDraft(saved);setDirty(false);setMessage('');setRecordMessage('');}}),button('save',{className:'wcu-primary',disabled:!dirty||disabled,onClick:save}))));
     }
     const actionKeys={snapshot:'see',screenshot:'see',accessibility_tree:'read',list_windows:'windows',find:'findControl',element_info:'read',click:'clickAction',double_click:'doubleClick',move:'movePointer',drag:'dragAction',scroll:'scrollAction',type_text:'typeAction',keypress:'keyAction',focus:'focusAction',invoke:'invokeAction',set_value:'valueAction',activate_window:'windowAction',wait:'waitAction',ocr:'ocrAction',wait_for:'verifyAction',close_window:'closeAction',move_window:'moveWindowAction',launch_app:'launchAction',health:'healthAction',tools:'toolsAction'};

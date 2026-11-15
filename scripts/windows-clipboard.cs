@@ -42,10 +42,11 @@ public sealed class WcuClipboardLease : IDisposable {
   readonly ManualResetEvent ready=new ManualResetEvent(false),finished=new ManualResetEvent(false);
   volatile Owner owner;
   Exception failure;
-  volatile bool read,closing,pasteSent,pasteBarrierDone;
+  volatile bool read,closing,pasteSent,pasteBarrierDone,nativePasteCompleted;
   IntPtr pasteTarget;
   public bool Restored {get;private set;}
   public bool RestorationFailed {get;private set;}
+  public bool NativePasteCompleted {get{return nativePasteCompleted;}}
   public long RequestWindow {get;private set;}
   public uint RequestProcessId {get;private set;}
   public bool IsCompleted {get{return finished.WaitOne(0);}}
@@ -60,6 +61,22 @@ public sealed class WcuClipboardLease : IDisposable {
     pasteTarget=targetWindowHandle;
     pasteSent=true;
     var form=owner;if(form!=null&&read)form.Poke();
+  }
+  public bool TryPasteNative(IntPtr targetWindowHandle){
+    var name=new System.Text.StringBuilder(128);
+    GetClassName(targetWindowHandle,name,name.Capacity);
+    if(!System.Text.RegularExpressions.Regex.IsMatch(name.ToString(),@"^(Edit|RichEdit\w*|WindowsForms10\.EDIT\..*|WindowsForms10\.RichEdit\w*\..*)$",System.Text.RegularExpressions.RegexOptions.IgnoreCase))return false;
+    uint pid;GetWindowThreadProcessId(targetWindowHandle,out pid);
+    if(pid==0||pid!=expectedProcessId)return false;
+    // Native edit controls finish WM_PASTE synchronously. This also confirms
+    // completion when a clipboard monitor materialized the text first.
+    pasteTarget=targetWindowHandle;
+    IntPtr result;
+    if(SendMessageTimeout(targetWindowHandle,0x0302,IntPtr.Zero,IntPtr.Zero,0x0002,1500,out result)==IntPtr.Zero)
+      throw new TimeoutException("Native paste did not finish; no keyboard retry sent");
+    nativePasteCompleted=true;pasteSent=true;
+    var form=owner;if(form!=null)form.Poke();
+    return true;
   }
   public bool Complete(int timeoutMs){
     if(!finished.WaitOne(timeoutMs))return false;
@@ -168,8 +185,8 @@ public sealed class WcuClipboardLease : IDisposable {
         bool own=GetClipboardOwner()==Handle;
         if(!own){lease.finished.Set();Close();return;}
         bool timeout=lease.closing||DateTime.UtcNow>=expires;
-        if(!lease.read&&!timeout)return;
-        if(lease.read&&lease.pasteSent&&!lease.pasteBarrierDone&&!timeout){
+        if(!lease.read&&!lease.nativePasteCompleted&&!timeout)return;
+        if(lease.read&&lease.pasteSent&&!lease.nativePasteCompleted&&!lease.pasteBarrierDone&&!timeout){
           lease.pasteBarrierDone=true;
           if(lease.pasteTarget!=IntPtr.Zero){
             IntPtr dummy;
@@ -182,11 +199,11 @@ public sealed class WcuClipboardLease : IDisposable {
         bool canRestore=false;
         try{
           if(!rendered)Render();
-          canRestore=lease.read&&lease.restore&&GetClipboardOwner()==Handle&&GetClipboardSequenceNumber()==sequence;
+          canRestore=(lease.read||lease.nativePasteCompleted)&&lease.restore&&GetClipboardOwner()==Handle&&GetClipboardSequenceNumber()==sequence;
         }finally{CloseClipboard();}
         if(canRestore&&GetClipboardOwner()==Handle&&GetClipboardSequenceNumber()==sequence){if(previous!=null)Clipboard.SetDataObject(previous,true);else Clipboard.Clear();lease.Restored=true;}
         lease.finished.Set();Close();
-      }catch(Exception error){if(lease.read)lease.RestorationFailed=true;else lease.failure=error;lease.finished.Set();Close();}
+      }catch(Exception error){if(lease.read||lease.nativePasteCompleted)lease.RestorationFailed=true;else lease.failure=error;lease.finished.Set();Close();}
     }
     protected override void Dispose(bool disposing){if(disposing){timer.Stop();timer.Dispose();}base.Dispose(disposing);}
   }
@@ -198,6 +215,7 @@ public sealed class WcuClipboardLease : IDisposable {
   [DllImport("user32.dll")] static extern IntPtr GetOpenClipboardWindow();
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window,out uint processId);
   [DllImport("user32.dll")] static extern uint GetClipboardSequenceNumber();
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window,System.Text.StringBuilder name,int count);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern uint RegisterClipboardFormat(string name);
   [DllImport("user32.dll",SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr hWnd,uint Msg,IntPtr wParam,IntPtr lParam,uint fuFlags,uint uTimeout,out IntPtr lpdwResult);
   [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint flags,UIntPtr size);

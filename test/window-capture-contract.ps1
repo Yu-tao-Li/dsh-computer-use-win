@@ -12,10 +12,12 @@ public static class WindowsComputerUseNative {
   public static long Foreground = 42;
   public static long[] Order = new long[] {42};
   public static Dictionary<long,RECT> Bounds = new Dictionary<long,RECT>();
+  public static Dictionary<long,long> Owners = new Dictionary<long,long>();
   public static HashSet<long> Hidden = new HashSet<long>();
   public static HashSet<long> Minimized = new HashSet<long>();
   public static int PrintCalls = 0, FrameShift = 0;
   public static IntPtr GetForegroundWindow() { return new IntPtr(Foreground); }
+  public static IntPtr GetWindow(IntPtr h,uint command) { long owner;return new IntPtr(Owners.TryGetValue(h.ToInt64(),out owner)?owner:0); }
   public static IntPtr[] TopLevelWindows() { return Array.ConvertAll(Order, h => new IntPtr(h)); }
   public static bool IsWindowVisible(IntPtr h) { return !Hidden.Contains(h.ToInt64()); }
   public static bool IsIconic(IntPtr h) { return Minimized.Contains(h.ToInt64()); }
@@ -35,6 +37,8 @@ public static class WindowsComputerUseNative {
 $def = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-WindowScreenCapture' }, $true)
 if ($null -eq $def) { throw 'Missing screen capture guard' }
 . ([scriptblock]::Create($def.Extent.Text))
+$ownerDef=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-InputWindow'},$true)
+. ([scriptblock]::Create($ownerDef.Extent.Text))
 $bounds = @{x=100;y=100;width=400;height=300}
 $virtual = @{Left=0;Top=0;Right=1000;Bottom=800}
 function Check([bool]$Expected, [string]$Label, $TargetBounds=$bounds) {
@@ -50,7 +54,18 @@ Check $false 'Empty target' @{x=100;y=100;width=0;height=300}
 Check $false 'Unknown target geometry' $null
 [WindowsComputerUseNative]::Order = @(99,42)
 [WindowsComputerUseNative]::Overlay(120,120,300,250)
-Check $false 'Overlapping window above target, including an owned popup'
+Check $false 'Unowned overlapping window, even from the same process'
+[WindowsComputerUseNative]::Owners[99]=42
+[WindowsComputerUseNative]::Foreground=99
+Check $true 'Owned dialog remains visible in the target crop'
+[WindowsComputerUseNative]::Owners[99]=77
+[WindowsComputerUseNative]::Owners[77]=42
+Check $true 'Nested owned dialog remains visible'
+[WindowsComputerUseNative]::Owners.Remove(99)
+[WindowsComputerUseNative]::Foreground=77
+Check $false 'Foreign overlay above an owned foreground dialog still blocks the crop'
+[WindowsComputerUseNative]::Owners.Clear()
+[WindowsComputerUseNative]::Foreground=42
 [WindowsComputerUseNative]::Order = @(42,99)
 Check $true 'Window below target does not occlude it'
 [WindowsComputerUseNative]::Order = @(99,42)

@@ -1,7 +1,8 @@
 // DSH owns MCP transport/cancellation. Display changes do not kill input.
 import z from '@deepseek-ai/schemastery';
 import { fileURLToPath } from 'node:url';
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createServer, connect } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_SETTINGS, normalizeSettings, enabledToolsForSettings, toolSelectionKey, repairStaleSettings } from './settings.mjs';
@@ -74,12 +75,31 @@ export function limitedErrorLog(logger,windowMs=60000,now=Date.now){
 // in use (#71). Directories from versions before 0.5.5 carry no process id.
 const CONTROL_PREFIX='dsh-wcu-control-',CONTROL_MAX_AGE_MS=7*24*3600*1000;
 const processAlive=pid=>{try{process.kill(pid,0);return true;}catch(error){return error.code==='EPERM';}};
+const controlPipe=dir=>'\\\\.\\pipe\\'+path.basename(dir);
+// A pipe belongs to this adapter lifetime; unlike a PID it cannot be reused
+// by an unrelated process after a crash. No polling or process queries.
+export async function holdControlDir(dir){
+  const server=createServer(socket=>socket.destroy());
+  await new Promise((resolve,reject)=>server.once('error',reject).listen(controlPipe(dir),resolve));
+  server.unref();
+  try{writeFileSync(path.join(dir,'.pipe-owner'),'1');}catch(error){server.close();throw error;}
+  return ()=>server.close();
+}
+function controlPipeAlive(dir){
+  return new Promise(resolve=>{
+    const socket=connect(controlPipe(dir));
+    const finish=alive=>{socket.destroy();resolve(alive);};
+    socket.once('connect',()=>finish(true));
+    socket.once('error',error=>finish(!['ENOENT','ECONNREFUSED'].includes(error.code)));
+    socket.setTimeout(250,()=>finish(true));
+  });
+}
 export function removeControlDir(dir){
   try{if(!lstatSync(dir).isDirectory())return false;rmSync(dir,{recursive:true,force:true,maxRetries:2,retryDelay:100});}
   catch(error){if(error.code!=='ENOENT')return false;}
   return !existsSync(dir);
 }
-export function sweepControlDirs({tmp=os.tmpdir(),keep,now=Date.now(),maxAgeMs=CONTROL_MAX_AGE_MS,alive=processAlive}={}){
+export async function sweepControlDirs({tmp=os.tmpdir(),keep,now=Date.now(),maxAgeMs=CONTROL_MAX_AGE_MS,alive=processAlive}={}){
   const removed=[];let names;
   try{names=readdirSync(tmp);}catch{return removed;}
   for(const name of names){
@@ -88,7 +108,9 @@ export function sweepControlDirs({tmp=os.tmpdir(),keep,now=Date.now(),maxAgeMs=C
     const owner=/^dsh-wcu-control-(\d+)-[^-]+$/.exec(name);
     let orphan=false;
     try{
-      if(owner){const pid=Number(owner[1]);orphan=pid!==process.pid&&!alive(pid);}
+      if(!lstatSync(dir).isDirectory())continue;
+      if(existsSync(path.join(dir,'.pipe-owner')))orphan=!await controlPipeAlive(dir);
+      else if(owner){const pid=Number(owner[1]);orphan=pid!==process.pid&&!alive(pid);}
       else{let touched=lstatSync(dir).mtimeMs;for(const file of readdirSync(dir))touched=Math.max(touched,lstatSync(path.join(dir,file)).mtimeMs);orphan=now-touched>maxAgeMs;}
     }catch{continue;}
     if(orphan&&removeControlDir(dir))removed.push(name);
@@ -124,6 +146,8 @@ export function bridgeConfig(config = {}, runtime = {}) {
 export async function apply(ctx, config) {
   const bridge = await import('@deepseek-ai/dsh-mcp-client');
   const root = mkdtempSync(path.join(os.tmpdir(), `${CONTROL_PREFIX}${process.pid}-`));
+  const releaseControlDir=await holdControlDir(root);
+  ctx.effect(()=>releaseControlDir);
   const runtime = { configFile: path.join(root,'settings.json'), stateFile: path.join(root,'state.json'), activityFile:path.join(root,'activity.json'), layoutFile:path.join(root,'overlay-layout.json'), userTabsFile:path.join(root,'user-tabs.json'), getLocale: () => getLocale() };
   runtime.approvalSecret = randomBytes(32).toString('base64url');
   runtime.approvalLedger=path.join(root,'approval-grants.json');
@@ -145,7 +169,7 @@ export async function apply(ctx, config) {
   // removed directory. Remove it once the server has had time to exit; the
   // next start sweeps whatever a crash or a quit left behind.
   ctx.effect(() => () => { for (const delay of [1500, 6000]) setTimeout(() => removeControlDir(root), delay).unref(); });
-  setTimeout(() => { try { sweepControlDirs({ keep: root }); } catch {} }, 3000).unref();
+  setTimeout(() => { void sweepControlDirs({ keep: root }).catch(()=>{}); }, 3000).unref();
   const logError = limitedErrorLog(ctx.logger);
   const support=bridgeSupport();
   if(!support.tested){runtime.notices={hostBridgeUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: bridge %s is unverified for this release; actions requiring approval fail closed if approval is unavailable.',support.version);}

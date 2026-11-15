@@ -2,6 +2,15 @@
 
 ## 0.6.0 — 2026-11-15
 
+- Excel 等桌面程序支持一次调用连续按键：`keypress.thenKeys` 在同一次前台借用中执行后续键组，减少功能区快捷键被前台归还打断的情况；补充明确选区、数字列宽、自动换行和自动行高的操作指引。/ Desktop keypress.thenKeys sends ordered chords in one foreground lease, with spreadsheet guidance for exact range selection, numeric widths, wrapping and row AutoFit.
+- Excel 等程序的自有弹窗可保留在主窗口截图中，避免“列宽”等弹窗已经打开却在截图里消失；无所属关系的其他窗口仍作为遮挡处理。/ Main-window screen crops include owned dialogs and menus, while unrelated windows still block an unobstructed crop.
+
+- 修复运行期间远程鼠标无法悬停解锁思考浮窗：鼠标监听改为只忽略带有 DSH 自身标记的注入移动，允许 UU 等远程软件的鼠标操作；更新输出时保留临时解锁，鼠标移开后仍自动锁回。/ Progress hover unlock now accepts remote-desktop mouse input, ignoring only DSH-marked injection; streaming updates preserve the temporary unlock and moving away still relocks it.
+
+- 修复快捷键录制时宿主抢先处理 Esc/F8：录制期间使用 Desktop 的原生录制接口，结束、取消或离开页面后释放。预览或局部保存后仍显示其他未保存的更改。/ Shortcut recording suspends Desktop native shortcuts until capture, cancellation or unmount. Preview and section saves keep unrelated unsaved changes visible.
+- 原生 Edit/RichEdit 改用同步 WM_PASTE，剪贴板监视器先读走文本时也能在粘贴完成后恢复旧剪贴板；自定义控件的键盘粘贴路径仍需确认目标读取。/ Native Edit/RichEdit pastes use synchronous WM_PASTE and restore the clipboard even when a monitor rendered first; custom controls still require a confirmed target read.
+- 新建控制目录以插件实例持有的命名管道判断存活，避免崩溃后 PID 被其他程序复用导致清理遗漏；旧格式目录沿用原清理规则。/ New control directories use an adapter-lifetime pipe to survive PID reuse correctly; legacy directories keep their previous cleanup rules.
+
 因为更强的模型 Fable 5.2 和 4 Carbon 发布，我决定让这两个模型对插件代码做一次彻底的优化和重构，以提升使用体验；Opus 5.5 和 6.1 Sol 也参与了审核和代码修改。发布前我做了全面的人工使用评测，尽可能保证实际使用不出问题；当然，问题没法彻底避免，遇到新问题请提 issue。/ With the release of the stronger Fable 5.2 and 4 Carbon models, I had these two models thoroughly optimize and refactor the plugin's code for a better experience; Opus 5.5 and 6.1 Sol took part in the review and the code changes as well. I evaluated it by hand in real use to keep everyday use free of problems as far as possible; problems can never be ruled out entirely, so please open an issue if you hit a new one.
 
 本版合并的 PR：[#81](https://github.com/Yu-tao-Li/dsh-computer-use-win/pull/81)（俄文词典，补完 [#74](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/74) 的俄文部分）。0.5.7 之后报告的 issue 都已关闭。/ Merged in this release: [#81](https://github.com/Yu-tao-Li/dsh-computer-use-win/pull/81) (the Russian dictionary, completing the Russian part of [#74](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/74)). Every issue reported since 0.5.7 is closed.

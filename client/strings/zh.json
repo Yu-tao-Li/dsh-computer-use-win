@@ -49,6 +49,7 @@
   "listening": "请按下快捷键…",
   "unsupportedKey": "请使用字母、数字、功能键或常用按键，可搭配 Ctrl、Alt、Shift、Win。",
   "recordCancelled": "已取消录制",
+  "recordUnavailable": "无法暂停桌面快捷键，请重新录制。",
   "recordTimedOut": "录制已超时，请点击按钮重试。",
   "starTitle": "在 GitHub 上给项目 Star（在新窗口打开）",
   "issueTitle": "在 GitHub 上提 Issue（在新窗口打开）",

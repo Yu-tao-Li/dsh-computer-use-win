@@ -254,7 +254,18 @@ Press a key or key chord, such as Ctrl+L, Enter, Alt+F4, or Shift+Tab. The Windo
 | nativeWindowHandle | integer | min: 1 |
 | activate | boolean | default: false |
 | keys | array | min items: 1; required |
+| thenKeys | array of chords | 1–19 following chords; desktop foreground only |
+| intervalMs | integer | 0–500 ms between chords; default: 60 |
 | dispatch | string | foreground/background; default: "foreground" |
+
+For Excel Ribbon commands, keep the chord sequence in one foreground lease:
+`{"keys":["alt","h"],"thenKeys":[["o"],["w"]]}` opens Column Width.
+Each chord still checks cancellation and the target foreground. A failed chord stops the sequence and restores the borrowed foreground; sent chords are not replayed.
+
+For spreadsheet layout, select the range with Ctrl+G and the observed Go To dialog.
+Use numeric column widths or AutoFit, set long-text columns to a bounded width,
+enable Wrap Text in Format Cells > Alignment, then AutoFit Row Height.
+Inspect the saved workbook rather than relying on a drag being dispatched.
 
 ### focus
 

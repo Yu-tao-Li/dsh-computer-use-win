@@ -13,7 +13,9 @@ foreach($name in @('Get-Prop','Get-ViewMode','Invoke-Safe','Test-TargetMatch','G
 Add-Type -TypeDefinition @'
 using System; using System.Collections.Generic;
 public static class WindowsComputerUseNative {
- public static bool SendKeyChord(string[] keys){Fixture.Forms.SendKeys.SendWait(keys.Length==2&&keys[0]=="ctrl"?"^"+keys[1]:keys[keys.Length-1]);return true;}
+ public static List<string> Chords=new List<string>();
+ public static int FailChordAt;
+ public static bool SendKeyChord(string[] keys){Chords.Add(String.Join("+",keys));if(FailChordAt==Chords.Count)throw new Exception("KEY_SEQUENCE_FAILURE");Fixture.Forms.SendKeys.SendWait(keys.Length==2&&keys[0]=="ctrl"?"^"+keys[1]:keys[keys.Length-1]);return true;}
  public struct POINT {public int x,y;}
  public const int MOUSEEVENTF_LEFTDOWN=2,MOUSEEVENTF_LEFTUP=4,MOUSEEVENTF_RIGHTDOWN=8,MOUSEEVENTF_RIGHTUP=16,MOUSEEVENTF_MIDDLEDOWN=32,MOUSEEVENTF_MIDDLEUP=64,MOUSEEVENTF_WHEEL=2048,MOUSEEVENTF_HWHEEL=4096;
  public static int Moves,FailMoveAt,Press,Release,Scroll; public static uint ScrollResult=1;
@@ -41,7 +43,7 @@ namespace Fixture.Forms {
 }
 '@
 function Start-Sleep {param($Milliseconds)}
-function Test-Failsafe {return $true}
+function Test-Failsafe {if($script:CancelSequence -and [WindowsComputerUseNative]::Chords.Count -gt 0){throw 'SEQUENCE_CANCELLED'};return $true}
 function Begin-ClipboardLease {
   param($Text,$RestoreClipboard)
   $old=[Fixture.Forms.Clipboard]::Data
@@ -52,11 +54,14 @@ function Begin-ClipboardLease {
   $lease=[pscustomobject]@{IsCompleted=$true;Restored=$false;RestorationFailed=$false;Previous=$old;Restore=$RestoreClipboard}
   $lease|Add-Member ScriptMethod Complete {param($Timeout) if($this.Restore){[Fixture.Forms.Clipboard]::Data=$this.Previous;$this.Restored=$true};return $true}
   $lease|Add-Member ScriptMethod MarkPasteSent {param($Hwnd)}; $lease|Add-Member ScriptMethod Dispose {}
+  $lease|Add-Member ScriptMethod TryPasteNative {param($Hwnd) return $false}
   return $lease
 }
 function Has-WindowTarget {param($InputObject) return -not [string]::IsNullOrWhiteSpace((Get-Prop $InputObject 'windowTitle' ''))}
 function Activate-TargetIfRequested {param($InputObject)}
 function Start-Input {param($InputObject,$Hwnd,[switch]$NoActivate) $script:GuardCalls++; return @{moved=$null}}
+function Resolve-InputWindow {param($InputObject) return 0}
+function Assert-InFront {param($State)}
 function Complete-Input {param($State,$Result) $script:CompleteCalls++}
 function Get-RootWindowAt {param($X,$Y) return 7}
 function Get-ElementWindow {param($Element) return 0}
@@ -77,6 +82,24 @@ foreach($key in @('+','^','%','~','(',')','{','}','[',']')){Assert-Equal (Conver
 Assert-Equal (Convert-KeyChord @('ctrl','+')) '^{+}'
 Assert-Equal (Convert-KeyChord @('ctrl','a')) '^a'
 Assert-Equal (Convert-KeyChord @('Enter')) '{ENTER}'
+$sequenceArgs=[pscustomobject]@{keys=@('alt','h');thenKeys=@(@('o'),@('w'));intervalMs=0}
+$script:GuardCalls=0;$script:CompleteCalls=0
+[WindowsComputerUseNative]::Chords.Clear()
+$sequenceResult=Invoke-Action 'keypress' $sequenceArgs
+Assert-Equal ([WindowsComputerUseNative]::Chords -join ',') 'alt+h,o,w'
+Assert-Equal $sequenceResult.chordsSent 3
+Assert-Equal $script:GuardCalls 1;Assert-Equal $script:CompleteCalls 1
+[WindowsComputerUseNative]::Chords.Clear();[WindowsComputerUseNative]::FailChordAt=2
+$script:GuardCalls=0;$script:CompleteCalls=0
+Expect-Error {Invoke-Action 'keypress' $sequenceArgs} 'KEY_SEQUENCE_FAILURE'
+Assert-Equal ([WindowsComputerUseNative]::Chords -join ',') 'alt+h,o'
+Assert-Equal $script:GuardCalls 1;Assert-Equal $script:CompleteCalls 1
+[WindowsComputerUseNative]::FailChordAt=0;[WindowsComputerUseNative]::Chords.Clear()
+$script:CancelSequence=$true;$script:CompleteCalls=0
+Expect-Error {Invoke-Action 'keypress' $sequenceArgs} 'SEQUENCE_CANCELLED'
+Assert-Equal ([WindowsComputerUseNative]::Chords -join ',') 'alt+h'
+Assert-Equal $script:CompleteCalls 1
+$script:CancelSequence=$false;[WindowsComputerUseNative]::Chords.Clear()
 foreach($fail in @($false,$true)){
   $original=New-Object Fixture.Forms.DataObject
   $original.SetData('Text',$false,'old');$original.SetData('Bitmap',$false,'image fixture');$original.SetData('FileDrop',$false,@('fixture.txt'))

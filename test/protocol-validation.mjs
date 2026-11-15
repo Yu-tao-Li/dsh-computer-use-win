@@ -11,6 +11,18 @@ try{
  const supported=new Set(['type','properties','additionalProperties','required','items','minItems','maxItems','enum','minLength','maxLength','pattern','minimum','maximum','description','default','title']);
  const visit=schema=>{for(const key of Object.keys(schema))assert(supported.has(key),'Unsupported schema keyword '+key);for(const child of Object.values(schema.properties??{}))visit(child);if(schema.items)visit(schema.items);};
  for(const tool of schemas)visit(tool.inputSchema);
+ const keySchema=schemas.find(tool=>tool.name==='windows_computer_use_keypress').inputSchema;
+ assert.equal(keySchema.properties.thenKeys.maxItems,19);
+ assert.equal(keySchema.properties.intervalMs.default,60);
+ for(const args of [
+  {keys:['alt','h'],thenKeys:[]},
+  {keys:['alt','h'],thenKeys:[['ctrl','a','b']]},
+  {keys:['alt','h'],thenKeys:[['o']],dispatch:'background'},
+  {keys:['alt','h'],thenKeys:[['o']],browserTab:'t1a'},
+  {keys:['alt','h'],thenKeys:[['o']],intervalMs:'60'},
+ ]){
+  const result=await client.call('windows_computer_use_keypress',args);assert.equal(result.isError,true);assert.match(text(result),/INVALID_ARGUMENTS/);
+ }
  for(const [args,pattern]of [[{target:''},/at least/],[{target:'x'.repeat(40000)},/at most/],[{target:'fixture.exe',arguments:'x'.repeat(40000)},/at most/]]){
   const result=await client.call('windows_computer_use_launch_app',args);assert.equal(result.isError,true);assert.match(text(result),pattern);
  }

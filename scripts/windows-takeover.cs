@@ -160,9 +160,9 @@ namespace DshTakeover {
   }
 
   // Where the user's own mouse last moved, for the overlay's lock button. A
-  // low-level hook on a thread of its own records physical movement only:
-  // input injected with SendInput (DSH's clicks among it) carries
-  // LLMHF_INJECTED and is skipped, and SetCursorPos never reaches the hook.
+  // low-level hook records local and remote-desktop mouse movement. Only
+  // injected movement bearing DSH's input marker is skipped; remote tools
+  // also set LLMHF_INJECTED. SetCursorPos never reaches the hook.
   // The hook stores one number, so system input never waits on the overlay.
   internal sealed class PointerWatch : IDisposable {
     readonly Native.Hook callback;
@@ -190,14 +190,17 @@ namespace DshTakeover {
     }
     // MSLLHOOKSTRUCT: pt.x at 0, pt.y at 4, flags at 12 (1 = injected, 2 = injected from a lower integrity level).
     void Record(int kind, IntPtr data) {
-      if (kind != 0x200 || (Marshal.ReadInt32(data, 12) & 0x03) != 0) return;
+      if (kind != 0x200) return;
+      int flags=Marshal.ReadInt32(data,12);
+      ulong extra=IntPtr.Size==8?unchecked((ulong)Marshal.ReadInt64(data,24)):unchecked((uint)Marshal.ReadInt32(data,20));
+      if((flags&0x03)==1&&extra==(ulong)KeyboardWatch.InputMarker){seen=false;return;}
       Interlocked.Exchange(ref packed, ((long)Marshal.ReadInt32(data, 0) << 32) | (uint)Marshal.ReadInt32(data, 4));
       seen = true;
     }
     // Tests feed the same parser a hook record built in memory, so no real input is needed.
-    internal void TestFeed(int x, int y, int flags) {
+    internal void TestFeed(int x, int y, int flags, ulong extra) {
       testFed = true; IntPtr data = Marshal.AllocHGlobal(32);
-      try { for (int offset = 0; offset < 32; offset += 4) Marshal.WriteInt32(data, offset, 0); Marshal.WriteInt32(data, 0, x); Marshal.WriteInt32(data, 4, y); Marshal.WriteInt32(data, 12, flags); Record(0x200, data); }
+      try { for (int offset = 0; offset < 32; offset += 4) Marshal.WriteInt32(data, offset, 0); Marshal.WriteInt32(data, 0, x); Marshal.WriteInt32(data, 4, y); Marshal.WriteInt32(data, 12, flags); if(IntPtr.Size==8)Marshal.WriteInt64(data,24,unchecked((long)extra));else Marshal.WriteInt32(data,20,unchecked((int)extra)); Record(0x200, data); }
       finally { Marshal.FreeHGlobal(data); }
     }
     internal bool Latest(out Native.Point point) {
@@ -540,11 +543,11 @@ namespace DshTakeover {
         } else if(action=="test_progress_lock_click"&&testMode){
           if(progress!=null)progress.TestLockClick();
         } else if(action=="test_progress_pointer"&&testMode){
-          // Where the cursor is (instead of GetCursorPos); a physical move is a
-          // hook record fed through the real parser with flags 0, an injected one with flags 1.
+          // Feed actual hook flags and extra-info through the real parser.
+          // Existing injected test records default to the plugin's marker.
           testOverlayCursor=new Native.Point(Get(command,"x",0),Get(command,"y",0));
           int flags=Get(command,"hookFlags",-1);
-          if(flags>=0){if(pointerWatch==null)pointerWatch=new PointerWatch();pointerWatch.TestFeed(Get(command,"x",0),Get(command,"y",0),flags);}
+          if(flags>=0){if(pointerWatch==null)pointerWatch=new PointerWatch();pointerWatch.TestFeed(Get(command,"x",0),Get(command,"y",0),flags,(ulong)Get<long>(command,"extra",(flags&1)!=0?(long)(ulong)KeyboardWatch.InputMarker:0L));}
           TrackProgressPointer();
         } else if(action=="test_progress_backdrop"&&testMode){
           if(progress!=null)progress.ShowTestBackdrop();
@@ -597,7 +600,7 @@ namespace DshTakeover {
         SyncTimer();
         if (testMode || action == "status") {
           Native.Point livePoint; bool liveCursorAvailable=Native.GetCursorPos(out livePoint);
-          Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0), consumed = consumed, uiWindowCount=Application.OpenForms.Count, stopShortcut = stopShortcut, windows = frames.Count, progressVisible=progress!=null, progressClickThrough=progress!=null&&progress.ClickThrough, progressContent=progress!=null?progress.Content:null, progressLocked=progress!=null&&progress.Locked, progressHover=progress!=null?progress.HoverStatus():null, pointerWatchActive=pointerWatch!=null&&pointerWatch.Active, progressReading=progress!=null?progress.ReadingStatus():null, progressOpacity=progress!=null?progress.BackgroundOpacity:0, progressBounds=progress!=null?new {x=progress.Left,y=progress.Top,width=progress.Width,height=progress.Height}:null, remoteIndicatorVisible=remoteVisible, overlayCaptureExcluded=frames.Count>0&&frames.TrueForAll(frame=>frame.CaptureExcluded), overlayClickThrough=frames.Count>0&&frames.TrueForAll(frame=>frame.ClickThrough), displayRevision=displayRevision, displays=Array.ConvertAll(displays,r=>new {left=r.Left,top=r.Top,width=r.Width,height=r.Height}), overlayBounds=frames.ConvertAll(frame=>new {left=frame.DisplayBounds.Left,top=frame.DisplayBounds.Top,width=frame.DisplayBounds.Width,height=frame.DisplayBounds.Height}), cursorError = cursorError, liveCursorAvailable = liveCursorAvailable, pointerSource = testPointerPoint.HasValue ? "test-seam" : "windows", pointerVisible = pointer != null, pointerClickThrough = pointer != null && pointer.ClickThrough, pointerCaptureExcluded = pointer != null && pointer.CaptureExcluded, foreground = Native.GetForegroundWindow().ToInt64() });
+          Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0), consumed = consumed, uiWindowCount=Application.OpenForms.Count, stopShortcut = stopShortcut, windows = frames.Count, progressVisible=progress!=null, progressWindow=progress!=null?progress.Handle.ToInt64():0, progressClickThrough=progress!=null&&progress.ClickThrough, progressContent=progress!=null?progress.Content:null, progressLocked=progress!=null&&progress.Locked, progressHover=progress!=null?progress.HoverStatus():null, pointerWatchActive=pointerWatch!=null&&pointerWatch.Active, progressReading=progress!=null?progress.ReadingStatus():null, progressOpacity=progress!=null?progress.BackgroundOpacity:0, progressBounds=progress!=null?new {x=progress.Left,y=progress.Top,width=progress.Width,height=progress.Height}:null, remoteIndicatorVisible=remoteVisible, overlayCaptureExcluded=frames.Count>0&&frames.TrueForAll(frame=>frame.CaptureExcluded), overlayClickThrough=frames.Count>0&&frames.TrueForAll(frame=>frame.ClickThrough), displayRevision=displayRevision, displays=Array.ConvertAll(displays,r=>new {left=r.Left,top=r.Top,width=r.Width,height=r.Height}), overlayBounds=frames.ConvertAll(frame=>new {left=frame.DisplayBounds.Left,top=frame.DisplayBounds.Top,width=frame.DisplayBounds.Width,height=frame.DisplayBounds.Height}), cursorError = cursorError, liveCursorAvailable = liveCursorAvailable, pointerSource = testPointerPoint.HasValue ? "test-seam" : "windows", pointerVisible = pointer != null, pointerClickThrough = pointer != null && pointer.ClickThrough, pointerCaptureExcluded = pointer != null && pointer.CaptureExcluded, foreground = Native.GetForegroundWindow().ToInt64() });
         } else {
           Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0) });
         }
@@ -685,10 +688,10 @@ namespace DshTakeover {
       Native.Point cursor,moved;
       if(testMode&&testOverlayCursor.HasValue)cursor=testOverlayCursor.Value;
       else if(!Native.GetCursorPos(out cursor))return;
-      // The cursor must still be where the user's last physical move left it;
+      // The cursor must still be where the user's last local/remote move left it;
       // DSH moving it elsewhere (SetCursorPos) breaks the match.
-      bool physical=pointerWatch.Latest(out moved)&&Math.Abs(moved.x-cursor.x)<=2&&Math.Abs(moved.y-cursor.y)<=2;
-      progress.TrackPointer(cursor,physical);
+      bool userPointer=pointerWatch.Latest(out moved)&&Math.Abs(moved.x-cursor.x)<=2&&Math.Abs(moved.y-cursor.y)<=2;
+      progress.TrackPointer(cursor,userPointer);
     }
     protected override void Dispose(bool disposing) {
       if (disposing && !shuttingDown) {
@@ -803,14 +806,14 @@ namespace DshTakeover {
     // passes the mouse through, resting the user's own pointer on it for a
     // moment unlocks the window, so it can be moved and resized; once the
     // pointer has been away for a while it locks again. The saved lock setting
-    // is not changed, and DSH's own pointer moves never count (physical=false).
-    internal void TrackPointer(Native.Point cursor,bool physical){
+    // is not changed, and DSH's own pointer moves never count (userPointer=false).
+    internal void TrackPointer(Native.Point cursor,bool userPointer){
       if(IsDisposed)return;
       var now=DateTime.UtcNow;var at=new Point(cursor.x-Left,cursor.y-Top);
       if(Locked){
         bool over=LockZone.Contains(at);
         if(hoverBlocked){if(!over)hoverBlocked=false;return;}
-        if(!(physical&&over)){if(hoverSince!=DateTime.MinValue){hoverSince=DateTime.MinValue;hoverFraction=0;Present();}return;}
+        if(!(userPointer&&over)){if(hoverSince!=DateTime.MinValue){hoverSince=DateTime.MinValue;hoverFraction=0;Present();}return;}
         if(hoverSince==DateTime.MinValue)hoverSince=now;
         float fraction=(float)Math.Min(1,(now-hoverSince).TotalMilliseconds/HoverUnlockMs);
         if(fraction>=1){hoverSince=awaySince=DateTime.MinValue;hoverFraction=0;hoverUnlocked=true;ApplyLock(false);return;}

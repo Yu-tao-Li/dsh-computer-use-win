@@ -2259,15 +2259,18 @@ function Type-Text {
   $lease = Begin-ClipboardLease -Text $Text -RestoreClipboard $RestoreClipboard
   try {
     [void](Test-Failsafe)
-    if (-not [WindowsComputerUseNative]::SendKeyChord(@('ctrl','v'))) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected paste input.' }
-    $lease.MarkPasteSent([WindowsComputerUseNative]::FocusedWindow([WindowsComputerUseNative]::GetForegroundWindow()))
+    $pasteTarget=[WindowsComputerUseNative]::FocusedWindow([WindowsComputerUseNative]::GetForegroundWindow())
+    if (-not $lease.TryPasteNative($pasteTarget)) {
+      if (-not [WindowsComputerUseNative]::SendKeyChord(@('ctrl','v'))) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected paste input.' }
+      $lease.MarkPasteSent([WindowsComputerUseNative]::FocusedWindow([WindowsComputerUseNative]::GetForegroundWindow()))
+    }
     $deadline = [DateTime]::UtcNow.AddMilliseconds(2200)
     while (-not $lease.IsCompleted -and [DateTime]::UtcNow -lt $deadline) {
       [void](Test-Failsafe)
       [void]$lease.Complete(25)
     }
     $requested = $lease.Complete(0)
-    $script:LastPasteInfo = @{ clipboardRequested = $requested; clipboardRestored = $lease.Restored; clipboardRestoreFailed = $lease.RestorationFailed; clipboardRequestWindow = $lease.RequestWindow; clipboardRequestProcessId = $lease.RequestProcessId }
+    $script:LastPasteInfo = @{ clipboardRequested = $requested; clipboardPasteCompleted = $lease.NativePasteCompleted; clipboardRestored = $lease.Restored; clipboardRestoreFailed = $lease.RestorationFailed; clipboardRequestWindow = $lease.RequestWindow; clipboardRequestProcessId = $lease.RequestProcessId }
   } finally {
     # Without a confirmed read, leave this paste's text available. Restoring
     # the old clipboard now could send unrelated data to a slow recipient.
@@ -2494,10 +2497,10 @@ function Get-ExtendedFrameBounds {
 
 function Test-WindowScreenCapture {
   param([long]$Hwnd, [object]$Bounds, [object]$VirtualScreen)
-  # EnumWindows is in Z order. Be conservative about overlays, including
-  # same-process popups: a screen crop is usable only with no overlap above it.
+  # Include this window's owned dialogs/menus in its screen crop. Unrelated
+  # windows, including unowned same-process siblings, still make it unusable.
   if ($null -eq $Bounds -or $Bounds.width -le 0 -or $Bounds.height -le 0) { return $false }
-  if ([WindowsComputerUseNative]::GetForegroundWindow().ToInt64() -ne $Hwnd) { return $false }
+  if (-not (Test-InputWindow ([WindowsComputerUseNative]::GetForegroundWindow().ToInt64()) $Hwnd)) { return $false }
   if ($Bounds.x -lt $VirtualScreen.Left -or $Bounds.y -lt $VirtualScreen.Top -or
       $Bounds.x + $Bounds.width -gt $VirtualScreen.Right -or
       $Bounds.y + $Bounds.height -gt $VirtualScreen.Bottom) { return $false }
@@ -2506,6 +2509,7 @@ function Test-WindowScreenCapture {
       return ([WindowsComputerUseNative]::IsWindowVisible($handle) -and -not [WindowsComputerUseNative]::IsIconic($handle))
     }
     if (-not [WindowsComputerUseNative]::IsWindowVisible($handle) -or [WindowsComputerUseNative]::IsIconic($handle)) { continue }
+    if (Test-InputWindow $handle.ToInt64() $Hwnd) { continue }
     [uint32]$overlayOwner = 0
     if ($script:TakeoverProcessId) {
       [void][WindowsComputerUseNative]::GetWindowThreadProcessId($handle, [ref]$overlayOwner)
@@ -3591,13 +3595,21 @@ function Invoke-Action {
         if ($typed -ne $true) { $result["note"] = "Background key queued to the focused control, delivery unverified." }
         return $result
       }
-      $chord = Convert-KeyChord -Keys $keys
-      $result = [ordered]@{ ok = $true; action = "keypress"; keys = $keys; sendKeys = $chord; method = "sendinput" }
+      $sequence = New-Object 'System.Collections.Generic.List[object]'
+      $sequence.Add([string[]]$keys)
+      foreach($next in @(Get-Prop $inputObject 'thenKeys' @())){$sequence.Add([string[]]$next)}
+      $chords = @($sequence | ForEach-Object { Convert-KeyChord -Keys $_ })
+      $result = [ordered]@{ ok = $true; action = "keypress"; keys = $keys; sendKeys = $chords[0]; method = "sendinput" }
+      if($sequence.Count -gt 1){$result['thenKeys']=@(Get-Prop $inputObject 'thenKeys' @());$result['chordsSent']=0}
       $state = Start-Input -InputObject $inputObject -Hwnd (Resolve-InputWindow $inputObject)
       try {
-        [void](Test-Failsafe)
-        Assert-InFront $state
-        if (-not [WindowsComputerUseNative]::SendKeyChord([string[]]$keys)) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected the key chord.' }
+        for($i=0;$i -lt $sequence.Count;$i++){
+          if($i -gt 0){Start-Sleep -Milliseconds ([int](Get-Prop $inputObject 'intervalMs' 60))}
+          [void](Test-Failsafe)
+          Assert-InFront $state
+          if (-not [WindowsComputerUseNative]::SendKeyChord([string[]]$sequence[$i])) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected the key chord.' }
+          if($sequence.Count -gt 1){$result['chordsSent']=$i+1}
+        }
       } finally { Complete-Input $state $result }
       return $result
     }
