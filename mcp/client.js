@@ -1142,6 +1142,9 @@ window.__ModuleLoader__.load({
       // The Firefox that DSH starts has no window yet, so choosing Firefox turns
       // the switches off, and choosing another browser turns them back.
       const change = (field,value) => {const next={...draft,[field]:value};
+        // Choosing Custom starts with every tool checked: the user unchecks what
+        // to leave out and saves. A Custom selection already saved stays as saved.
+        if(field==='toolPreset'&&value==='custom'&&draft.toolPreset!=='custom')next.enabledTools=saved.toolPreset==='custom'?saved.enabledTools:[...allToolNames];
         if(field==='browserApp'&&value==='firefox'&&draft.browserApp!=='firefox'){visibleBeforeFirefox.current=draft.browserVisible;attachBeforeFirefox.current=draft.browserAttachUser;next.browserVisible=false;next.browserAttachUser=false;}
         else if(field==='browserApp'&&draft.browserApp==='firefox'&&value!=='firefox'){if(visibleBeforeFirefox.current!==null){next.browserVisible=visibleBeforeFirefox.current;visibleBeforeFirefox.current=null;}if(attachBeforeFirefox.current!==null){next.browserAttachUser=attachBeforeFirefox.current;attachBeforeFirefox.current=null;}}
         setDraft(next);setDirty(Object.keys(defaults).some(key=>!equal(next[key],saved[key])));setMessage('');};

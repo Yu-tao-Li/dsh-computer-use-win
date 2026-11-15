@@ -258,11 +258,17 @@ app.whenReady().then(async()=>{
   await until("!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='保存更改').disabled");
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.enabledTools.length===25");
+  // A saved Custom selection comes back as saved after an unsaved detour.
+  await evaluate("document.getElementById('wincu-page-toolPreset-full').click()");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('26 / 26')");
+  await evaluate("document.getElementById('wincu-page-toolPreset-custom').click()");
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('25 / 26')");
+  assert.equal(await evaluate("document.getElementById('wincu-page-tool-drag').checked"),false,'A saved Custom selection stays as saved');
   await evaluate("document.getElementById('wincu-page-toolPreset-full').click()");
   await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('26 / 26')");
   await evaluate("window.clickButton('保存更改')");
   await until("window.snapshot.value.toolPreset==='full'");
-  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),25,'Presets must keep the custom selection');
+  assert.equal(await evaluate('window.snapshot.value.enabledTools.length'),25,'Switching presets does not rewrite the stored list');
   await evaluate("document.getElementById('wincu-page-toolPreset-lite').click()");
   await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('12 / 26')");
   await evaluate("window.clickButton('保存更改')");
@@ -280,9 +286,10 @@ app.whenReady().then(async()=>{
   await until("document.getElementById('wincu-page-toolPreset-lazy').checked&&document.body.textContent.includes('懒启动')");
   await new Promise(resolve=>setTimeout(resolve,100));
   await savePicture('settings-lazy.png');
+  // Choosing Custom from another saved preset starts with every tool checked.
   await evaluate("document.getElementById('wincu-page-toolPreset-custom').click()");
-  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('25 / 26')");
-  assert.equal(await evaluate("document.getElementById('wincu-page-tool-drag').checked"),false);
+  await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('26 / 26')");
+  assert.equal(await evaluate("document.getElementById('wincu-page-tool-drag').checked"),true,'Custom starts with every tool checked');
   await evaluate("window.clickButton('全选')");
   await until("document.querySelector('[data-wincu-tool-count]').textContent.includes('26 / 26')");
   await evaluate("window.clickButton('保存更改')");

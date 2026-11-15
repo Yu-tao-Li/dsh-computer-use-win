@@ -28,7 +28,7 @@ Firefox 系网页通道为实验功能：选择“Firefox 系（实验性）”�
 
 在 **全部 / 精简 / 懒启动 / 自定义** 一排选项里选择，默认全部 26 项（25 项操作工具加管理入口），下方一行说明当前方案。每项设置左边是一张随设置变化的小示意图，右边是名称和开关，两项一行。详细说明收在 ⓘ 图标里，鼠标停上去、点一下或用键盘聚焦时在图标上方弹出，不会被鼠标指针挡住；鼠标可以移到说明上，点一下后移开也不消失，按 Esc 或点别处关闭。精简固定加载 12 项；自定义才展开内部缩进清单，支持逐项、分组、全选和全部关闭。切换方案会保留自定义勾选，保存后在当前动作结束时生效，重启保留选择。agent 不能重新启用用户关闭的工具。
 
-懒启动仅注册管理入口，允许全部工具按需加载；启动显示“1 项，允许全部 26 项”。切换回自定义会恢复原清单。使用桌面工具前需要加载，`reset` 恢复为管理入口。
+懒启动仅注册管理入口，允许全部工具按需加载；启动显示“1 项，允许全部 26 项”。从别的方案切到自定义时，清单默认全部勾选，取消勾选后保存才生效；已经保存为自定义的清单照常显示。使用桌面工具前需要加载，`reset` 恢复为管理入口。
 
 ### 接管提示
 
@@ -68,7 +68,7 @@ Firefox-family Browser Use is experimental: select Firefox family, or configure 
 
 Choose **All / Lite / Lazy / Custom** in one row; a line below describes the selected preset, and each setting shows a small picture of its effect beside its name and switch, two to a row. Details open above the ⓘ icon on hover, click or keyboard focus, so the pointer never covers them; the pointer can move onto the text, a click keeps it open, and Esc or a click elsewhere closes it. All is the default (26 entries); Lite loads 12. Custom reveals the indented checklist with individual/group selection, select-all and disable-all. Preset changes preserve your custom selection. Save applies after the current action finishes and survives restart. Management cannot re-enable user-disabled tools.
 
-Lazy starts with one management entry while allowing all tools to be loaded on demand. Switching back to Custom restores its saved list; reset returns Lazy to management only.
+Lazy starts with one management entry while allowing all tools to be loaded on demand. Choosing Custom from another preset starts with every tool checked and takes effect when saved; a saved Custom selection is shown as saved; reset returns Lazy to management only.
 
 The screen edge glow/status pill and the pointer glow/DSH tag have independent controls. Their pictures follow the switches and the top/bottom placement. Customize text, placement and the 200–3000ms hide delay under More options, save and preview. The layers let clicks pass through, keep focus and leave Windows cursor themes intact. **Visible in remote sessions and recordings** is on by default, including virtual displays, and also covers the progress overlay, so screen sharing and recordings see its text, including the model's reasoning and replies. Turning it off requests capture exclusion for the indicators and the overlay on supported Windows capture paths. Active monitor enumeration, display/session events and a 500ms topology check refresh the layers after display, layout or DPI changes. The indicators cover this plugin's complete desktop operation series, or a requested preview.
 
