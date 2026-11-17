@@ -1,14 +1,14 @@
-// Problem reports. "Report a problem" on the settings page writes one readable
-// Markdown file to the user's Downloads folder: the environment, the plugin's
+// Problem reports. "Report a problem" on the settings page writes one plain
+// text file to the user's Downloads folder: the environment, the plugin's
 // self-test, its recent computer-use calls and its lines from the DSH log. It
-// then opens a GitHub issue page whose form arrives with the environment filled
-// in, and the user drags the file there. Nothing leaves this computer unless
-// the user attaches it. User folders, the user name and the computer name are
-// replaced, typed text is kept as its length only, and no screenshot is added.
+// then opens the Downloads folder and GitHub's new-issue page, and the user
+// drags the file there. Nothing leaves this computer unless the user attaches
+// it. User folders, the user name and the computer name are replaced, typed
+// text is kept as its length only, and no screenshot is added.
 // Patterns: DSH Desktop's own diagnostics export (logs plus system facts in one
 // archive), dshmarket's home-path redaction, VS Code's issue reporter and
-// electron-util's debugInfo + openNewGitHubIssue (short facts in the issue URL,
-// the long material attached), GitHub's issue-form URL prefill.
+// electron-util's debugInfo + openNewGitHubIssue (the material attached to a
+// new issue).
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, openSync, readSync, closeSync } from 'node:fs';
 import os from 'node:os';
@@ -19,8 +19,6 @@ export const DIAGNOSTICS_ROUTE = '/dsh-computer-use-win/api/diagnostics';
 const CALL_LIMIT = 30;
 const LOG_LINE_LIMIT = 200;
 const LOG_TAIL_BYTES = 2 * 1024 * 1024;
-// GitHub answers 414 for long URLs; the environment block stays well below it.
-const URL_ENVIRONMENT_LIMIT = 1800;
 // Argument values that can carry what the user typed or read: kept as a length.
 const VALUE_KEYS = new Set(['text', 'value', 'keys', 'thenKeys', 'query', 'url', 'path', 'paths', 'title', 'windowTitle', 'name', 'content', 'password', 'script', 'arguments', 'args', 'prompt', 'filter']);
 const PLUGIN_MARKERS = ['windows-computer-use', 'dsh-computer-use-win', 'wincu', 'WCU_'];
@@ -101,7 +99,8 @@ const runFile = (file, args, { timeout = 15000, env } = {}) => new Promise(resol
   execFile(file, args, { windowsHide: true, timeout, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8', ...(env ? { env } : {}) },
     (error, stdout, stderr) => resolve({ error, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }));
 });
-const powershellPath = () => path.join(process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+const windowsDir = () => process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+const powershellPath = () => path.join(windowsDir(), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 
 // Facts only Windows knows: where Downloads really is (users move it), the
 // Windows release, the screens and the browsers. Base64 keeps non-ASCII paths
@@ -205,9 +204,7 @@ export function dshLogDirs(env = process.env) {
   return dirs.filter(dir => { try { return statSync(dir).isDirectory(); } catch { return false; } });
 }
 
-const fence = (text, lang = 'text') => '```' + lang + '\n' + String(text).replace(/```/g, '``\u200b`') + '\n```';
-
-// The short environment block the issue form gets in its URL.
+// The environment in a few lines, at the top of the file.
 export function environmentSummary(facts) {
   const s = facts.settings ?? {};
   const rows = [
@@ -222,45 +219,27 @@ export function environmentSummary(facts) {
     `__COMPAT_LAYER: ${facts.compatLayer ? facts.compatLayer : 'not set'}`,
     `自检 / Self-test: ${facts.selfTest ? (facts.selfTest.ok ? 'ok' : 'failed') + (facts.selfTest.backend?.powershell ? `, backend ${facts.selfTest.backend.powershell}` : '') + (facts.selfTest.backend?.uiAutomation === false ? ', no UIA' : '') + (facts.selfTest.inputDesktopAvailable === false ? ', input desktop unavailable' : '') : 'not run'}`,
   ];
-  return clip(rows.join('\n'), URL_ENVIRONMENT_LIMIT);
+  return rows.join('\n');
 }
 
-export function issueUrl(summary, { title = '' } = {}) {
-  const query = new URLSearchParams({ template: 'bug_report.yml', ...(title ? { title } : {}), environment: summary });
-  return `${ISSUE_URL}?${query.toString()}`;
-}
-
-export function diagnosticsMarkdown(facts, { calls = [], logs = [], at = new Date() } = {}) {
-  const callRows = calls.length
-    ? ['| 时间 / Time | 工具 / Tool | 耗时 / ms | 结果 / Result | 参数 / Arguments |', '|---|---|---|---|---|',
-      ...calls.map(call => `| ${call.at} | ${call.tool} | ${call.ms ?? ''} | ${call.ok ? 'ok' : 'error: ' + String(call.error ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')} | \`${JSON.stringify(call.args).replace(/\|/g, '\\|').replace(/`/g, "'")}\` |`)].join('\n')
+// The file is plain text (Notepad opens it on any Windows): a heading line
+// per section, one call per line.
+export function diagnosticsText(facts, { calls = [], logs = [], at = new Date() } = {}) {
+  const oneLine = text => String(text ?? '').replace(/\s*\r?\n\s*/g, ' ');
+  const section = (title, body) => ['', `== ${title} ==`, body];
+  const callLines = calls.length
+    ? calls.map(call => [call.at, call.tool, `${call.ms ?? '?'} ms`, call.ok ? 'ok' : `error: ${oneLine(call.error)}`, JSON.stringify(call.args ?? {})].join('  ')).join('\n')
     : '这次启动 DSH 后还没有电脑操控调用。/ No computer-use calls since DSH started.';
   return [
-    `# dsh-computer-use-win 诊断信息 / diagnostics`,
-    '',
+    'dsh-computer-use-win 诊断信息 / diagnostics',
     `导出时间 / Exported: ${at.toISOString()} · 插件 / plugin ${facts.version}`,
-    '',
-    '> 用户目录、用户名和计算机名已经替换；输入的文字只保留长度；文件里没有截图。上传前可以先看一遍。/ User folders, the user name and the computer name are replaced; typed text is kept as its length only; there are no screenshots. Look it over before you upload it.',
-    '',
-    '## 环境 / Environment',
-    '',
-    fence(environmentSummary(facts)),
-    '',
-    '## 设置 / Settings',
-    '',
-    fence(JSON.stringify(facts.settings ?? {}, null, 2), 'json'),
-    '',
-    '## 自检 / Self-test',
-    '',
-    fence(JSON.stringify(facts.selfTest ?? { ok: false, error: 'not run' }, null, 2), 'json'),
-    '',
-    `## 最近的电脑操控调用 / Recent computer-use calls (${calls.length})`,
-    '',
-    callRows,
-    '',
-    `## DSH 日志里和本插件相关的行 / Plugin lines in the DSH log (${logs.length})`,
-    '',
-    logs.length ? fence(logs.join('\n')) : '没有找到。/ None found.',
+    '用户目录、用户名和计算机名已经替换；输入的文字只保留长度；文件里没有截图。上传前可以先看一遍。',
+    'User folders, the user name and the computer name are replaced; typed text is kept as its length only; there are no screenshots. Look it over before you upload it.',
+    ...section('环境 / Environment', environmentSummary(facts)),
+    ...section('设置 / Settings', JSON.stringify(facts.settings ?? {}, null, 2)),
+    ...section('自检 / Self-test', JSON.stringify(facts.selfTest ?? { ok: false, error: 'not run' }, null, 2)),
+    ...section(`最近的电脑操控调用 / Recent computer-use calls (${calls.length})`, callLines),
+    ...section(`DSH 日志里和本插件相关的行 / Plugin lines in the DSH log (${logs.length})`, logs.length ? logs.join('\n') : '没有找到。/ None found.'),
     '',
   ].join('\n');
 }
@@ -270,8 +249,8 @@ const stamp = (at = new Date()) => {
   return `${at.getFullYear()}${pad(at.getMonth() + 1)}${pad(at.getDate())}-${pad(at.getHours())}${pad(at.getMinutes())}${pad(at.getSeconds())}`;
 };
 
-// Collects, writes and returns { file, fileName, issueUrl }. Settings keep
-// their shape; the banner text the user wrote is kept as its length.
+// Collects, writes and returns { file, fileName }. Settings keep their shape;
+// the banner text the user wrote is kept as its length.
 export async function exportDiagnostics({ version, settings = {}, calls = [], host, mcpClient, dshLocale, installSpec, serverPath, defaultBrowser, env = process.env, at = new Date(), outDir, selfTest, facts: given } = {}) {
   const redact = makeRedactor({ secrets: [env.WCU_APPROVAL_SECRET].filter(Boolean) });
   const system = given?.system ?? await systemFacts();
@@ -289,20 +268,26 @@ export async function exportDiagnostics({ version, settings = {}, calls = [], ho
     selfTest: selfTest ?? (serverPath ? await runSelfTest(serverPath, { env }) : undefined),
   };
   const logs = (given?.logs ?? pluginLogLines(dshLogDirs(env))).map(redact);
-  const markdown = redact(diagnosticsMarkdown(facts, { calls, logs, at }));
+  // A BOM and CRLF line ends, so every Notepad shows the Chinese and the lines right.
+  const text = redact(diagnosticsText(facts, { calls, logs, at })).replace(/\r?\n/g, '\r\n');
   const folder = outDir ?? (system.downloads && existsSync(system.downloads) ? system.downloads : path.join(os.homedir(), 'Downloads'));
   mkdirSync(folder, { recursive: true });
-  const fileName = `wincu-diagnostics-${stamp(at)}.md`;
+  const fileName = `wincu-diagnostics-${stamp(at)}.txt`;
   const file = path.join(folder, fileName);
-  writeFileSync(file, '\ufeff' + markdown, 'utf8');
-  return { file, fileName, issueUrl: issueUrl(redact(environmentSummary(facts))), bytes: Buffer.byteLength(markdown) };
+  writeFileSync(file, '\ufeff' + text, 'utf8');
+  return { file, fileName, bytes: Buffer.byteLength(text) };
 }
 
-// Explorer shows the file; the default browser opens the issue form.
-export function revealAndOpen({ file, issueUrl: url }, run = (command, args) => { const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: false }); child.on('error', () => { }); child.unref(); }) {
+const launch = (command, args) => { const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: false }); child.on('error', () => { }); child.unref(); };
+
+// Two windows and no more: File Explorer on the Downloads folder with the file
+// selected, and the default browser on the new-issue page. The page goes
+// through ShellExecute (url.dll, as Go's pkg/browser does): explorer.exe given
+// a URL with a query opened its default folder, Documents, and no browser.
+export function revealAndOpen({ file, url = ISSUE_URL }, run = launch) {
   if (process.platform !== 'win32') return false;
-  if (file) run('explorer.exe', ['/select,', file]);
-  if (url) run('explorer.exe', [url]);
+  if (file) run(path.join(windowsDir(), 'explorer.exe'), ['/select,', file]);
+  if (url) run(path.join(windowsDir(), 'System32', 'rundll32.exe'), ['url.dll,FileProtocolHandler', url]);
   return true;
 }
 
@@ -337,7 +322,7 @@ export function createDiagnosticsHandler({ collect, open = revealAndOpen, logger
       const result = await running;
       let opened = false;
       try { opened = open(result) !== false; } catch (error) { logger?.warn?.('dsh-computer-use-win: could not open the diagnostics: %s', error?.message ?? error); }
-      sendJson(response, 200, { ok: true, fileName: result.fileName, issueUrl: result.issueUrl, opened });
+      sendJson(response, 200, { ok: true, fileName: result.fileName, issueUrl: ISSUE_URL, opened });
     } catch (error) {
       logger?.warn?.('dsh-computer-use-win: diagnostics export failed: %s', error?.message ?? error);
       sendJson(response, 500, { ok: false, error: clip(String(error?.message ?? error), 300) });

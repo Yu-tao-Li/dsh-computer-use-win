@@ -196,7 +196,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 | 设置 | 可以怎么选 |
 |---|---|
 | 更新 | 有新版本时，标题右侧 GitHub 左边出现“更新”，点了才安装；平时不显示，见 1.2 |
-| 反馈问题 | 标题右侧。导出诊断文件到下载文件夹，并在浏览器打开填好环境的 GitHub 问题页面，见 8.4 |
+| 反馈问题 | 标题右侧。把诊断信息存到下载文件夹，再打开下载文件夹和 GitHub 新建问题页面，见 8.4 |
 | 工具加载 | **全部**（26 个，默认）；**精简**（12 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
 | 优先使用网页控件 | 默认打开。网页能直接读写时在后台完成，不动鼠标、不抢前台；桌面程序和读不到的网页内容再交给电脑操控 |
 | 显示 DSH 浏览器窗口 | 默认打开，能看到 DSH 浏览器在做什么；关掉后它在后台运行，没有窗口 |
@@ -322,12 +322,9 @@ Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定
 
 #### 8.4 遇到问题怎么反馈？
 
-在 **设置 → 电脑操控** 标题右侧点“反馈问题”。插件会做两件事：
+在 **设置 → 电脑操控** 标题右侧点“反馈问题”。插件把诊断信息存到下载文件夹里的 `wincu-diagnostics-日期-时间.txt`，设置页提示“已将诊断信息保存到下载文件夹。”，同时打开下载文件夹（选中这个文件）和 GitHub 的新建问题页面。在问题页面写下遇到的问题，把文件拖进去，就可以提交。
 
-1. 在下载文件夹里生成诊断文件 `wincu-diagnostics-日期-时间.md`，并在资源管理器里选中它。里面有插件和 DSH 的版本、Windows 和 PowerShell、屏幕和缩放、默认浏览器和 Edge、Chrome 的版本、设置、插件自检结果、这次启动后最近 30 次电脑操控调用（工具、成败、错误信息和耗时），以及 DSH 日志里和本插件相关的行。
-2. 在浏览器里打开 GitHub 问题页面，环境已经填好。写下遇到的问题，再把诊断文件拖进去，就可以提交。
-
-诊断文件是普通文本，上传前可以打开看一遍。用户目录、用户名和计算机名已经替换，输入的文字只保留长度，文件里没有截图。截图对排查很有帮助，需要的话请遮住隐私后另外拖进问题页面。
+诊断文件里有插件和 DSH 的版本、Windows 和 PowerShell、屏幕和缩放、默认浏览器和 Edge、Chrome 的版本、设置、插件自检结果、这次启动后最近 30 次电脑操控调用（工具、成败、错误信息和耗时），以及 DSH 日志里和本插件相关的行。它是普通文本，用记事本就能打开，上传前可以先看一遍。用户目录、用户名和计算机名已经替换，输入的文字只保留长度，文件里没有截图。截图对排查很有帮助，需要的话请遮住隐私后另外拖进问题页面。
 
 ### 9. 数据与隐私
 
@@ -550,7 +547,7 @@ Change these in **Settings → Computer Use**. Most take effect after you click 
 | Setting | Your choices |
 |---|---|
 | Update | Appears left of the GitHub link at the top right when a newer version exists, and installs it only when clicked; hidden otherwise; see 1.2 |
-| Report a problem | At the top right. Exports a diagnostics file to your Downloads folder and opens a GitHub issue page with the environment filled in; see 8.4 |
+| Report a problem | At the top right. Saves diagnostics to your Downloads folder, then opens that folder and GitHub's new-issue page; see 8.4 |
 | Tool loading | **All** (26 tools, the default); **Lite** (12 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
 | Prefer web page controls | On by default. Pages it can read and operate directly are handled in the background, without moving the pointer or taking the foreground; desktop apps and page content it cannot read go to Computer Use |
 | Show the DSH browser window | On by default, so you can watch the DSH browser; turn it off to run the browser in the background with no window |
@@ -676,12 +673,9 @@ The plugin provides desktop tools only. It does not include a model, an API key,
 
 #### 8.4 How do I report a problem?
 
-Click Report a problem at the top right of **Settings → Computer Use**. The plugin then does two things:
+Click Report a problem at the top right of **Settings → Computer Use**. The plugin saves the diagnostics as `wincu-diagnostics-date-time.txt` in your Downloads folder, the settings page says "Diagnostics saved to your Downloads folder.", and the Downloads folder (with the file selected) and GitHub's new-issue page open. Describe what happened on the issue page, drag the file onto it, and submit.
 
-1. It writes the diagnostics file `wincu-diagnostics-date-time.md` to your Downloads folder and selects it in File Explorer. The file holds the plugin and DSH versions, Windows and PowerShell, screens and scaling, the default browser and the Edge and Chrome versions, your settings, the plugin's self-test, the last 30 computer-use calls since DSH started (tool, result, error message and duration), and the plugin's lines in the DSH log.
-2. It opens the GitHub issue page in your browser with the environment filled in. Describe what happened, drag the diagnostics file onto the page, and submit.
-
-The diagnostics file is plain text, so you can read it before you upload it. User folders, the user name and the computer name are replaced, typed text is kept as its length only, and it has no screenshots. Screenshots help a lot; cover private details and drag them onto the issue page separately if you like.
+The file holds the plugin and DSH versions, Windows and PowerShell, screens and scaling, the default browser and the Edge and Chrome versions, your settings, the plugin's self-test, the last 30 computer-use calls since DSH started (tool, result, error message and duration), and the plugin's lines in the DSH log. It is plain text that Notepad opens, so you can read it before you upload it. User folders, the user name and the computer name are replaced, typed text is kept as its length only, and it has no screenshots. Screenshots help a lot; cover private details and drag them onto the issue page separately if you like.
 
 ### 9. Data and privacy
 

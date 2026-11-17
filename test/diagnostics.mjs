@@ -1,12 +1,13 @@
-// Problem reports: redaction, the call log, the issue URL, the file, the route.
-// No desktop input; the export runs on given facts in a temporary folder.
+// Problem reports: redaction, the call log, the text file, the two windows it
+// opens, the route. No desktop input; the export runs on given facts in a
+// temporary folder, and the windows are recorded, not opened.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  ISSUE_URL, createDiagnosticsHandler, describeArgs, diagnosticsMarkdown, environmentSummary, exportDiagnostics,
-  installCallLog, issueUrl, makeRedactor, pluginLogLines, readInstallSpec, trustedRequest,
+  ISSUE_URL, createDiagnosticsHandler, describeArgs, diagnosticsText, environmentSummary, exportDiagnostics,
+  installCallLog, makeRedactor, pluginLogLines, readInstallSpec, revealAndOpen, trustedRequest,
 } from '../mcp/diagnostics.mjs';
 
 // Every user-profile path goes, 8.3 and forward-slash forms too; user and computer names as whole words.
@@ -40,7 +41,7 @@ for (let i = 0; i < 31; i++) await execute('windows_computer_use_screenshot', {}
 assert.equal(log.list().length, 30, 'Only the last thirty calls stay');
 assert.ok(log.list().every(call => call.tool === 'screenshot' && call.ok && Number.isFinite(call.ms)));
 
-// The environment block fits a URL GitHub accepts, and the form gets it by field id.
+// The environment block at the top of the file.
 const facts = {
   version: '0.6.1', installSpec: 'file:C:/Users/Alice/x.tgz', host: 'DSH Desktop (profile desktop)', mcpClient: '0.2.1-rc.2', node: '24.15.0', electron: '44.0.0',
   windows: { product: 'Windows 11 Pro', display: '25H2', build: '26200', ubr: 8655 }, powershell: '5.1.26100.8655', pwsh: false,
@@ -52,22 +53,18 @@ const facts = {
 const summary = environmentSummary(facts);
 assert.match(summary, /Windows 11 Pro 25H2 build 26200\.8655/);
 assert.match(summary, /__COMPAT_LAYER: RunAsInvoker/);
-assert.ok(summary.length <= 1800);
-const url = new URL(issueUrl(summary, { title: 'x' }));
-assert.equal(url.origin + url.pathname, ISSUE_URL);
-assert.equal(url.searchParams.get('template'), 'bug_report.yml');
-assert.equal(url.searchParams.get('environment'), summary);
-assert.ok(issueUrl('x'.repeat(5000)).length < 8000);
-assert.ok(environmentSummary({ ...facts, version: 'v'.repeat(5000) }).length <= 1800, 'A long environment is clipped');
+assert.equal(ISSUE_URL, 'https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new', 'The plain new-issue page');
 
-// The file: sections in order, pipes in a call stay inside their cell.
-const markdown = diagnosticsMarkdown(facts, { calls: [{ at: 't', tool: 'find', ms: 5, ok: false, error: 'a | b', args: { query: '<3 chars>' } }], logs: ['l1'] });
-for (const heading of ['## 环境 / Environment', '## 设置 / Settings', '## 自检 / Self-test', '## 最近的电脑操控调用', '## DSH 日志里和本插件相关的行']) assert.ok(markdown.includes(heading), heading);
-assert.ok(markdown.includes('error: a \\| b'));
+// The file is plain text: sections in order, one call per line, no Markdown.
+const text = diagnosticsText(facts, { calls: [{ at: 't', tool: 'find', ms: 5, ok: false, error: 'a | b\nsecond line', args: { query: '<3 chars>' } }], logs: ['l1'] });
+const headings = ['== 环境 / Environment ==', '== 设置 / Settings ==', '== 自检 / Self-test ==', '== 最近的电脑操控调用 / Recent computer-use calls (1) ==', '== DSH 日志里和本插件相关的行 / Plugin lines in the DSH log (1) =='];
+assert.deepEqual(headings.map(heading => text.indexOf(heading)).every((at, i, all) => at > 0 && (i === 0 || at > all[i - 1])), true, 'Every section, in order');
+assert.ok(text.split('\n').includes('t  find  5 ms  error: a | b second line  {"query":"<3 chars>"}'), 'One call per line');
+assert.ok(!/```|^#|^\|/m.test(text), 'No Markdown fences, headings or tables');
 
 const root = await mkdtemp(path.join(os.tmpdir(), 'wcu-diagnostics-'));
 try {
-  // The export writes one BOM-prefixed Markdown file and redacts it as a whole.
+  // The export writes one .txt file (BOM, CRLF) and redacts it as a whole.
   const out = path.join(root, 'Downloads');
   const env = { ...process.env, WCU_APPROVAL_SECRET: 'approval-secret-abcdef', __COMPAT_LAYER: 'RunAsInvoker' };
   const result = await exportDiagnostics({
@@ -75,14 +72,25 @@ try {
     installSpec: `file:${os.homedir()}\\x.tgz`, env, outDir: out, at: new Date(2026, 10, 18, 2, 3, 4),
     selfTest: { ok: true, backend: { powershell: '5.1' } }, facts: { system: { windows: facts.windows, powershell: '5.1', screens: facts.screens }, browsers: facts.browsers, logs: [`dsh.log: windows-computer-use ready at ${os.homedir()}\\a approval-secret-abcdef`] },
   });
-  assert.equal(result.fileName, 'wincu-diagnostics-20261118-020304.md');
-  const text = await readFile(result.file, 'utf8');
-  assert.equal(text.charCodeAt(0), 0xfeff, 'A BOM, so Notepad reads the Chinese right');
-  assert.ok(!text.includes(os.homedir()), 'No home path in the file');
-  assert.ok(!text.includes('approval-secret-abcdef'), 'No secret in the file');
-  assert.ok(text.includes('"indicatorText": "<10 chars>"'), 'The banner text is kept as a length');
-  assert.ok(text.includes('__COMPAT_LAYER: RunAsInvoker'));
-  assert.ok(new URL(result.issueUrl).searchParams.get('environment').includes('Windows 11 Pro'));
+  assert.equal(result.fileName, 'wincu-diagnostics-20261118-020304.txt');
+  assert.equal(path.dirname(result.file), out);
+  const saved = await readFile(result.file, 'utf8');
+  assert.equal(saved.charCodeAt(0), 0xfeff, 'A BOM, so Notepad reads the Chinese right');
+  assert.ok(!/(?<!\r)\n/.test(saved), 'CRLF line ends only');
+  assert.ok(!saved.includes(os.homedir()), 'No home path in the file');
+  assert.ok(!saved.includes('approval-secret-abcdef'), 'No secret in the file');
+  assert.ok(saved.includes('"indicatorText": "<10 chars>"'), 'The banner text is kept as a length');
+  assert.ok(saved.includes('__COMPAT_LAYER: RunAsInvoker'));
+  assert.ok(saved.includes('Windows: Windows 11 Pro 25H2'));
+
+  // Two windows: Explorer on the file, and the new-issue page through
+  // ShellExecute (explorer.exe opened Documents for a URL).
+  const runs = [];
+  const shown = revealAndOpen(result, (command, args) => runs.push([path.basename(command).toLowerCase(), ...args]));
+  if (process.platform === 'win32') {
+    assert.equal(shown, true);
+    assert.deepEqual(runs, [['explorer.exe', '/select,', result.file], ['rundll32.exe', 'url.dll,FileProtocolHandler', ISSUE_URL]]);
+  } else assert.deepEqual([shown, runs], [false, []]);
 
   // The profile that lists the plugin is found from pnpm's nested folder.
   const profile = path.join(root, 'profile'), nested = path.join(profile, 'node_modules', '.pnpm', 'dsh-computer-use-win@file+x', 'node_modules', 'dsh-computer-use-win');
@@ -121,20 +129,20 @@ assert.equal(trustedRequest({ headers: { 'x-wcu-request': '1' } }), true, 'A pro
 
 const response = () => { const r = { status: 0, headers: {}, body: '' }; r.writeHead = (status, headers) => { r.status = status; r.headers = headers ?? {}; }; r.end = body => { r.body = body ?? ''; }; return r; };
 let collected = 0, opened = [];
-const handler = createDiagnosticsHandler({ collect: async () => { collected++; await new Promise(resolve => setTimeout(resolve, 30)); return { file: 'C:/x/wincu.md', fileName: 'wincu.md', issueUrl: 'https://github.com/x' }; }, open: result => { opened.push(result.fileName); return true; } });
+const handler = createDiagnosticsHandler({ collect: async () => { collected++; await new Promise(resolve => setTimeout(resolve, 30)); return { file: 'C:/x/wincu.txt', fileName: 'wincu.txt' }; }, open: result => { opened.push(result.fileName); return true; } });
 let r = response(); await handler({ method: 'GET', headers: page }, r); assert.equal(r.status, 405);
 r = response(); await handler({ method: 'POST', headers: { ...page, 'x-wcu-request': undefined } }, r); assert.equal(r.status, 403); assert.equal(collected, 0);
 const [a, b] = [response(), response()];
 await Promise.all([handler({ method: 'POST', headers: page }, a), handler({ method: 'POST', headers: page }, b)]);
 assert.deepEqual([a.status, b.status].sort(), [200, 409], 'One export at a time');
 const ok = JSON.parse([a, b].find(x => x.status === 200).body);
-assert.deepEqual(ok, { ok: true, fileName: 'wincu.md', issueUrl: 'https://github.com/x', opened: true });
-assert.deepEqual(opened, ['wincu.md']);
+assert.deepEqual(ok, { ok: true, fileName: 'wincu.txt', issueUrl: ISSUE_URL, opened: true });
+assert.deepEqual(opened, ['wincu.txt']);
 const failing = createDiagnosticsHandler({ collect: async () => { throw new Error('disk full at C:\\Users\\Alice'); } });
 r = response(); await failing({ method: 'POST', headers: page }, r);
 assert.equal(r.status, 500); assert.equal(JSON.parse(r.body).ok, false);
-const notWindows = createDiagnosticsHandler({ collect: async () => ({ fileName: 'f.md', issueUrl: 'u' }), open: () => false });
+const notWindows = createDiagnosticsHandler({ collect: async () => ({ fileName: 'f.txt' }), open: () => false });
 r = response(); await notWindows({ method: 'POST', headers: page }, r);
-assert.equal(JSON.parse(r.body).opened, false, 'The page opens the form itself when the plugin could not');
+assert.equal(JSON.parse(r.body).opened, false, 'The page opens the issue page itself when the plugin could not');
 
-console.log(JSON.stringify({ passed: true, redaction: true, callLog: true, issueUrl: true, export: true, route: true }));
+console.log(JSON.stringify({ passed: true, redaction: true, callLog: true, textFile: true, windows: true, export: true, route: true }));

@@ -575,12 +575,11 @@ window.__ModuleLoader__.load({
     "updateRefresh": "刷新页面",
     "updateDoneTitle": "已更新到 v{version}",
     "report": "反馈问题",
-    "reportTitle": "导出诊断信息到下载文件夹，并在浏览器里打开 GitHub 问题页面",
+    "reportTitle": "把诊断信息保存到下载文件夹，并打开下载文件夹和 GitHub 新建问题页面",
     "reportRunning": "导出中…",
-    "reportDone": "已导出",
-    "reportDoneTitle": "诊断文件 {file} 已存到下载文件夹，问题页面已在浏览器打开，把文件拖进去即可。",
-    "reportFailed": "已打开问题页面",
-    "reportFailedTitle": "没能导出诊断文件，已直接打开 GitHub 问题页面。"
+    "reportSaved": "已将诊断信息保存到下载文件夹。",
+    "reportFailed": "诊断信息没有保存成功，已打开 GitHub 新建问题页面。",
+    "reportOk": "确定"
   },
   "en": {
     "nav": "Computer Use",
@@ -846,12 +845,11 @@ window.__ModuleLoader__.load({
     "updateRefresh": "Reload page",
     "updateDoneTitle": "Updated to v{version}",
     "report": "Report a problem",
-    "reportTitle": "Export diagnostics to your Downloads folder and open a GitHub issue in the browser",
+    "reportTitle": "Save diagnostics to your Downloads folder, then open that folder and GitHub's new-issue page",
     "reportRunning": "Exporting…",
-    "reportDone": "Exported",
-    "reportDoneTitle": "The diagnostics file {file} is in your Downloads folder and the issue page is open in your browser; drag the file onto it.",
-    "reportFailed": "Issue page opened",
-    "reportFailedTitle": "The diagnostics file could not be exported, so the GitHub issue page opened directly."
+    "reportSaved": "Diagnostics saved to your Downloads folder.",
+    "reportFailed": "The diagnostics could not be saved; GitHub's new-issue page is open.",
+    "reportOk": "OK"
   }
 };
     const defaultIndicatorTexts = [
@@ -910,6 +908,11 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] .wcu-update a.wcu-update-link:hover{background:var(--wcu-hover);text-decoration:none}
       [data-wincu-settings] .wcu-update a{color:var(--dsw-alias-label-link,#4176e6);text-decoration:none;white-space:nowrap}
       [data-wincu-settings] .wcu-update a:hover{text-decoration:underline}
+      [data-wincu-settings] dialog.wcu-dialog{box-sizing:border-box;width:min(380px,calc(100vw - 32px));margin:auto;padding:20px 20px 16px;border:.5px solid var(--wcu-card-stroke);border-radius:var(--dsw-radius-xl,16px);background:var(--wcu-control);color:var(--wcu-fg);box-shadow:0 16px 48px rgba(0,0,0,.22)}
+      [data-wincu-settings] dialog.wcu-dialog::backdrop{background:rgba(0,0,0,.32)}
+      [data-wincu-settings] dialog.wcu-dialog p{margin:0;color:var(--wcu-fg);font-size:14px;line-height:1.6}
+      [data-wincu-settings] dialog.wcu-dialog p.wcu-dialog-detail{margin-top:6px;color:var(--wcu-muted);font-size:12px;overflow-wrap:anywhere}
+      [data-wincu-settings] .wcu-dialog-actions{display:flex;justify-content:flex-end;margin-top:16px}
       [data-wincu-settings] .wcu-spinner{width:12px;height:12px;border-radius:50%;border:2px solid color-mix(in srgb,var(--wcu-muted) 35%,transparent);border-top-color:var(--wcu-muted);animation:wcu-spin .8s linear infinite}
       @keyframes wcu-spin{to{transform:rotate(360deg)}}
       @media (prefers-reduced-motion:reduce){[data-wincu-settings] .wcu-spinner{animation:none}}
@@ -1317,28 +1320,46 @@ window.__ModuleLoader__.load({
       }
       return null;
     }
-    // "Report a problem": the plugin writes a diagnostics file to Downloads and
-    // opens the issue form (mcp/diagnostics.mjs). If that fails, the form still
-    // opens, with what this page knows.
+    // "Report a problem": the plugin writes the diagnostics to Downloads, then
+    // opens that folder and the new-issue page (mcp/diagnostics.mjs); this page
+    // says where the file went. If the export fails, the issue page still opens.
     const REPORT_ISSUE_URL='https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new';
+    // A modal <dialog>: the browser keeps it above the page, traps focus and
+    // closes it on Esc.
+    function ReportDialog({t,dialog,onClose}){
+      const ref=React.useRef(null),close=React.useRef(onClose);close.current=onClose;
+      React.useEffect(()=>{
+        const node=ref.current;if(!node)return;
+        const closed=()=>close.current();
+        node.addEventListener('close',closed);
+        try{if(!node.open)node.showModal();}catch{node.setAttribute('open','');}
+        return ()=>node.removeEventListener('close',closed);
+      },[]);
+      const dismiss=()=>{const node=ref.current;if(node&&typeof node.close==='function'&&node.open)node.close();else close.current();};
+      return h('dialog',{ref,className:'wcu-dialog','data-wincu-report-dialog':dialog.tone,'aria-labelledby':'wcu-report-dialog-text'},
+        h('p',{id:'wcu-report-dialog-text'},dialog.text),
+        dialog.detail?h('p',{className:'wcu-dialog-detail'},dialog.detail):null,
+        h('div',{className:'wcu-dialog-actions'},h('button',{type:'button',className:'wcu-small wcu-primary',autoFocus:true,onClick:dismiss},t('reportOk'))));
+    }
     function ReportButton({t}){
-      const [state,setState]=React.useState({phase:'idle'});
-      React.useEffect(()=>{if(state.phase!=='done'&&state.phase!=='failed')return;const timer=setTimeout(()=>setState({phase:'idle'}),8000);return ()=>clearTimeout(timer);},[state.phase]);
-      const openForm=url=>{try{window.open(url,'_blank','noopener');}catch{}};
+      const [state,setState]=React.useState({phase:'idle',dialog:null});
+      const openIssuePage=()=>{try{window.open(REPORT_ISSUE_URL,'_blank','noopener');}catch{}};
       const run=async()=>{
         if(state.phase==='running')return;
-        setState({phase:'running'});
+        setState({phase:'running',dialog:null});
+        let detail='';
         try{
           const {status,data}=await requestJson('/dsh-computer-use-win/api/diagnostics',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:120000});
-          if(status===200&&data?.ok){if(!data.opened&&typeof data.issueUrl==='string')openForm(data.issueUrl);setState({phase:'done',file:data.fileName});return;}
+          if(status===200&&data?.ok){if(!data.opened)openIssuePage();setState({phase:'idle',dialog:{tone:'saved',text:t('reportSaved')}});return;}
+          if(typeof data?.error==='string')detail=data.error;
         }catch{}
-        openForm(REPORT_ISSUE_URL+'?'+new URLSearchParams({template:'bug_report.yml',environment:'插件 / Plugin: '+PLUGIN_VERSION+'\n'+(typeof navigator==='undefined'?'':navigator.userAgent)}).toString());
-        setState({phase:'failed'});
+        openIssuePage();
+        setState({phase:'idle',dialog:{tone:'failed',text:t('reportFailed'),detail}});
       };
-      if(state.phase==='running')return h('span',{className:'wcu-update','data-wincu-report':'running'},h('span',{className:'wcu-spinner','aria-hidden':true}),h('span',null,t('reportRunning')));
-      if(state.phase==='done')return h('span',{className:'wcu-update','data-wincu-report':'done','data-tone':'success',title:fill(t('reportDoneTitle'),{file:state.file})},t('reportDone'));
-      if(state.phase==='failed')return h('span',{className:'wcu-update','data-wincu-report':'failed',title:t('reportFailedTitle')},t('reportFailed'));
-      return h('button',{type:'button',className:'wcu-small','data-wincu-report':'idle',title:t('reportTitle'),onClick:run},t('report'));
+      const button=state.phase==='running'
+        ?h('span',{className:'wcu-update','data-wincu-report':'running'},h('span',{className:'wcu-spinner','aria-hidden':true}),h('span',null,t('reportRunning')))
+        :h('button',{type:'button',className:'wcu-small','data-wincu-report':'idle',title:t('reportTitle'),onClick:run},t('report'));
+      return h(React.Fragment,null,button,state.dialog?h(ReportDialog,{t,dialog:state.dialog,onClose:()=>setState(current=>({...current,dialog:null}))}):null);
     }
     // The one line below the title, only when an update needs a step from the
     // user (a restart the market does not run) or did not finish.

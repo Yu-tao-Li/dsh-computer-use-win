@@ -262,10 +262,9 @@
   "updateRefresh": "Reload page",
   "updateDoneTitle": "Updated to v{version}",
   "report": "Report a problem",
-  "reportTitle": "Export diagnostics to your Downloads folder and open a GitHub issue in the browser",
+  "reportTitle": "Save diagnostics to your Downloads folder, then open that folder and GitHub's new-issue page",
   "reportRunning": "Exporting…",
-  "reportDone": "Exported",
-  "reportDoneTitle": "The diagnostics file {file} is in your Downloads folder and the issue page is open in your browser; drag the file onto it.",
-  "reportFailed": "Issue page opened",
-  "reportFailedTitle": "The diagnostics file could not be exported, so the GitHub issue page opened directly."
+  "reportSaved": "Diagnostics saved to your Downloads folder.",
+  "reportFailed": "The diagnostics could not be saved; GitHub's new-issue page is open.",
+  "reportOk": "OK"
 }

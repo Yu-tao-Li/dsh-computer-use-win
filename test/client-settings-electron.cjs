@@ -546,26 +546,34 @@ app.whenReady().then(async()=>{
   const updateText="(document.querySelector('[data-wincu-update]')?.textContent||'')";
   const noteText="(document.querySelector('[data-wincu-update-note]')?.textContent||'')";
   const posts="window.fetchCalls.filter(c=>c.method==='POST'&&c.url==='/dsh-market/api/v1/updates')";
-  // Report a problem: the plugin writes the file and opens the form; the page
-  // only says so. When the plugin cannot open the form, the page opens the URL
-  // it got back; when the export fails, the page opens the form itself.
-  await evaluate("window.opened=[];window.open=url=>{window.opened.push(String(url));return null;};window.reportReply={status:200,body:{ok:true,fileName:'wincu-diagnostics-20261118-020304.md',issueUrl:'https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new?template=bug_report.yml',opened:true}};window.baseFetch=window.fakeFetch;window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/diagnostics'?window.reportReply:window.baseFetch?window.baseFetch(call):{status:404,body:null};void 0");
+  // Report a problem: the plugin writes the file and opens the Downloads folder
+  // and the new-issue page; the page shows a modal dialog saying where the file
+  // went. When the plugin cannot open the issue page, the page opens it; when
+  // the export fails, the page opens it and says so.
+  const ISSUE_PAGE='https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new';
+  await evaluate("window.opened=[];window.open=url=>{window.opened.push(String(url));return null;};window.reportReply={status:200,body:{ok:true,fileName:'wincu-diagnostics-20261118-020304.txt',issueUrl:'"+ISSUE_PAGE+"',opened:true}};window.baseFetch=window.fakeFetch;window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/diagnostics'?window.reportReply:window.baseFetch?window.baseFetch(call):{status:404,body:null};void 0");
   assert.ok(await evaluate("(()=>{const b=document.querySelector('[data-wincu-report=idle]');return !!b&&b.textContent==='反馈问题'&&getComputedStyle(b).backgroundColor==='rgba(0, 0, 0, 0)'})()"),'A transparent Report a problem button');
   await evaluate("document.querySelector('[data-wincu-report=idle]').click()");
-  await until("!!document.querySelector('[data-wincu-report=done]')");
+  await until("!!document.querySelector('dialog[data-wincu-report-dialog=saved]')");
   const reportCall=await evaluate("window.fetchCalls.filter(c=>c.url==='/dsh-computer-use-win/api/diagnostics').map(c=>({method:c.method,header:c.headers['x-wcu-request'],type:c.headers['content-type']}))");
   assert.deepEqual(reportCall,[{method:'POST',header:'1',type:'application/json'}],'One POST with the plugin header');
-  assert.ok(await evaluate("document.querySelector('[data-wincu-report=done]').title.includes('wincu-diagnostics-20261118-020304.md')"));
-  assert.deepEqual(await evaluate('window.opened'),[],'The plugin opened the form; the page does not open it again');
+  const savedDialog=await evaluate("(()=>{const d=document.querySelector('dialog[data-wincu-report-dialog=saved]'),ok=d.querySelector('button'),box=d.getBoundingClientRect();return {open:d.open,modal:d.matches(':modal'),texts:[...d.querySelectorAll('p')].map(p=>p.textContent),button:ok.textContent,focused:document.activeElement===ok,centered:Math.abs(box.left+box.width/2-document.documentElement.clientWidth/2)<2,idle:!!document.querySelector('[data-wincu-report=idle]')};})()");
+  assert.deepEqual(savedDialog,{open:true,modal:true,texts:['已将诊断信息保存到下载文件夹。'],button:'确定',focused:true,centered:true,idle:true},'A modal dialog says the file is in Downloads');
+  assert.deepEqual(await evaluate('window.opened'),[],'The plugin opened the folder and the issue page; the page opens nothing more');
+  await evaluate("document.querySelector('dialog[data-wincu-report-dialog=saved] button').click()");
+  await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   const resetReport=async reply=>{await evaluate("window.reportReply="+reply+";window.root.render(React.createElement('span',null,'closed'))");await evaluate("window.renderPage('zh')");await until("!!document.querySelector('[data-wincu-report=idle]')");await evaluate("document.querySelector('[data-wincu-report=idle]').click()");};
-  await resetReport("{status:200,body:{ok:true,fileName:'f.md',issueUrl:'https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new?template=bug_report.yml&environment=x',opened:false}}");
-  await until("!!document.querySelector('[data-wincu-report=done]')");
-  assert.deepEqual(await evaluate('window.opened'),['https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new?template=bug_report.yml&environment=x']);
+  await resetReport("{status:200,body:{ok:true,fileName:'f.txt',issueUrl:'"+ISSUE_PAGE+"',opened:false}}");
+  await until("!!document.querySelector('dialog[data-wincu-report-dialog=saved]')");
+  assert.deepEqual(await evaluate('window.opened'),[ISSUE_PAGE],'The page opens the plain new-issue page when the plugin could not');
+  win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
+  await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   await resetReport("{status:500,body:{ok:false,error:'disk full'}}");
-  await until("!!document.querySelector('[data-wincu-report=failed]')");
-  const fallback=new URL(await evaluate('window.opened.at(-1)'));
-  assert.equal(fallback.searchParams.get('template'),'bug_report.yml');
-  assert.ok(fallback.searchParams.get('environment').includes(await evaluate('window.V')),'The fallback form still names the plugin version');
+  await until("!!document.querySelector('dialog[data-wincu-report-dialog=failed]')");
+  assert.equal(await evaluate('window.opened.at(-1)'),ISSUE_PAGE,'A failed export still opens the new-issue page');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('dialog[data-wincu-report-dialog=failed] p')].map(p=>p.textContent)"),['诊断信息没有保存成功，已打开 GitHub 新建问题页面。','disk full']);
+  await evaluate("document.querySelector('dialog[data-wincu-report-dialog=failed] button').click()");
+  await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   await evaluate("window.fakeFetch=window.baseFetch;void 0");
   const recheck=async market=>{await evaluate("window.__wcuUpdateTest.reset();window.fetchCalls=[];window.fakeFetch="+market+";window.__wcuUpdateTest.check();void 0");};
   // A release the market still holds back is named, with no button.

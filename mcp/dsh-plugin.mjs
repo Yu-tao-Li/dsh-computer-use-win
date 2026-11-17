@@ -156,7 +156,8 @@ export async function apply(ctx, config) {
   runtime.hostPorts = [];
   runtime.hostPortFile=path.join(root,'host-ports.json');atomicJson(runtime.hostPortFile,{ports:[],pending:true});let webServerSeen=false,hostPortsDisposed=false;const settleNoWebServer=setTimeout(()=>{if(!webServerSeen&&!hostPortsDisposed)atomicJsonAsync(runtime.hostPortFile,{ports:[]}).catch(()=>{});},1500);settleNoWebServer.unref?.();ctx.effect(()=>()=>{hostPortsDisposed=true;clearTimeout(settleNoWebServer);});
   // "Report a problem" on the settings page: the page posts here, the export
-  // writes the diagnostics file and opens the issue form (diagnostics.mjs).
+  // writes the diagnostics file, then opens the Downloads folder and the
+  // new-issue page (diagnostics.mjs).
   const callLog = installCallLog(ctx);
   const pluginRoot = fileURLToPath(new URL('..', import.meta.url));
   const collectDiagnostics = () => {

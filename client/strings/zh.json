@@ -262,10 +262,9 @@
   "updateRefresh": "刷新页面",
   "updateDoneTitle": "已更新到 v{version}",
   "report": "反馈问题",
-  "reportTitle": "导出诊断信息到下载文件夹，并在浏览器里打开 GitHub 问题页面",
+  "reportTitle": "把诊断信息保存到下载文件夹，并打开下载文件夹和 GitHub 新建问题页面",
   "reportRunning": "导出中…",
-  "reportDone": "已导出",
-  "reportDoneTitle": "诊断文件 {file} 已存到下载文件夹，问题页面已在浏览器打开，把文件拖进去即可。",
-  "reportFailed": "已打开问题页面",
-  "reportFailedTitle": "没能导出诊断文件，已直接打开 GitHub 问题页面。"
+  "reportSaved": "已将诊断信息保存到下载文件夹。",
+  "reportFailed": "诊断信息没有保存成功，已打开 GitHub 新建问题页面。",
+  "reportOk": "确定"
 }
