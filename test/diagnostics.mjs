@@ -91,11 +91,21 @@ try {
   await writeFile(path.join(nested, 'package.json'), JSON.stringify({ name: 'dsh-computer-use-win' }));
   assert.equal(readInstallSpec(nested), '0.6.1');
 
-  // DSH log lines: only the plugin's, newest files last.
+  // DSH log lines: only the plugin's, newest files last, a line DSH wrote to
+  // both its main and its error log only once.
   const logs = path.join(root, 'logs');
   await mkdir(logs);
-  await writeFile(path.join(logs, 'dsh-2026-11-18.log'), 'other line\nwindows-computer-use MCP server 0.6.1 ready\nanother\n');
-  assert.deepEqual(pluginLogLines([logs]), ['logs/dsh-2026-11-18.log: windows-computer-use MCP server 0.6.1 ready']);
+  await writeFile(path.join(logs, 'dsh-2026-11-18.error.log'), 'windows-computer-use MCP server 0.6.1 ready\n');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  await writeFile(path.join(logs, 'dsh-2026-11-18.log'), 'other line\nwindows-computer-use MCP server 0.6.1 ready\nwincu: second\nanother\n');
+  assert.deepEqual(pluginLogLines([logs]), ['logs/dsh-2026-11-18.error.log: windows-computer-use MCP server 0.6.1 ready', 'logs/dsh-2026-11-18.log: wincu: second']);
+
+  // Settings in the file: no button tokens, and a tool list only for a custom preset.
+  const second = await exportDiagnostics({ version: '0.6.1', settings: { toolPreset: 'full', enabledTools: ['click'], previewToken: 5, progressPreviewToken: 6 }, env, outDir: out, at: new Date(2026, 10, 18, 2, 3, 5), selfTest: { ok: true }, facts: { system: {}, browsers: {}, logs: [] } });
+  const secondText = await readFile(second.file, 'utf8');
+  assert.ok(!/Token|enabledTools/.test(secondText), 'Tokens and an unused tool list stay out');
+  const custom = await exportDiagnostics({ version: '0.6.1', settings: { toolPreset: 'custom', enabledTools: ['click'] }, env, outDir: out, at: new Date(2026, 10, 18, 2, 3, 6), selfTest: { ok: true }, facts: { system: {}, browsers: {}, logs: [] } });
+  assert.ok((await readFile(custom.file, 'utf8')).includes('"enabledTools"'), 'A custom tool list is kept');
 } finally {
   await rm(root, { recursive: true, force: true });
 }

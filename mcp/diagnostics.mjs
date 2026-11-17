@@ -172,9 +172,10 @@ export async function runSelfTest(serverPath, { timeout = 45000, env = process.e
 }
 
 // The plugin's lines from DSH's own log files (newest two per folder, their
-// last 2 MiB), the last 200 of them.
+// last 2 MiB), the last 200 of them. DSH writes warnings to its main log and
+// its error log alike, so a line already taken from one file is not repeated.
 export function pluginLogLines(dirs, { limit = LOG_LINE_LIMIT, markers = PLUGIN_MARKERS } = {}) {
-  const lines = [];
+  const lines = [], seen = new Set();
   for (const dir of dirs) {
     let names = [];
     try { names = readdirSync(dir).filter(name => name.endsWith('.log')).map(name => ({ name, at: statSync(path.join(dir, name)).mtimeMs })).sort((a, b) => b.at - a.at).slice(0, 2).map(item => item.name).reverse(); } catch { continue; }
@@ -186,7 +187,11 @@ export function pluginLogLines(dirs, { limit = LOG_LINE_LIMIT, markers = PLUGIN_
         try { readSync(fd, buffer, 0, buffer.length, start); } finally { closeSync(fd); }
         text = buffer.toString('utf8');
       } catch { continue; }
-      for (const line of text.split(/\r?\n/)) if (line && markers.some(marker => line.includes(marker))) lines.push(`${path.basename(dir)}/${name}: ${clip(line, 600)}`);
+      for (const line of text.split(/\r?\n/)) {
+        if (!line || !markers.some(marker => line.includes(marker)) || seen.has(line)) continue;
+        seen.add(line);
+        lines.push(`${path.basename(dir)}/${name}: ${clip(line, 600)}`);
+      }
     }
   }
   return lines.slice(-limit);
@@ -272,6 +277,9 @@ export async function exportDiagnostics({ version, settings = {}, calls = [], ho
   const system = given?.system ?? await systemFacts();
   const cleanSettings = { ...settings };
   if (typeof cleanSettings.indicatorText === 'string') cleanSettings.indicatorText = `<${[...cleanSettings.indicatorText].length} chars>`;
+  // Button tokens say nothing; a tool list matters only for a custom preset.
+  for (const key of Object.keys(cleanSettings)) if (/Token$/.test(key)) delete cleanSettings[key];
+  if (cleanSettings.toolPreset !== 'custom') delete cleanSettings.enabledTools;
   const facts = {
     version, host, mcpClient, dshLocale, installSpec: installSpec ? redact(installSpec) : undefined, settings: cleanSettings,
     node: process.versions.node, electron: process.versions.electron, osRelease: `${os.type()} ${os.release()}`,
