@@ -57,6 +57,17 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] .wcu-header{padding:0 0 12px}
       [data-wincu-settings] .wcu-title-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
       [data-wincu-settings] .wcu-version{font-size:13px;font-weight:500;color:var(--wcu-muted);white-space:nowrap}
+      [data-wincu-settings] .wcu-title-end{display:flex;align-items:center;gap:6px;margin-left:auto}
+      [data-wincu-settings] .wcu-update{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--wcu-muted);white-space:nowrap}
+      [data-wincu-settings] .wcu-title-end button.wcu-small{height:30px}
+      [data-wincu-settings] .wcu-update a.wcu-update-link{display:inline-flex;align-items:center;height:30px;padding:0 10px;border:.5px solid var(--wcu-line-strong);border-radius:var(--dsw-radius-sm,8px);color:var(--wcu-fg);font-size:12px;text-decoration:none}
+      [data-wincu-settings] .wcu-update a.wcu-update-link:hover{background:var(--wcu-hover);text-decoration:none}
+      [data-wincu-settings] .wcu-update a{color:var(--dsw-alias-label-link,#4176e6);text-decoration:none;white-space:nowrap}
+      [data-wincu-settings] .wcu-update a:hover{text-decoration:underline}
+      [data-wincu-settings] .wcu-spinner{width:12px;height:12px;border-radius:50%;border:2px solid color-mix(in srgb,var(--wcu-muted) 35%,transparent);border-top-color:var(--wcu-muted);animation:wcu-spin .8s linear infinite}
+      @keyframes wcu-spin{to{transform:rotate(360deg)}}
+      @media (prefers-reduced-motion:reduce){[data-wincu-settings] .wcu-spinner{animation:none}}
+      [data-wincu-settings] .wcu-update-note{margin:6px 0 0;font-size:12px;line-height:1.5}
       [data-wincu-settings] .wcu-header-actions{display:flex;gap:4px;align-items:center;margin-left:auto}
       [data-wincu-settings] .wcu-header-actions[data-compact]{gap:0;padding:1px;border:.5px solid var(--wcu-line-strong);border-radius:8px;background:transparent}
       [data-wincu-settings] .wcu-project-icon{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:0 8px;height:28px;color:var(--wcu-muted);border-radius:6px;font-size:12px;text-decoration:none;white-space:nowrap}
@@ -315,6 +326,184 @@ window.__ModuleLoader__.load({
       lock:locked=>drawing(box(locked?'a-win a-edge':'a-win a-frame',18,12,62,45,4.5),box('a-ink',25,23,36,2.6,1.3),box('a-ink',25,30,42,2.6,1.3),box('a-ink',25,37,28,2.6,1.3),box(locked?'a-acc':'a-win',68,9,22,22,5.5),...(!locked?[box('a-frame',68,9,22,22,5.5)]:[]),h('path',{className:locked?'a-lock':'a-lock-open',d:locked?'M76 19.5v-2.2a3 3 0 0 1 6 0v2.2M74.8 19.5h8.4v6.2h-8.4z':'M76 19.5v-2.4a3 3 0 0 1 5.6-1.4M74.8 19.5h8.4v6.2h-8.4z'}),...(locked?[arrow(48,31)]:[]))
     };
 
+    // Plugin updates. The check runs once per DSH start, when this client
+    // loads, and again on request. It uses the public update API of DSH's
+    // plugin market (dshmarket, bundled with DSH Desktop): discovery first, then
+    // a check of this one package; an update starts only from a click, as DSH
+    // Desktop's plugin contract requires for any package change. The market
+    // installs it and checks the version pnpm put on disk. Without the market
+    // the latest version comes from npm, and the page links the upgrade steps.
+    const UPDATE_PACKAGE='dsh-computer-use-win';
+    const UPDATE_SCHEMA='dsh-market/update-api/v1';
+    const UPDATE_RELEASES='https://github.com/Yu-tao-Li/dsh-computer-use-win/releases';
+    const UPDATE_FORCE_CODES=['RELEASE_TOO_FRESH','VERSION_UNCHANGED'];
+    const UPDATE_TERMINAL=['succeeded','failed','cancelled','rolled-back'];
+    const versionParts=value=>{const m=/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(value??'').trim());return m?{core:[+m[1],+m[2],+m[3]],pre:m[4]?m[4].split('.'):[]}:null;};
+    // Semantic-version order; NaN when either side is not a version.
+    function compareVersions(left,right){
+      const a=versionParts(left),b=versionParts(right);
+      if(!a||!b)return NaN;
+      for(let i=0;i<3;i++)if(a.core[i]!==b.core[i])return a.core[i]<b.core[i]?-1:1;
+      if(!a.pre.length||!b.pre.length)return a.pre.length===b.pre.length?0:a.pre.length?-1:1;
+      for(let i=0;i<Math.max(a.pre.length,b.pre.length);i++){
+        const p=a.pre[i],q=b.pre[i];
+        if(p===undefined)return -1;if(q===undefined)return 1;if(p===q)continue;
+        const pn=/^\d+$/.test(p),qn=/^\d+$/.test(q);
+        if(pn&&qn)return +p<+q?-1:1;if(pn!==qn)return pn?-1:1;return p<q?-1:1;
+      }
+      return 0;
+    }
+    const updateStore={state:{phase:'idle'},listeners:new Set(),
+      set(patch){this.state={...this.state,...patch};for(const listener of [...this.listeners])listener();},
+      subscribe(listener){this.listeners.add(listener);return ()=>this.listeners.delete(listener);}};
+    const updateBadge=()=>updateStore.state.phase==='available';
+    async function requestJson(url,{method='GET',body,timeoutMs=10000,headers={}}={}){
+      const controller=typeof AbortController==='function'?new AbortController():undefined;
+      const timer=controller&&setTimeout(()=>controller.abort(),timeoutMs);
+      try{
+        const response=await fetch(url,{method,cache:'no-store',credentials:'same-origin',headers:{...(body===undefined?{}:{'content-type':'application/json'}),...headers},...(body===undefined?{}:{body:JSON.stringify(body)}),...(controller?{signal:controller.signal}:{})});
+        let data=null;try{data=await response.json();}catch{}
+        return {status:response.status,ok:response.ok,data};
+      }finally{if(timer)clearTimeout(timer);}
+    }
+    // undefined: not asked yet; null: no usable market (asked again on the next check).
+    let updateMarket,updateChecking,updateStarted=false;
+    async function discoverMarket(){
+      if(updateMarket)return updateMarket;
+      try{
+        const {ok,data}=await requestJson('/dsh-market/api/v1/capabilities');
+        updateMarket=ok&&data?.schema===UPDATE_SCHEMA&&data.features?.check&&data.features?.update&&typeof data.endpoints?.updates==='string'&&typeof data.endpoints?.operations==='string'?data:null;
+      }catch{updateMarket=null;}
+      return updateMarket;
+    }
+    function settleUpdateCheck({source,installed,latest,updateAvailable}){
+      // A newer version already on disk is an update waiting for a restart.
+      const phase=compareVersions(installed,PLUGIN_VERSION)>0?'updated':updateAvailable?'available':compareVersions(latest,installed)>0?'held':'latest';
+      updateStore.set({phase,source,installed,latest,failure:null,checkedAt:Date.now(),restartRequired:phase==='updated',refreshRequired:false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
+    }
+    // Checks run on their own: once per DSH start, and again when the settings
+    // page opens on a result that is old or missing. Nothing to click.
+    function checkUpdate(){
+      if(updateStore.state.phase==='updating')return Promise.resolve();
+      if(updateChecking)return updateChecking;
+      updateStore.set({checking:true});
+      updateChecking=(async()=>{
+        const market=await discoverMarket();
+        if(market){
+          try{
+            const {status,data}=await requestJson(market.endpoints.updates+'?name='+UPDATE_PACKAGE,{timeoutMs:30000});
+            const found=data?.package;
+            // The market updates registry installs; a file: or link: install
+            // ("linked") updates from its own source, so it gets the steps.
+            if(status===200&&found&&versionParts(found.installedVersion))return settleUpdateCheck({source:found.source==='linked'?'help':'market',installed:found.installedVersion,latest:versionParts(found.latestVersion)?found.latestVersion:found.installedVersion,updateAvailable:found.updateAvailable===true});
+          // Not a package of this profile (a GitHub or local install): the market
+          // cannot update it, and npm still tells whether a newer version exists.
+          }catch{}
+        }
+        try{
+          const {ok,data}=await requestJson('https://registry.npmjs.org/'+UPDATE_PACKAGE+'/latest');
+          if(ok&&versionParts(data?.version))return settleUpdateCheck({source:'help',installed:PLUGIN_VERSION,latest:data.version,updateAvailable:compareVersions(data.version,PLUGIN_VERSION)>0});
+        }catch{}
+        updateStore.set({phase:'unknown',checkedAt:Date.now()});
+      })().finally(()=>{updateChecking=undefined;updateStore.set({checking:false});});
+      return updateChecking;
+    }
+    function failUpdate(failure){updateStore.set({phase:'failed',percent:null,failure:{code:String(failure?.code||'UPDATE_FAILED'),message:String(failure?.message||'').slice(0,300),retryable:failure?.retryable!==false}});}
+    async function startUpdate({force=false}={}){
+      const state=updateStore.state,market=updateMarket;
+      if(!market||state.source!=='market'||state.phase==='updating')return;
+      const target=state.latest;
+      updateStore.set({phase:'updating',percent:null,failure:null,target});
+      try{
+        const {status,data}=await requestJson(market.endpoints.updates,{method:'POST',body:{packageName:UPDATE_PACKAGE,...(force?{force:true}:{})},timeoutMs:30000});
+        let operation=data?.operation;
+        if(status!==202||!operation?.operationId)return failUpdate(data?.failure??{code:status===409?'OPERATION_BUSY':'UPDATE_FAILED',message:data?.error||('HTTP '+status),retryable:status===409});
+        const id=operation.operationId,deadline=Date.now()+15*60000;
+        while(!UPDATE_TERMINAL.includes(operation.state)){
+          if(Date.now()>deadline)return failUpdate({code:'UPDATE_TIMEOUT'});
+          await new Promise(resolve=>setTimeout(resolve,1000));
+          const polled=await requestJson(market.endpoints.operations+'?operationId='+encodeURIComponent(id),{timeoutMs:15000}).catch(()=>null);
+          if(polled?.status===404)return failUpdate({code:'UPDATE_LOST'});
+          if(polled?.data?.operation?.operationId===id)operation=polled.data.operation;
+          const percent=operation.progress?.percent;
+          updateStore.set({percent:Number.isFinite(percent)?Math.max(0,Math.min(100,Math.round(percent))):null});
+        }
+        if(operation.state!=='succeeded')return failUpdate(operation.failure??{code:operation.state==='cancelled'?'UPDATE_CANCELLED':'UPDATE_FAILED'});
+        // The API asks each client to compare the installed version with the
+        // version it offered before it reports success or offers a restart.
+        if(!(compareVersions(operation.installedVersion,target)>=0))return failUpdate({code:'RESOLVED_VERSION_MISMATCH',message:String(operation.installedVersion??'')});
+        updateStore.set({phase:'updated',installed:operation.installedVersion,percent:null,restartRequired:operation.outcome?.restartRequired===true,refreshRequired:operation.outcome?.refreshRequired===true});
+      }catch(error){failUpdate({code:'UPDATE_FAILED',message:error?.message});}
+    }
+    async function restartForUpdate(){
+      const market=updateMarket;
+      if(!updateStore.state.restartSupported||!market)return;
+      updateStore.set({restarting:true});
+      try{const {ok,data}=await requestJson(market.endpoints.restart,{method:'POST',body:{},timeoutMs:15000});if(!ok)updateStore.set({restarting:false,phase:'failed',failure:{code:'RESTART_FAILED',message:String(data?.error||''),retryable:false}});}
+      catch{/* the host is going away */}
+    }
+    const fill=(text,values)=>String(text).replace(/\{(\w+)\}/g,(_,key)=>values[key]??'');
+    const UPDATE_STALE_MS=6*60*60*1000;
+    // Left of the GitHub link, and only when there is something to say: one
+    // transparent "Update" button when a newer version can be installed, a
+    // word or two while it runs and after it. Versions sit in the tooltips.
+    function UpdateInline({t}){
+      const state=React.useSyncExternalStore(listener=>updateStore.subscribe(listener),()=>updateStore.state);
+      // DSH can stay open for days: an old or failed check is repeated when
+      // the page opens.
+      React.useEffect(()=>{const current=updateStore.state;if(current.phase==='unknown'||(['latest','held'].includes(current.phase)&&Date.now()-(current.checkedAt??0)>UPDATE_STALE_MS))void checkUpdate();},[]);
+      const small=(text,props)=>h('button',{type:'button',className:'wcu-small',...props},text);
+      const wrap=(tone,...children)=>h('span',{className:'wcu-update','data-wincu-update':state.phase,'data-tone':tone||undefined},...children);
+      if(state.phase==='available')return wrap('',state.source==='market'
+        ?small(t('updateNow'),{'data-wincu-update-now':true,title:fill(t('updateAvailable'),{version:state.latest}),onClick:()=>{void startUpdate();}})
+        :h('a',{className:'wcu-update-link',href:t('updateHelpUrl'),target:'_blank',rel:'noopener noreferrer',title:fill(t('updateAvailable'),{version:state.latest})+' · '+t('updateHow'),'data-wincu-update-help':true},t('updateNow')));
+      if(state.phase==='updating')return wrap('',h('span',{className:'wcu-spinner','aria-hidden':true}),h('span',null,t('updateRunning')+(state.percent!=null?' '+state.percent+'%':'')));
+      // What finishes it comes from the market: a restart (a button, or the note
+      // below the title), a page reload, or nothing.
+      if(state.phase==='updated')return wrap('success',h('span',{title:fill(t('updateDoneTitle'),{version:state.installed})},t('updateDone')),
+        state.restartRequired&&state.restartSupported&&small(t('updateRestart'),{'data-wincu-update-restart':true,disabled:state.restarting,onClick:()=>{void restartForUpdate();}}),
+        !state.restartRequired&&state.refreshRequired&&small(t('updateRefresh'),{'data-wincu-update-refresh':true,onClick:()=>{try{window.location.reload();}catch{}}}));
+      if(state.phase==='failed'){
+        const code=state.failure?.code;
+        return wrap('error',h('span',null,t(code==='OPERATION_BUSY'?'updateBusy':'updateFailed')),
+          UPDATE_FORCE_CODES.includes(code)?small(t('updateForce'),{'data-wincu-update-force':true,onClick:()=>{void startUpdate({force:true});}})
+          :state.failure?.retryable&&updateMarket&&state.source==='market'?small(t('updateRetry'),{'data-wincu-update-retry':true,onClick:()=>{void startUpdate();}}):null);
+      }
+      return null;
+    }
+    // "Report a problem": the plugin writes a diagnostics file to Downloads and
+    // opens the issue form (mcp/diagnostics.mjs). If that fails, the form still
+    // opens, with what this page knows.
+    const REPORT_ISSUE_URL='https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new';
+    function ReportButton({t}){
+      const [state,setState]=React.useState({phase:'idle'});
+      React.useEffect(()=>{if(state.phase!=='done'&&state.phase!=='failed')return;const timer=setTimeout(()=>setState({phase:'idle'}),8000);return ()=>clearTimeout(timer);},[state.phase]);
+      const openForm=url=>{try{window.open(url,'_blank','noopener');}catch{}};
+      const run=async()=>{
+        if(state.phase==='running')return;
+        setState({phase:'running'});
+        try{
+          const {status,data}=await requestJson('/dsh-computer-use-win/api/diagnostics',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:120000});
+          if(status===200&&data?.ok){if(!data.opened&&typeof data.issueUrl==='string')openForm(data.issueUrl);setState({phase:'done',file:data.fileName});return;}
+        }catch{}
+        openForm(REPORT_ISSUE_URL+'?'+new URLSearchParams({template:'bug_report.yml',environment:'插件 / Plugin: '+PLUGIN_VERSION+'\n'+(typeof navigator==='undefined'?'':navigator.userAgent)}).toString());
+        setState({phase:'failed'});
+      };
+      if(state.phase==='running')return h('span',{className:'wcu-update','data-wincu-report':'running'},h('span',{className:'wcu-spinner','aria-hidden':true}),h('span',null,t('reportRunning')));
+      if(state.phase==='done')return h('span',{className:'wcu-update','data-wincu-report':'done','data-tone':'success',title:fill(t('reportDoneTitle'),{file:state.file})},t('reportDone'));
+      if(state.phase==='failed')return h('span',{className:'wcu-update','data-wincu-report':'failed',title:t('reportFailedTitle')},t('reportFailed'));
+      return h('button',{type:'button',className:'wcu-small','data-wincu-report':'idle',title:t('reportTitle'),onClick:run},t('report'));
+    }
+    // The one line below the title, only when an update needs a step from the
+    // user (a restart the market does not run) or did not finish.
+    function UpdateNote({t}){
+      const state=React.useSyncExternalStore(listener=>updateStore.subscribe(listener),()=>updateStore.state);
+      if(state.phase==='updated'&&state.restartRequired&&!state.restartSupported)return h('p',{className:'wcu-update-note','data-wincu-update-note':'restart'},t(state.runtime==='web'?'updateRestartWeb':'updateRestartDesktop'));
+      if(state.phase==='failed'&&state.failure?.code!=='OPERATION_BUSY')return h('p',{className:'wcu-update-note','data-tone':'error','data-wincu-update-note':'failed'},
+        t(UPDATE_FORCE_CODES.includes(state.failure.code)?'updateTooFresh':state.failure.code==='RESOLVED_VERSION_MISMATCH'?'updateMismatch':'updateFailedHint')+(state.failure.message?' ('+state.failure.message.slice(0,160)+') ':' '),
+        h('a',{href:t('updateHelpUrl'),target:'_blank',rel:'noopener noreferrer'},t('updateHow')));
+      return null;
+    }
 
     function Card({scope,t,savePatch,as='li',idPrefix='wincu',view}) {
       if(view==='summary')return h('span',{'data-wincu-summary':true},t('pluginDescription'),' ',h('span',{style:{color:'var(--dsw-alias-label-link,#71a7ff)'}},t('openSettings')));
@@ -466,8 +655,19 @@ window.__ModuleLoader__.load({
             communityLink('https://github.com/Yu-tao-Li/dsh-computer-use-win','starLink','star','starTitle'),t('starAfter'),t('issueBefore'),
             communityLink('https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new','issueLink','issue','issueTitle'),t('issueAfter'),noteToggle)),
           h('div',{className:'wcu-title-row'},h('h2',null,t('title')),h('span',{className:'wcu-version','data-wincu-version':true},'v'+PLUGIN_VERSION),
-            noteCompact&&h('div',{className:'wcu-header-actions','data-compact':true},h('a',{href:'https://github.com/Yu-tao-Li/dsh-computer-use-win',target:'_blank',rel:'noopener noreferrer',className:'wcu-project-icon',title:t('projectTitle'),'aria-label':t('projectTitle')},linkIcon('github'),h('span',null,'GitHub')),noteToggle)),
+            h('div',{className:'wcu-title-end'},h(UpdateInline,{t}),h(ReportButton,{t}),noteCompact&&h('div',{className:'wcu-header-actions','data-compact':true},h('a',{href:'https://github.com/Yu-tao-Li/dsh-computer-use-win',target:'_blank',rel:'noopener noreferrer',className:'wcu-project-icon',title:t('projectTitle'),'aria-label':t('projectTitle')},linkIcon('github'),h('span',null,'GitHub')),noteToggle))),
+          h(UpdateNote,{t}),
           h('p',null,t('intro'))),
+        h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-tools-title'},
+          head(idPrefix+'-tools-title','toolsTitle','toolsInfo',h('span',{className:'wcu-tool-count','data-wincu-tool-count':true},draft.toolPreset==='lazy'?t('lazyCount')+' '+allToolNames.length:t('toolsSelected')+' '+activeTools.length+' / '+allToolNames.length)),
+          item(picture(arts.tools(new Set(activeTools),new Set(allowedTools))),
+            h('div',{className:'wcu-segment wcu-presets',role:'radiogroup','aria-label':t('toolsTitle')},...['full','lite','lazy','custom'].map(preset=>h('label',{key:preset},h('input',{type:'radio',name:idPrefix+'-toolPreset',id:idPrefix+'-toolPreset-'+preset,value:preset,checked:draft.toolPreset===preset,disabled,onChange:()=>change('toolPreset',preset)}),t(preset)))),
+            h('p',{className:'wcu-hint','data-wincu-preset-hint':true},t(draft.toolPreset+'Summary'))),
+          h('details',{className:'wcu-tool-detail','data-wincu-tools':true,hidden:draft.toolPreset!=='custom',open:draft.toolPreset==='custom'},h('summary',null,t('customTools')),
+            h('div',{className:'wcu-tool-body'},h('div',{className:'wcu-tool-toolbar'},button('allTools',{className:'wcu-small',disabled:customDisabled||draft.enabledTools.length===allToolNames.length,onClick:()=>change('enabledTools',[...allToolNames])}),button('noTools',{className:'wcu-small',disabled:customDisabled||!draft.enabledTools.length,onClick:()=>change('enabledTools',[])})),
+              ...toolGroups.map(([group,entries])=>{const names=entries.map(entry=>entry[0]),count=names.filter(name=>draft.enabledTools.includes(name)).length;return h('fieldset',{className:'wcu-tool-group',disabled:customDisabled,key:group},
+                h('legend',null,h('label',{className:'wcu-tool-group-label'},h('input',{type:'checkbox',id:idPrefix+'-tool-group-'+group,checked:count===names.length,'aria-checked':count&&count<names.length?'mixed':count===names.length,ref:input=>{if(input)input.indeterminate=count>0&&count<names.length;},onChange:e=>selectTools(names,e.target.checked)}),t('toolGroup_'+group),h('span',{className:'wcu-tool-count'},count+' / '+names.length))),
+                h('div',{className:'wcu-tool-grid'},...entries.map(([name])=>h('label',{className:'wcu-tool-item',key:name,title:'windows_computer_use_'+name},h('input',{type:'checkbox',id:idPrefix+'-tool-'+name,'data-wincu-tool':name,checked:draft.enabledTools.includes(name),disabled:customDisabled,onChange:e=>selectTools([name],e.target.checked)}),h('span',null,h('strong',null,t('tool_'+name)),h('small',null,t('toolHint_'+name)))))));})))),
         h('section',{className:'wcu-section','data-wincu-browser-policy':true,'aria-labelledby':idPrefix+'-browser-title'},
           head(idPrefix+'-browser-title','browserTitle','browserInfo'),
           h('div',{className:'wcu-grid'},
@@ -493,16 +693,6 @@ window.__ModuleLoader__.load({
               h('li',null,t('signInStep3'),h('span',{className:'wcu-address'},h('code',null,KEPT_FOLDER),h(CopyButton,{text:KEPT_FOLDER,t})))),
             h('strong',null,t('signInRisks')),
             h('ul',null,...[1,2,3].map(n=>h('li',{key:n},t('signInRisk'+n)))))),
-        h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-tools-title'},
-          head(idPrefix+'-tools-title','toolsTitle','toolsInfo',h('span',{className:'wcu-tool-count','data-wincu-tool-count':true},draft.toolPreset==='lazy'?t('lazyCount')+' '+allToolNames.length:t('toolsSelected')+' '+activeTools.length+' / '+allToolNames.length)),
-          item(picture(arts.tools(new Set(activeTools),new Set(allowedTools))),
-            h('div',{className:'wcu-segment wcu-presets',role:'radiogroup','aria-label':t('toolsTitle')},...['full','lite','lazy','custom'].map(preset=>h('label',{key:preset},h('input',{type:'radio',name:idPrefix+'-toolPreset',id:idPrefix+'-toolPreset-'+preset,value:preset,checked:draft.toolPreset===preset,disabled,onChange:()=>change('toolPreset',preset)}),t(preset)))),
-            h('p',{className:'wcu-hint','data-wincu-preset-hint':true},t(draft.toolPreset+'Summary'))),
-          h('details',{className:'wcu-tool-detail','data-wincu-tools':true,hidden:draft.toolPreset!=='custom',open:draft.toolPreset==='custom'},h('summary',null,t('customTools')),
-            h('div',{className:'wcu-tool-body'},h('div',{className:'wcu-tool-toolbar'},button('allTools',{className:'wcu-small',disabled:customDisabled||draft.enabledTools.length===allToolNames.length,onClick:()=>change('enabledTools',[...allToolNames])}),button('noTools',{className:'wcu-small',disabled:customDisabled||!draft.enabledTools.length,onClick:()=>change('enabledTools',[])})),
-              ...toolGroups.map(([group,entries])=>{const names=entries.map(entry=>entry[0]),count=names.filter(name=>draft.enabledTools.includes(name)).length;return h('fieldset',{className:'wcu-tool-group',disabled:customDisabled,key:group},
-                h('legend',null,h('label',{className:'wcu-tool-group-label'},h('input',{type:'checkbox',id:idPrefix+'-tool-group-'+group,checked:count===names.length,'aria-checked':count&&count<names.length?'mixed':count===names.length,ref:input=>{if(input)input.indeterminate=count>0&&count<names.length;},onChange:e=>selectTools(names,e.target.checked)}),t('toolGroup_'+group),h('span',{className:'wcu-tool-count'},count+' / '+names.length))),
-                h('div',{className:'wcu-tool-grid'},...entries.map(([name])=>h('label',{className:'wcu-tool-item',key:name,title:'windows_computer_use_'+name},h('input',{type:'checkbox',id:idPrefix+'-tool-'+name,'data-wincu-tool':name,checked:draft.enabledTools.includes(name),disabled:customDisabled,onChange:e=>selectTools([name],e.target.checked)}),h('span',null,h('strong',null,t('tool_'+name)),h('small',null,t('toolHint_'+name)))))));})))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-indicator-title'},
           head(idPrefix+'-indicator-title','indicatorTitle','indicatorInfo',button('preview',{className:'wcu-small',disabled:disabled||(!draft.indicatorEnabled&&!draft.cursorIndicatorEnabled),onClick:previewIndicator,title:t('previewTitle')})),
           h('div',{className:'wcu-grid'},
@@ -636,20 +826,33 @@ window.__ModuleLoader__.load({
     function watchNavIcon(names){
       if(typeof document==='undefined'||typeof MutationObserver!=='function')return ()=>{};
       const style=document.createElement('style');
-      style.textContent=`[data-wincu-nav]>svg:first-child{display:none}[data-wincu-nav]::before{content:'';flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:${navMouse} center/16px no-repeat;mask:${navMouse} center/16px no-repeat}`;
+      style.textContent=`[data-wincu-nav]>svg:first-child{display:none}[data-wincu-nav]::before{content:'';flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:${navMouse} center/16px no-repeat;mask:${navMouse} center/16px no-repeat}[data-wincu-nav][data-wincu-update]::after{content:'';flex:none;width:7px;height:7px;margin-left:auto;border-radius:50%;background:var(--dsw-alias-state-error-primary,#e5484d)}`;
       document.head.append(style);
-      const mark=root=>{for(const button of root.querySelectorAll('button[class*="navCell"]')){const mine=button.firstElementChild?.localName==='svg'&&names.includes(button.lastElementChild?.textContent);if(mine!==button.hasAttribute('data-wincu-nav'))button.toggleAttribute('data-wincu-nav',mine);}};
+      const mark=root=>{for(const button of root.querySelectorAll('button[class*="navCell"]')){const mine=button.firstElementChild?.localName==='svg'&&names.includes(button.lastElementChild?.textContent);if(mine!==button.hasAttribute('data-wincu-nav'))button.toggleAttribute('data-wincu-nav',mine);if(button.hasAttribute('data-wincu-update')!==(mine&&updateBadge()))button.toggleAttribute('data-wincu-update',mine&&updateBadge());}};
+      // An update waiting to be installed shows a dot on this section's nav button.
+      const unsubscribe=updateStore.subscribe(()=>{for(const button of document.querySelectorAll('[data-wincu-nav]'))button.toggleAttribute('data-wincu-update',updateBadge());});
       const layers=new Map();
       // Only layers that arrive with a settings nav are observed, so chat updates cost nothing.
       const watch=node=>{if(node.nodeType!==1||layers.has(node)||!node.querySelector('button[class*="navCell"]'))return;const observer=new MutationObserver(()=>mark(node));observer.observe(node,{childList:true,subtree:true,characterData:true});layers.set(node,observer);mark(node);};
       const top=new MutationObserver(records=>{for(const record of records){record.addedNodes.forEach(watch);record.removedNodes.forEach(node=>{layers.get(node)?.disconnect();layers.delete(node);});}});
       top.observe(document.body,{childList:true});
       for(const node of document.body.children)watch(node);
-      return ()=>{top.disconnect();for(const observer of layers.values())observer.disconnect();layers.clear();style.remove();for(const button of document.querySelectorAll('[data-wincu-nav]'))button.removeAttribute('data-wincu-nav');};
+      return ()=>{unsubscribe();top.disconnect();for(const observer of layers.values())observer.disconnect();layers.clear();style.remove();for(const button of document.querySelectorAll('[data-wincu-nav]')){button.removeAttribute('data-wincu-nav');button.removeAttribute('data-wincu-update');}};
     }
     function apply(ctx) {
       ctx.effect(()=>ctx.locale.register(NS,dictionaries));
       ctx.effect(()=>watchNavIcon([dictionaries.zh.nav,dictionaries.en.nav]));
+      // One update check per DSH start, a few seconds in, so it never competes
+      // with the start itself. A second apply in the same page does not repeat it.
+      ctx.effect(()=>{
+        const delay=Number.isFinite(globalThis.__wcuUpdateDelayMs)?globalThis.__wcuUpdateDelayMs:8000;
+        // Tests set the delay; they also get a way back to a fresh, unchecked state.
+        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,target:undefined,source:undefined,runtime:null,restartSupported:false,restarting:false,restartRequired:false,refreshRequired:false});}};
+        if(updateStarted||delay<0||typeof setTimeout!=='function'||typeof fetch!=='function')return ()=>{};
+        updateStarted=true;
+        const timer=setTimeout(()=>{void checkUpdate();},delay);
+        return ()=>clearTimeout(timer);
+      });
       registerActivity(ctx);
       const t=ctx.locale.bind?ctx.locale.bind(NS):key=>key;
       let mounted=false;

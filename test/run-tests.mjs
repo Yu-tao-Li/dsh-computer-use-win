@@ -43,6 +43,7 @@ const suites = [
   ['clipboard-focus-contract',powershell,['-NoProfile','-File','test/clipboard-focus-contract.ps1']],
   ['presentation-failure',process.execPath,['test/presentation-failure.mjs']],
   ['ui-copy',process.execPath,['test/ui-copy.mjs']],
+  ['diagnostics',process.execPath,['test/diagnostics.mjs']],
   ['clipboard-delayed',powershell,['-NoProfile','-STA','-File','test/clipboard-delayed.ps1']],
   ['browser-policy',process.execPath,['test/browser-policy.mjs']],
   ['source-encoding', process.execPath, ['test/source-encoding.mjs']],

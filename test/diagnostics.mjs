@@ -1,0 +1,130 @@
+// Problem reports: redaction, the call log, the issue URL, the file, the route.
+// No desktop input; the export runs on given facts in a temporary folder.
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  ISSUE_URL, createDiagnosticsHandler, describeArgs, diagnosticsMarkdown, environmentSummary, exportDiagnostics,
+  installCallLog, issueUrl, makeRedactor, pluginLogLines, readInstallSpec, trustedRequest,
+} from '../mcp/diagnostics.mjs';
+
+// Every user-profile path goes, 8.3 and forward-slash forms too; user and computer names as whole words.
+const redact = makeRedactor({ user: 'Alice', host: 'DESK-42', secrets: ['approval-secret-123456'] });
+assert.equal(redact('C:\\Users\\Alice\\AppData\\x.log c:/users/alice/y C:\\Users\\ALICE~1\\Temp\\z'), '%USERPROFILE%\\AppData\\x.log %USERPROFILE%/y %USERPROFILE%\\Temp\\z');
+assert.equal(redact('Alice on DESK-42; Malice and Alice2 stay'), '<user> on <computer>; Malice and Alice2 stay');
+assert.equal(redact('token approval-secret-123456 end'), 'token <secret> end');
+assert.equal(makeRedactor({ user: 'li', host: '' })('li liang'), 'li liang', 'Names shorter than three characters are left alone');
+
+// A call's shape, never what it typed.
+assert.deepEqual(describeArgs({ text: '我的密码是 hunter2', elementId: 'uia:rt:42', x: 10, submit: true, title: 'Secret chat' }),
+  { text: '<13 chars>', elementId: 'uia:rt:42', x: 10, submit: true, title: '<11 chars>' });
+assert.deepEqual(describeArgs('{"steps":[{"action":"type_text","arguments":{"text":"abc"}}],"browserTab":"t1a2b"}'),
+  { steps: [{ action: 'type_text', arguments: { text: '<3 chars>' } }], browserTab: 't1a2b' });
+assert.deepEqual(describeArgs({ keys: ['ctrl', 'v'] }), { keys: '<2 items>' });
+
+// The call log keeps desktop calls only, the last thirty, errors redacted.
+const handlers = [];
+const fakeCtx = { on: (name, handler) => { assert.equal(name, 'tools/execute'); handlers.push(handler); } };
+const log = installCallLog(fakeCtx, { redact });
+assert.equal(handlers.length, 1);
+const execute = (name, args, result, error) => handlers[0]({ name, arguments: args }, async () => { if (error) throw error; return result; });
+assert.deepEqual(await execute('bash', {}, { ok: 1 }), { ok: 1 });
+assert.equal(log.list().length, 0, 'Other tools are not recorded');
+await execute('mcp__wincu__windows_computer_use_click', { elementId: 'uia:rt:1' }, { isError: true, content: [{ type: 'text', text: 'Error: denied at C:\\Users\\Alice\\file' }] });
+await assert.rejects(execute('windows_computer_use_type_text', { text: 'hello' }, null, new Error('COMPUTER_USE_STOPPED by Alice')));
+let [first, second] = log.list();
+assert.deepEqual([first.tool, first.ok, first.error, first.args], ['click', false, 'Error: denied at %USERPROFILE%\\file', { elementId: 'uia:rt:1' }]);
+assert.deepEqual([second.tool, second.ok, second.error, second.args], ['type_text', false, 'COMPUTER_USE_STOPPED by <user>', { text: '<5 chars>' }]);
+for (let i = 0; i < 31; i++) await execute('windows_computer_use_screenshot', {}, { content: [] });
+assert.equal(log.list().length, 30, 'Only the last thirty calls stay');
+assert.ok(log.list().every(call => call.tool === 'screenshot' && call.ok && Number.isFinite(call.ms)));
+
+// The environment block fits a URL GitHub accepts, and the form gets it by field id.
+const facts = {
+  version: '0.6.1', installSpec: 'file:C:/Users/Alice/x.tgz', host: 'DSH Desktop (profile desktop)', mcpClient: '0.2.1-rc.2', node: '24.15.0', electron: '44.0.0',
+  windows: { product: 'Windows 11 Pro', display: '25H2', build: '26200', ubr: 8655 }, powershell: '5.1.26100.8655', pwsh: false,
+  screens: [{ primary: true, bounds: '2560x1440@0,0' }], systemDpi: 144, culture: 'zh-CN', uiCulture: 'zh-CN', dshLocale: 'zh-CN',
+  browsers: { edge: '157.0.4341.60' }, defaultBrowser: 'MSEdgeHTM', compatLayer: 'RunAsInvoker',
+  settings: { toolPreset: 'full', browserApp: 'default', browserVisible: true, browserSignIn: false, browserAttachUser: false, progressOverlayEnabled: true },
+  selfTest: { ok: true, backend: { powershell: '5.1.26100.8655', uiAutomation: true }, inputDesktopAvailable: true },
+};
+const summary = environmentSummary(facts);
+assert.match(summary, /Windows 11 Pro 25H2 build 26200\.8655/);
+assert.match(summary, /__COMPAT_LAYER: RunAsInvoker/);
+assert.ok(summary.length <= 1800);
+const url = new URL(issueUrl(summary, { title: 'x' }));
+assert.equal(url.origin + url.pathname, ISSUE_URL);
+assert.equal(url.searchParams.get('template'), 'bug_report.yml');
+assert.equal(url.searchParams.get('environment'), summary);
+assert.ok(issueUrl('x'.repeat(5000)).length < 8000);
+assert.ok(environmentSummary({ ...facts, version: 'v'.repeat(5000) }).length <= 1800, 'A long environment is clipped');
+
+// The file: sections in order, pipes in a call stay inside their cell.
+const markdown = diagnosticsMarkdown(facts, { calls: [{ at: 't', tool: 'find', ms: 5, ok: false, error: 'a | b', args: { query: '<3 chars>' } }], logs: ['l1'] });
+for (const heading of ['## 环境 / Environment', '## 设置 / Settings', '## 自检 / Self-test', '## 最近的电脑操控调用', '## DSH 日志里和本插件相关的行']) assert.ok(markdown.includes(heading), heading);
+assert.ok(markdown.includes('error: a \\| b'));
+
+const root = await mkdtemp(path.join(os.tmpdir(), 'wcu-diagnostics-'));
+try {
+  // The export writes one BOM-prefixed Markdown file and redacts it as a whole.
+  const out = path.join(root, 'Downloads');
+  const env = { ...process.env, WCU_APPROVAL_SECRET: 'approval-secret-abcdef', __COMPAT_LAYER: 'RunAsInvoker' };
+  const result = await exportDiagnostics({
+    version: '0.6.1', settings: { ...facts.settings, indicatorText: 'DSH 正在控制电脑' }, calls: log.list().slice(-2), host: facts.host, mcpClient: facts.mcpClient, dshLocale: 'zh-CN',
+    installSpec: `file:${os.homedir()}\\x.tgz`, env, outDir: out, at: new Date(2026, 10, 18, 2, 3, 4),
+    selfTest: { ok: true, backend: { powershell: '5.1' } }, facts: { system: { windows: facts.windows, powershell: '5.1', screens: facts.screens }, browsers: facts.browsers, logs: [`dsh.log: windows-computer-use ready at ${os.homedir()}\\a approval-secret-abcdef`] },
+  });
+  assert.equal(result.fileName, 'wincu-diagnostics-20261118-020304.md');
+  const text = await readFile(result.file, 'utf8');
+  assert.equal(text.charCodeAt(0), 0xfeff, 'A BOM, so Notepad reads the Chinese right');
+  assert.ok(!text.includes(os.homedir()), 'No home path in the file');
+  assert.ok(!text.includes('approval-secret-abcdef'), 'No secret in the file');
+  assert.ok(text.includes('"indicatorText": "<10 chars>"'), 'The banner text is kept as a length');
+  assert.ok(text.includes('__COMPAT_LAYER: RunAsInvoker'));
+  assert.ok(new URL(result.issueUrl).searchParams.get('environment').includes('Windows 11 Pro'));
+
+  // The profile that lists the plugin is found from pnpm's nested folder.
+  const profile = path.join(root, 'profile'), nested = path.join(profile, 'node_modules', '.pnpm', 'dsh-computer-use-win@file+x', 'node_modules', 'dsh-computer-use-win');
+  await mkdir(nested, { recursive: true });
+  await writeFile(path.join(profile, 'package.json'), JSON.stringify({ dependencies: { 'dsh-computer-use-win': '0.6.1' } }));
+  await writeFile(path.join(nested, 'package.json'), JSON.stringify({ name: 'dsh-computer-use-win' }));
+  assert.equal(readInstallSpec(nested), '0.6.1');
+
+  // DSH log lines: only the plugin's, newest files last.
+  const logs = path.join(root, 'logs');
+  await mkdir(logs);
+  await writeFile(path.join(logs, 'dsh-2026-11-18.log'), 'other line\nwindows-computer-use MCP server 0.6.1 ready\nanother\n');
+  assert.deepEqual(pluginLogLines([logs]), ['logs/dsh-2026-11-18.log: windows-computer-use MCP server 0.6.1 ready']);
+} finally {
+  await rm(root, { recursive: true, force: true });
+}
+
+// The route answers only the DSH page itself.
+const page = { host: '127.0.0.1:43120', origin: 'http://127.0.0.1:43120', 'x-wcu-request': '1', 'sec-fetch-site': 'same-origin' };
+assert.equal(trustedRequest({ headers: page }), true);
+assert.equal(trustedRequest({ headers: { ...page, 'x-wcu-request': undefined } }), false, 'Our header is required');
+assert.equal(trustedRequest({ headers: { ...page, 'sec-fetch-site': 'cross-site' } }), false);
+assert.equal(trustedRequest({ headers: { ...page, origin: 'https://evil.example' } }), false);
+assert.equal(trustedRequest({ headers: { ...page, host: 'evil.example' } }), false, 'DNS rebinding');
+assert.equal(trustedRequest({ headers: { 'x-wcu-request': '1' } }), true, 'A proxy that strips Host and Origin');
+
+const response = () => { const r = { status: 0, headers: {}, body: '' }; r.writeHead = (status, headers) => { r.status = status; r.headers = headers ?? {}; }; r.end = body => { r.body = body ?? ''; }; return r; };
+let collected = 0, opened = [];
+const handler = createDiagnosticsHandler({ collect: async () => { collected++; await new Promise(resolve => setTimeout(resolve, 30)); return { file: 'C:/x/wincu.md', fileName: 'wincu.md', issueUrl: 'https://github.com/x' }; }, open: result => { opened.push(result.fileName); return true; } });
+let r = response(); await handler({ method: 'GET', headers: page }, r); assert.equal(r.status, 405);
+r = response(); await handler({ method: 'POST', headers: { ...page, 'x-wcu-request': undefined } }, r); assert.equal(r.status, 403); assert.equal(collected, 0);
+const [a, b] = [response(), response()];
+await Promise.all([handler({ method: 'POST', headers: page }, a), handler({ method: 'POST', headers: page }, b)]);
+assert.deepEqual([a.status, b.status].sort(), [200, 409], 'One export at a time');
+const ok = JSON.parse([a, b].find(x => x.status === 200).body);
+assert.deepEqual(ok, { ok: true, fileName: 'wincu.md', issueUrl: 'https://github.com/x', opened: true });
+assert.deepEqual(opened, ['wincu.md']);
+const failing = createDiagnosticsHandler({ collect: async () => { throw new Error('disk full at C:\\Users\\Alice'); } });
+r = response(); await failing({ method: 'POST', headers: page }, r);
+assert.equal(r.status, 500); assert.equal(JSON.parse(r.body).ok, false);
+const notWindows = createDiagnosticsHandler({ collect: async () => ({ fileName: 'f.md', issueUrl: 'u' }), open: () => false });
+r = response(); await notWindows({ method: 'POST', headers: page }, r);
+assert.equal(JSON.parse(r.body).opened, false, 'The page opens the form itself when the plugin could not');
+
+console.log(JSON.stringify({ passed: true, redaction: true, callLog: true, issueUrl: true, export: true, route: true }));

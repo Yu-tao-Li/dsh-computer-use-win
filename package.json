@@ -15,6 +15,7 @@
     "mcp/browser-pipe.mjs",
     "mcp/browser.mjs",
     "mcp/catalog.mjs",
+    "mcp/diagnostics.mjs",
     "mcp/client.js",
     "mcp/dsh-plugin.mjs",
     "mcp/host-compat.mjs",

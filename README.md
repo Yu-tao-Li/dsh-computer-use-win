@@ -42,7 +42,9 @@
 
 #### 1.2 升级
 
-运行同一条安装命令，然后像上面第 2 步那样完全退出、再重新打开 DSH Desktop。
+DSH 每次启动时会自动检查新版本。有新版本时，**设置 → 电脑操控** 标题右侧 GitHub 左边会出现“更新”，左侧“电脑操控”旁有小红点；点“更新”，看到“已更新”后，像上面第 2 步那样完全退出、再重新打开 DSH Desktop。新版本由 DSH 自带的插件市场（dshmarket）安装，插件市场默认等新版本发布满一天后才提供。
+
+也可以运行同一条安装命令，然后同样完全退出、再重新打开 DSH Desktop。没有插件市场，或者插件是从本地文件装的时，“更新”会打开这段升级说明。
 
 命令里的 `desktop` 是 DSH Desktop 使用的配置（profile）。如果装到了别的 profile，正在用的 DSH 不会有任何变化。
 
@@ -193,12 +195,14 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 
 | 设置 | 可以怎么选 |
 |---|---|
+| 更新 | 有新版本时，标题右侧 GitHub 左边出现“更新”，点了才安装；平时不显示，见 1.2 |
+| 反馈问题 | 标题右侧。导出诊断文件到下载文件夹，并在浏览器打开填好环境的 GitHub 问题页面，见 8.4 |
+| 工具加载 | **全部**（26 个，默认）；**精简**（12 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
 | 优先使用网页控件 | 默认打开。网页能直接读写时在后台完成，不动鼠标、不抢前台；桌面程序和读不到的网页内容再交给电脑操控 |
 | 显示 DSH 浏览器窗口 | 默认打开，能看到 DSH 浏览器在做什么；关掉后它在后台运行，没有窗口 |
 | 浏览器类型 | 默认跟随 Windows 的默认浏览器，也可以选 Edge、Chrome 或 Firefox 系（实验）；默认浏览器不是 Edge 或 Chrome 时，用已安装的 Chrome 或 Edge。选 Firefox 系时先用 Windows 默认的那一个，见 [Firefox 系浏览器](docs/browser-bidi.md) |
 | 保留网站登录 | 默认关闭。打开后 DSH 专用浏览器改用长期保留的配置，你在它的窗口里登录过的网站，下次还是登录状态；你自己的浏览器里不用做任何设置，也不会弹出允许提示。设置页会说明怎么登录、登录存在哪、有哪些风险，见 7.4 |
 | 连接现有浏览器（实验） | 默认关闭。打开后，agent 可以操作你自己已经打开的 Chrome 或 Edge。先在浏览器的 `chrome://inspect/#remote-debugging`（Edge 是 `edge://inspect/#remote-debugging`）里允许远程调试；之后每次连接，浏览器都会问你是否允许。只连“浏览器类型”选中的浏览器，选“默认”时连 Windows 的默认浏览器；选 Firefox 系时不可用。见 7.4 |
-| 工具加载 | **全部**（26 个，默认）；**精简**（12 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
 | 屏幕提示 | 开关屏幕边缘光晕和提示条；可以改提示文字，放在顶部或底部，并设置结束后多久收起（0.2–3 秒） |
 | 鼠标提示 | 单独开关鼠标旁的光斑和 DSH 标签。不会改你的系统鼠标样式，调大了的指针也会自动避开 |
 | 远程与录屏可见 | 默认打开，让 UU 远程、屏幕共享和录屏也能看到提示和思考与操作浮窗，包括浮窗里模型的思考和回复。换显示器、调整布局或缩放后会自动跟上 |
@@ -316,11 +320,24 @@ Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定
 
 插件只提供桌面工具，不带模型、API key，也不带 OmniParser、UI-TARS 这类看图解析工具。能看图的模型或单独的解析服务可以读截图，再把位置交给插件去操作。
 
+#### 8.4 遇到问题怎么反馈？
+
+在 **设置 → 电脑操控** 标题右侧点“反馈问题”。插件会做两件事：
+
+1. 在下载文件夹里生成诊断文件 `wincu-diagnostics-日期-时间.md`，并在资源管理器里选中它。里面有插件和 DSH 的版本、Windows 和 PowerShell、屏幕和缩放、默认浏览器和 Edge、Chrome 的版本、设置、插件自检结果、这次启动后最近 30 次电脑操控调用（工具、成败、错误信息和耗时），以及 DSH 日志里和本插件相关的行。
+2. 在浏览器里打开 GitHub 问题页面，环境已经填好。写下遇到的问题，再把诊断文件拖进去，就可以提交。
+
+诊断文件是普通文本，上传前可以打开看一遍。用户目录、用户名和计算机名已经替换，输入的文字只保留长度，文件里没有截图。截图对排查很有帮助，需要的话请遮住隐私后另外拖进问题页面。
+
 ### 9. 数据与隐私
 
 界面读取、文字识别、截图和输入都在你的电脑上完成，结果交给 DSH 或其他调用方。这些内容会不会再发给远程模型，取决于你的 DSH 和模型设置。截图和读出的文字可能包含窗口里的敏感信息，所以分享日志或提 Issue 之前，请先遮住账号、路径、密码和私人对话。
 
 浏览器通道读到的网页内容同样在本机处理，再交给调用方。agent 浏览器默认不带任何登录；打开“保留网站登录”后，agent 能读取和操作你在 DSH 浏览器里登录过的网站。打开“连接现有浏览器”并允许连接后，agent 能读取和操作那个浏览器里所有已登录的网站，所以只在需要时打开，用完可以在浏览器里关掉远程调试。网页里的文字也可能夹带写给 agent 的指令，所以页面大纲的开头会提醒模型：网页内容不可信，只听你的指示。
+
+检查更新时，设置页向 DSH 插件市场询问这个插件的最新版本，插件市场再去 npm 查；没装插件市场时，设置页直接问 npm（registry.npmjs.org）。请求里只有插件名，不带你电脑上的任何内容。
+
+“反馈问题”导出的诊断文件只存在你的电脑上，你把它拖进问题页面才会上传，内容见 8.4。
 
 ### 10. 文档与开发
 
@@ -337,7 +354,7 @@ npm ci
 npm test
 ```
 
-单独运行的 MCP 服务不依赖任何第三方包；接入 DSH 时，用的是 DSH 自带的 Schemastery 和官方 MCP 桥。开发依赖只用于测试。`npm test` 会运行 **87 套互相隔离的回归测试**，覆盖设置兼容、接管与停止、思考与操作浮窗、界面读取、截图、文字识别协议、输入边界、批量动作和浏览器通道。它不会发出真实的键盘鼠标输入，也不会改动你装好的 DSH 配置；需要真实界面的测试只操作专用的测试窗口和临时的浏览器配置，日志写在命令输出的临时目录里。
+单独运行的 MCP 服务不依赖任何第三方包；接入 DSH 时，用的是 DSH 自带的 Schemastery 和官方 MCP 桥。开发依赖只用于测试。`npm test` 会运行 **88 套互相隔离的回归测试**，覆盖设置兼容、接管与停止、思考与操作浮窗、界面读取、截图、文字识别协议、输入边界、批量动作和浏览器通道。它不会发出真实的键盘鼠标输入，也不会改动你装好的 DSH 配置；需要真实界面的测试只操作专用的测试窗口和临时的浏览器配置，日志写在命令输出的临时目录里。
 
 `node test/notepad-e2e.mjs` 是另一项会真实打字的测试，它会打开记事本，请在专门的测试桌面上运行。
 
@@ -379,7 +396,9 @@ You need a Windows computer with DSH Desktop installed. The plugin uses Windows 
 
 #### 1.2 Upgrade
 
-Run the same install command, then fully quit and reopen DSH Desktop as in step 2 above.
+DSH checks for a new version at every start. When one exists, an Update button appears in **Settings → Computer Use**, left of the GitHub link at the top right, and a small red dot shows next to Computer Use on the left. Click Update, and once it says Updated, fully quit and reopen DSH Desktop as in step 2 above. The new version is installed by DSH's bundled plugin market (dshmarket), which by default offers a new version one day after its release.
+
+You can also run the same install command, then fully quit and reopen DSH Desktop the same way. Without the plugin market, or when the plugin was installed from a local file, Update opens these upgrade steps.
 
 The `desktop` in the command is the profile that DSH Desktop uses. If you install into another profile, the DSH you are using does not change.
 
@@ -530,12 +549,14 @@ Change these in **Settings → Computer Use**. Most take effect after you click 
 
 | Setting | Your choices |
 |---|---|
+| Update | Appears left of the GitHub link at the top right when a newer version exists, and installs it only when clicked; hidden otherwise; see 1.2 |
+| Report a problem | At the top right. Exports a diagnostics file to your Downloads folder and opens a GitHub issue page with the environment filled in; see 8.4 |
+| Tool loading | **All** (26 tools, the default); **Lite** (12 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
 | Prefer web page controls | On by default. Pages it can read and operate directly are handled in the background, without moving the pointer or taking the foreground; desktop apps and page content it cannot read go to Computer Use |
 | Show the DSH browser window | On by default, so you can watch the DSH browser; turn it off to run the browser in the background with no window |
 | Browser type | Follows the Windows default browser, or choose Edge, Chrome or the Firefox family (experimental); when the default is neither Edge nor Chrome, an installed Chrome or Edge is used. The Firefox family starts with the Windows default one; see [Firefox-family browsers](docs/browser-bidi.md) |
 | Keep website sign-ins | Off by default. When on, the DSH browser keeps one profile, and sites you sign in to in its window are still signed in next time; nothing to set up in your own browser and no prompts to allow. The settings page says how to sign in, where the sign-ins are kept and the risks; see 7.4 |
 | Connect browser (experimental) | Off by default. When on, the agent can work in the Chrome or Edge you already have open. First allow remote debugging at `chrome://inspect/#remote-debugging` (or `edge://inspect/#remote-debugging`); after that the browser asks you every time it is connected. Only the browser chosen under Browser type is used, and Default means the Windows default browser; it is unavailable for the Firefox family. See 7.4 |
-| Tool loading | **All** (26 tools, the default); **Lite** (12 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
 | Screen indicator | Turn the edge glow and the status bar on or off. Change the text, put the bar at the top or bottom, and choose how long it stays after a turn ends (0.2–3 seconds) |
 | Pointer indicator | Turn the glow and DSH tag at the pointer on or off on their own. Your Windows pointer style is not changed, and the tag stays clear of enlarged pointers |
 | Visible in remote sessions and recordings | On by default, so UU Remote, screen sharing and recordings can show the indicators and the reasoning and progress overlay too, including the model's reasoning and replies. It keeps up when you change monitors, layout or scaling |
@@ -653,11 +674,24 @@ It works on Windows only. DSH can also run inside WSL (for example `dsh web` in 
 
 The plugin provides desktop tools only. It does not include a model, an API key, or image parsers such as OmniParser or UI-TARS. A model that can see images, or a separate parsing service, can read the screenshots and pass positions back to the tools.
 
+#### 8.4 How do I report a problem?
+
+Click Report a problem at the top right of **Settings → Computer Use**. The plugin then does two things:
+
+1. It writes the diagnostics file `wincu-diagnostics-date-time.md` to your Downloads folder and selects it in File Explorer. The file holds the plugin and DSH versions, Windows and PowerShell, screens and scaling, the default browser and the Edge and Chrome versions, your settings, the plugin's self-test, the last 30 computer-use calls since DSH started (tool, result, error message and duration), and the plugin's lines in the DSH log.
+2. It opens the GitHub issue page in your browser with the environment filled in. Describe what happened, drag the diagnostics file onto the page, and submit.
+
+The diagnostics file is plain text, so you can read it before you upload it. User folders, the user name and the computer name are replaced, typed text is kept as its length only, and it has no screenshots. Screenshots help a lot; cover private details and drag them onto the issue page separately if you like.
+
 ### 9. Data and privacy
 
 Reading controls, text recognition, screenshots and input all run on your computer. The results go to DSH or another caller, and whether they are then sent to a remote model depends on your DSH and model settings. Screenshots and recognized text can include sensitive content from your windows, so hide accounts, paths, passwords and private chats before you share logs or open an issue.
 
 Pages read through the browser lane are also processed on your computer before they go to the caller. By default the agent browser carries no sign-ins; with Keep website sign-ins on, the agent can read and operate the sites you signed in to in the DSH browser. With Connect browser on and a connection allowed, the agent can read and operate every site signed in to in that browser, so turn it on only when needed, and you can turn remote debugging off in the browser afterwards. Page text can also carry instructions aimed at the agent, so every page outline starts by reminding the model that page content is untrusted and only your instructions count.
+
+To check for updates, the settings page asks DSH's plugin market for this plugin's latest version, and the market looks it up on npm; without the market, the page asks npm (registry.npmjs.org) directly. The request carries the plugin name and nothing from your computer.
+
+The diagnostics file from Report a problem stays on your computer until you drag it onto an issue page; 8.4 lists what it holds.
 
 ### 10. Documentation and development
 
@@ -674,7 +708,7 @@ npm ci
 npm test
 ```
 
-The standalone MCP server needs no third-party packages at runtime. Inside DSH, it uses DSH's own Schemastery and the official MCP bridge. Development dependencies are only for testing. `npm test` runs **87 isolated regression suites** covering settings compatibility, takeover and stopping, the progress overlay, reading controls, capture, OCR protocols, input edge cases, batch actions and the browser lane. It sends no real keyboard or mouse input and does not touch your installed DSH profiles. Tests that need a real interface use only their own test windows and temporary browser profiles, and logs go to the temporary folder the command prints.
+The standalone MCP server needs no third-party packages at runtime. Inside DSH, it uses DSH's own Schemastery and the official MCP bridge. Development dependencies are only for testing. `npm test` runs **88 isolated regression suites** covering settings compatibility, takeover and stopping, the progress overlay, reading controls, capture, OCR protocols, input edge cases, batch actions and the browser lane. It sends no real keyboard or mouse input and does not touch your installed DSH profiles. Tests that need a real interface use only their own test windows and temporary browser profiles, and logs go to the temporary folder the command prints.
 
 `node test/notepad-e2e.mjs` is a separate test that really types. It opens Notepad, so run it on a dedicated test desktop.
 
