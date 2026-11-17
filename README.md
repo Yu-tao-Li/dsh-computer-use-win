@@ -86,7 +86,7 @@ DSH Web 和单独的 MCP 客户端会用你电脑上的 Node.js 运行插件，�
 
 ### 2. 界面预览
 
-下面是 DSH Desktop 2.0.18 里的真实截图（中文界面），只保留了浏览器窗口、对话或设置面板，点击图片可以看原图。设置页截图来自 0.6.0；浏览器截图来自 0.5.2，对话截图来自更早的一次搜索任务，这两处的界面到 0.6.0 都没有变。浮窗图用的是一次真实任务的记录，由插件自己的浮窗程序重新画出来。
+下面是 DSH Desktop 2.0.18 里的真实截图（中文界面），只保留了浏览器窗口、对话或设置面板，点击图片可以看原图。设置页总览截图来自 0.6.1，其他设置截图来自 0.6.0；浏览器截图来自 0.5.2，对话截图来自更早的一次搜索任务，这两处的界面到 0.6.1 都没有变。浮窗图用的是一次真实任务的记录，由插件自己的浮窗程序重新画出来。
 
 #### 2.1 网页在 DSH 浏览器里操作
 
@@ -112,7 +112,7 @@ DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示�
 
 设置在左侧的“电脑操控”（鼠标图标）里，标题旁显示插件版本号。最上面是“网页与浏览器”：优先使用网页控件、显示 DSH 浏览器窗口、浏览器类型、保留网站登录，以及默认关闭的“连接现有浏览器（实验）”。下面选工具加载方案：全部、精简、懒启动或自定义，默认是“全部”（26 个工具）。再往下是接管提示、思考与操作浮窗和停止操作。每项左边的小图跟着设置变化，说明收在 ⓘ 图标里。顶部的 Star 和 Issue 说明可以折叠，折叠后标题右边只留一个 GitHub 链接和展开箭头，下图就是折叠后的样子；之后一直保持折叠，升级也不会改回来，点箭头就能展开。
 
-![电脑操控设置页：左侧是带鼠标图标的电脑操控选项卡；标题“电脑操控（Computer Use）”旁是版本号 v0.6.0，右边是折叠后的 GitHub 链接和展开箭头；“网页与浏览器”分组里有优先使用网页控件、显示 DSH 浏览器窗口、浏览器类型、保留网站登录、连接现有浏览器（实验）五项，每项左边有小示意图；下面的工具分组显示已启用 26 / 26，可以选全部、精简、懒启动、自定义四种加载方案](assets/desktop-settings-overview-hd.png)
+![电脑操控设置页：左侧是带鼠标图标的电脑操控选项卡；顶部是可以折叠的 Star 和 Issue 提示；标题“电脑操控”旁是版本号 v0.6.1，右边是“反馈问题”按钮；下面先是工具分组，显示已启用 26 / 26，可以选全部、精简、懒启动、自定义四种加载方案；再下面是网页与浏览器分组，有优先使用网页控件、显示 DSH 浏览器窗口、浏览器类型、保留网站登录等开关，每项左边有小示意图](assets/desktop-settings-overview-hd.png)
 
 #### 2.5 更多截图
 
@@ -440,7 +440,7 @@ Run on its own, the server loads all tools by default. Set `WCU_TOOL_MODE=lite` 
 
 ### 2. Interface tour
 
-These are real screenshots from DSH Desktop 2.0.18, with the Chinese interface. Each image shows only the browser window, the conversation or the settings panel; click one to see it at full size. The settings screenshots come from 0.6.0. The browser screenshot comes from 0.5.2 and the conversation screenshots from an earlier search task; neither part of the interface has changed since. The overlay images replay the record of a real task through the plugin's own overlay code.
+These are real screenshots from DSH Desktop 2.0.18, with the Chinese interface. Each image shows only the browser window, the conversation or the settings panel; click one to see it at full size. The settings overview comes from 0.6.1 and the other settings screenshots from 0.6.0. The browser screenshot comes from 0.5.2 and the conversation screenshots from an earlier search task; neither part of the interface has changed since. The overlay images replay the record of a real task through the plugin's own overlay code.
 
 #### 2.1 Web pages are worked on in the DSH browser
 
@@ -466,7 +466,7 @@ The overlay is locked by default, so the mouse passes through it and it never bl
 
 The settings are under Computer Use, the tab with the mouse icon on the left (电脑操控 in the Chinese interface); the plugin version shows next to the title. Web and browser comes first: Prefer web page controls, Show the DSH browser window, Browser type, Keep website sign-ins, and the off-by-default Connect browser (experimental). Below it, pick how tools are loaded: All, Lite, Lazy or Custom. All (26 tools) is the default. Further down are the takeover indicator, the reasoning and progress overlay, and stopping. The small picture to the left of each item follows its setting, and the explanations sit behind ⓘ icons. The Star and Issue note at the top can be folded: only a GitHub link and an expand arrow then stay to the right of the title, as in the screenshot. It stays folded, also across upgrades, until you expand it with the arrow.
 
-![The settings page: the mouse-icon tab on the left (电脑操控 in the Chinese interface); the title with the version v0.6.0, and to its right the folded GitHub link with an expand arrow; the Web and browser group with Prefer web page controls, Show the DSH browser window, Browser type, Keep website sign-ins and Connect browser (experimental), each with a small picture on its left; below it the Tools group showing 26 of 26 enabled and the All, Lite, Lazy and Custom presets](assets/desktop-settings-overview-hd.png)
+![The settings page: the mouse-icon tab on the left (电脑操控 in the Chinese interface); the foldable Star and Issue note at the top; the title with the version v0.6.1 and, on the right, the Report a problem button; then the Tools group showing 26 of 26 enabled with the All, Lite, Lazy and Custom presets; below it the Web and browser group with Prefer web page controls, Show the DSH browser window, Browser type and Keep website sign-ins, each with a small picture on its left](assets/desktop-settings-overview-hd.png)
 
 #### 2.5 More screenshots
 
