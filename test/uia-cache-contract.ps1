@@ -67,14 +67,24 @@ namespace Fixture.Automation {
     }
     public bool TryGetCurrentPattern(AutomationPattern p, out object pattern) {CurrentReads++; pattern=null; return false;}
     public List<AutomationElement> FindAll(TreeScope scope, Condition condition) {FindCalls++; return Children;}
+    // Renderer handle -> page root, so the shipped page-content walk can run
+    // against a fake provider without a real window.
+    public static Dictionary<long, AutomationElement> Handles=new Dictionary<long, AutomationElement>();
+    public static AutomationElement FromHandle(IntPtr handle) {
+      AutomationElement found; return Handles.TryGetValue(handle.ToInt64(), out found) ? found : null;
+    }
     public static AutomationProperty NameProperty=new AutomationProperty("Name"), AutomationIdProperty=new AutomationProperty("AutomationId"), ClassNameProperty=new AutomationProperty("ClassName"), ControlTypeProperty=new AutomationProperty("ControlType"), BoundingRectangleProperty=new AutomationProperty("BoundingRectangle"), IsEnabledProperty=new AutomationProperty("IsEnabled"), IsOffscreenProperty=new AutomationProperty("IsOffscreen"), HasKeyboardFocusProperty=new AutomationProperty("HasKeyboardFocus"), ProcessIdProperty=new AutomationProperty("ProcessId"), NativeWindowHandleProperty=new AutomationProperty("NativeWindowHandle"), RuntimeIdProperty=new AutomationProperty("RuntimeId"), LocalizedControlTypeProperty=new AutomationProperty("LocalizedControlType"), FrameworkIdProperty=new AutomationProperty("FrameworkId");
   }
   public class TreeWalker {
     public TreeWalker(Condition c) {}
+    public static TreeWalker RawViewWalker=new TreeWalker(null);
     static void Step() {
       if (AutomationElement.DelayMs>0) Thread.Sleep(AutomationElement.DelayMs);
       if (AutomationElement.FailAtNavigation>0 && AutomationElement.FirstCalls+AutomationElement.SiblingCalls>=AutomationElement.FailAtNavigation) throw new Exception("provider navigation failed");
     }
+    // One-argument forms used by the page-content walk: raw children, no cache.
+    public AutomationElement GetFirstChild(AutomationElement e) {AutomationElement.FirstCalls++; Step(); return e.Children.Count==0?null:e.Children[0];}
+    public AutomationElement GetNextSibling(AutomationElement e) {AutomationElement.SiblingCalls++; Step(); int i=e.Parent.Children.IndexOf(e)+1; return i>=e.Parent.Children.Count?null:e.Parent.Children[i];}
     public AutomationElement GetFirstChild(AutomationElement e, CacheRequest c) {AutomationElement.FirstCalls++; Step(); return e.Children.Count==0?null:e.Children[0].GetUpdatedCache(c);}
     public AutomationElement GetNextSibling(AutomationElement e, CacheRequest c) {AutomationElement.SiblingCalls++; Step(); int i=e.Parent.Children.IndexOf(e)+1; return i>=e.Parent.Children.Count?null:e.Parent.Children[i].GetUpdatedCache(c);}
   }
@@ -109,6 +119,11 @@ function Get-NativeWindowList {param([bool]$IncludeInvisible,[int]$MaxWindows) r
 # Renderer page probe: ready from the Nth probe of a renderer listed in PageReadyAt.
 $script:ChromiumPages=@{}; $script:PageProbes=0; $script:PageReadyAt=@{}; $script:PageRefuses=@()
 function Test-ChromiumPage {param([IntPtr]$Renderer) $script:PageProbes++; $key=[string]$Renderer.ToInt64(); if ($script:PageRefuses -contains $key) {throw 'Access is denied.'}; $at=$script:PageReadyAt[$key]; return ($null -ne $at -and $script:PageProbes -ge $at)}
+# Content probe: the shipped walk is replaced by the verdict it would return, so
+# the reporting rules can be asserted without a live page. $null is "no page
+# root", which is different from a measured empty page.
+$script:PageContentAt=@{}; $script:PageContentProbes=0
+function Get-ChromiumPageContent {param([IntPtr]$Renderer,[int]$LimitMs=250,[int]$MaxNodes=200) $script:PageContentProbes++; return $script:PageContentAt[[string]$Renderer.ToInt64()]}
 function Assert-Equal {param($Actual,$Expected,[string]$Label) if ($Actual -ne $Expected) {throw "${Label}: expected=$Expected actual=$Actual"}}
 function Reset-Fixture {
   [Fixture.Automation.AutomationElement]::Reset()
@@ -285,6 +300,105 @@ Assert-Equal $result.webContent.state partial 'One of two pages ready'
 [void][WindowsComputerUseNative]::Gone.Add(101); [WindowsComputerUseNative]::Renderers=@([IntPtr]103)
 [void](Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400}))
 Assert-Equal $script:ChromiumPages.ContainsKey('101') $false 'Closed renderers are forgotten'
+# Content is reported separately from attachment. An attached page tree with no
+# text is what a document looks like when its content has not reached the DOM:
+# the page is "ready" and still blank. ready, state and waitedMs keep their old
+# meaning, so only the new field decides this.
+Reset-Fixture
+[WindowsComputerUseNative]::Renderers=@([IntPtr]111); $script:PageReadyAt=@{'111'=1}
+$script:PageContentAt=@{'111'=@{hasText=$false;truncated=$false}}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $result.webContent.state ready 'Blank page still has an attached tree'
+Assert-Equal $result.webContent.ready 1 'Blank page still counts as attached'
+Assert-Equal $result.webContent.contentState empty 'Attached but empty page reported as empty'
+$script:PageContentAt=@{'111'=@{hasText=$true;truncated=$false}}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $result.webContent.contentState content 'Page with text reported as content'
+# A walk that was cut short proves nothing, so it must not claim "empty".
+$script:PageContentAt=@{'111'=@{hasText=$false;truncated=$true}}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $result.webContent.contentState unknown 'Truncated content walk is unknown'
+$script:PageContentAt=@{'111'=@{hasText=$false;truncated=$false}}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $result.webContent.contentState empty 'Complete walk with no text is empty'
+$script:PageContentAt=@{'111'=$null}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $result.webContent.contentState unknown 'No page root is unknown, not empty'
+# A page that is not attached yet is unknown too: the attachment hint owns it.
+[WindowsComputerUseNative]::Renderers=@([IntPtr]112); $script:PageReadyAt=@{}
+$script:PageContentAt=@{}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400})
+Assert-Equal $result.webContent.state starting 'Unattached page still starting'
+Assert-Equal $result.webContent.contentState unknown 'Unattached page has no content verdict'
+# Two renderers: one without text, one with, so text wins.
+[WindowsComputerUseNative]::Renderers=@([IntPtr]111,[IntPtr]112); $script:PageReadyAt=@{'111'=1}
+$script:PageContentAt=@{'111'=@{hasText=$true;truncated=$false};'112'=@{hasText=$false;truncated=$false}}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400})
+Assert-Equal $result.webContent.contentState content 'One renderer with text is content'
+Assert-Equal $result.webContent.state partial 'Mixed attachment still partial'
+# A hung renderer is never probed for content.
+Reset-Fixture
+[void][WindowsComputerUseNative]::Gone.Clear()
+[WindowsComputerUseNative]::Renderers=@([IntPtr]113); $script:PageReadyAt=@{'113'=1}
+[void][WindowsComputerUseNative]::Hung.Add(113); $script:PageContentAt=@{'113'=@{hasText=$true;truncated=$false}}
+$script:PageContentProbes=0
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $script:PageContentProbes 0 'Hung renderer never probed for content'
+Assert-Equal $result.webContent.contentState unknown 'Hung renderer has no content verdict'
+# The shipped walk itself: run it on a fake provider to check it stops at the
+# first node that carries text, and that it reports an unfinished walk.
+$walkDefinition = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-ChromiumPageContent'}, $true)
+if ($null -eq $walkDefinition) { throw 'Shipped page-content walk is missing' }
+$walkSource = $walkDefinition.Extent.Text.Replace('System.Windows', 'Fixture').Replace('function Get-ChromiumPageContent', 'function Get-ShippedPageContent')
+. ([scriptblock]::Create($walkSource))
+Reset-Fixture
+[Fixture.Automation.AutomationElement]::Handles.Clear()
+# A renderer window whose first raw child is the page root, which is what
+# FromHandle($Renderer) hands the walk.
+$pageRoot = New-Object Fixture.Automation.AutomationElement 2001
+$pageRoot.Cached.Name = 'Page title'
+for ($i = 1; $i -le 20; $i++) {
+  $node = New-Object Fixture.Automation.AutomationElement (2001 + $i)
+  $node.Cached.Name = if ($i -eq 3) { 'Readable text' } else { '' }
+  $pageRoot.Add($node)
+}
+$rendererElement = New-Object Fixture.Automation.AutomationElement 2000
+$rendererElement.Add($pageRoot)
+[Fixture.Automation.AutomationElement]::Handles[[long]114] = $rendererElement
+$readsBefore = [Fixture.Automation.AutomationElement]::CurrentReads
+$walk = Get-ShippedPageContent -Renderer ([IntPtr]114) -LimitMs 5000
+$reads = [Fixture.Automation.AutomationElement]::CurrentReads - $readsBefore
+Assert-Equal $walk.hasText $true 'Walk finds text'
+Assert-Equal $walk.truncated $false 'Walk that found text is not truncated'
+# One read for the page root plus the nodes up to the third child; a walk that
+# kept going would read all twenty.
+if ($reads -gt 8) { throw "Walk did not stop at the first text node: $reads property reads" }
+# No text anywhere: the whole subtree is read and the answer is still no text.
+$quietRoot = New-Object Fixture.Automation.AutomationElement 2101
+for ($i = 1; $i -le 5; $i++) {
+  $node = New-Object Fixture.Automation.AutomationElement (2101 + $i)
+  $node.Cached.Name = ''
+  $quietRoot.Add($node)
+}
+$quietRenderer = New-Object Fixture.Automation.AutomationElement 2100
+$quietRenderer.Add($quietRoot)
+[Fixture.Automation.AutomationElement]::Handles[[long]115] = $quietRenderer
+$walk = Get-ShippedPageContent -Renderer ([IntPtr]115) -LimitMs 5000
+Assert-Equal $walk.hasText $false 'Page without text has no text'
+Assert-Equal $walk.truncated $false 'Finished walk of a small page is not truncated'
+# A renderer with no first child has no page root yet: that is "not built yet",
+# which the caller reports as unknown, not as empty.
+$bareRenderer = New-Object Fixture.Automation.AutomationElement 2201
+[Fixture.Automation.AutomationElement]::Handles[[long]116] = $bareRenderer
+Assert-Equal (Get-ShippedPageContent -Renderer ([IntPtr]116) -LimitMs 5000) $null 'Renderer without a page root measures nothing'
+# The walk time limit is its own small budget; running out of it must report an
+# unfinished walk so the caller can say unknown instead of empty.
+[Fixture.Automation.AutomationElement]::Handles[[long]117] = $quietRenderer
+$walk = Get-ShippedPageContent -Renderer ([IntPtr]117) -LimitMs 0
+Assert-Equal $walk.hasText $false 'Walk out of time found no text'
+Assert-Equal $walk.truncated $true 'Walk out of time is truncated'
+[Fixture.Automation.AutomationElement]::Handles.Clear()
+[void][WindowsComputerUseNative]::Hung.Clear()
 $probes=$script:PageProbes
 $result=Get-TreeResult desktop 1 10 ([pscustomobject]@{})
 Assert-Equal ($script:PageProbes-$probes) 0 'Desktop scope does not warm pages'
@@ -293,4 +407,4 @@ $result=Invoke-Action find ([pscustomobject]@{query='Fixture';treeTimeoutMs=400}
 Assert-Equal $result.webContent.renderers 1 'Find forwards page state'
 [WindowsComputerUseNative]::Renderers=@()
 Assert-Equal (Get-TreeResult active_window 1 10 ([pscustomobject]@{})).Contains('webContent') $false 'Windows without renderers report no page state'
-Write-Output 'PASS cached compact/full, stable ids, lazy wide/deep limits, Chromium layout depth, bounded page warm-up, partial deadlines, provider errors, value search, activation refusal/success/hung diagnostics and element_info detail contract'
+Write-Output 'PASS cached compact/full, stable ids, lazy wide/deep limits, Chromium layout depth, bounded page warm-up, page content verdicts, partial deadlines, provider errors, value search, activation refusal/success/hung diagnostics and element_info detail contract'

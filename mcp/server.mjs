@@ -134,7 +134,7 @@ const treeBudgetProperties = {
 };
 
 const maxDepthDescription = "Levels below the root. In window-scoped trees, unnamed browser layout panes (Chromium: Electron, Chrome/Edge, CEF, WebView2; Gecko: Firefox and its forks) do not count, so page content stays within the default depth.";
-const webContentNote = " In a Chromium-based window (Electron, Chrome/Edge, CEF, WebView2) the first observation enables the page's accessibility tree; webContent reports whether it is ready.";
+const webContentNote = " In a Chromium-based window (Electron, Chrome/Edge, CEF, WebView2) the first observation enables the page's accessibility tree; webContent reports whether it is ready and whether the page carries text (contentState: content, empty or unknown).";
 
 const tools = [
   {
@@ -1208,6 +1208,26 @@ async function observeBackend(action, args, request) {
   if (web && web.ready === 0) result.hint = web.state === "unavailable"
     ? "This Chromium window exposes no page content to UI Automation. Use OCR text/coordinates or screenshot vision."
     : "Chromium is still building this page's accessibility tree. Observe the window again shortly before falling back to OCR coordinates.";
+  // An attached page tree with no text in it is usually a page that has not put
+  // its content into the DOM yet, not a page without content: measured on Edge
+  // 157, such a page has 0 characters and the same all-white frame as
+  // about:blank, and more time, not a reload, is what fills it in. But a page
+  // drawn entirely by canvas or images carries no text either and is perfectly
+  // healthy, so this must not send every textless page to a reload: a reload can
+  // discard the page's state. Say what to do only as far as the result allows.
+  else if (web && web.contentState === "empty") {
+    const empty = "This Chromium page's accessibility tree is attached but it carries no text yet. An empty read is not a sign-in problem: do not report signed-out, or a broken page, from this result alone. ";
+    const wait = "Wait about 3 seconds and observe again, and again up to about 10 seconds in total. A reload is the last resort, because it restarts the page's render timer and can discard the page's own state.";
+    if (result.screenshot) {
+      result.hint = empty
+        + "Check the screenshot first. If it shows content, the page paints without text (canvas or images): use OCR text/coordinates or screenshot vision, and do not reload. "
+        + "If the screenshot is blank too, " + wait;
+    } else if (!result.hint) {
+      result.hint = empty
+        + "Read the window again shortly; a page drawn by canvas or images looks like this and is not broken, so prefer OCR or a screenshot over a reload. "
+        + "If it is still empty, " + wait;
+    }
+  }
   if (action === "find" && args.ocrFallback && !args.controlType && result.results?.length === 0 && (sparse || result.truncated) && result.targetResponsive !== false && !request?.cancelled) {
     try {
       const ocr = await runBackend("ocr", { ...args, resolveControl: false, maxWidth: 0 }, 20000, request);

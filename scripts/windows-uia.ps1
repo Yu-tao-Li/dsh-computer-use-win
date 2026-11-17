@@ -2821,6 +2821,74 @@ function Test-ChromiumPage {
   return ($null -ne $walker.GetFirstChild($root))
 }
 
+# Attachment is not content. A document that finished loading before its content
+# reached the DOM exposes its root and one unnamed container, so the page tree is
+# attached while the window shows nothing: measured on Edge 157, a page whose
+# body held only an empty mount element gave one descendant with no name, 0
+# characters of text and the same all-white frame as about:blank. This walk
+# answers one question -- does the page carry text? -- so one observation can
+# say "nothing to read yet" instead of leaving it to be inferred from the
+# attachment flag.
+#
+# It stops at the first descendant that carries text: the answer is a boolean,
+# so walking the rest only spends the caller's time budget (measured on
+# Electron 44, a full walk doubled a normal page's observation, 129 -> 274 ms).
+# It also stops at $LimitMs and at $MaxNodes and says which happened, so a walk
+# that did not finish is reported as unknown instead of empty.
+#
+# The page root is skipped on purpose: its name is the document title, which an
+# otherwise blank page has too (<title> with an empty body still yields a named
+# root). Returns $null when the renderer exposes no page root at all, which is
+# "not built yet", not "empty".
+#
+# This looks for text, and only text. A page whose whole content is an image or
+# a canvas carries no text and can still be a working page, so "no text" is a
+# fact about text nodes, not a verdict about the page; callers must not turn it
+# into "broken", and not into "reload".
+function Get-ChromiumPageContent {
+  param([IntPtr]$Renderer, [int]$LimitMs = 250, [int]$MaxNodes = 200)
+  $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+  $root = $walker.GetFirstChild([System.Windows.Automation.AutomationElement]::FromHandle($Renderer))
+  if ($null -eq $root) { return $null }
+  [void]$root.Current.ControlType
+  $facts = @{ hasText = $false; truncated = $false }
+  $watch = [System.Diagnostics.Stopwatch]::StartNew()
+  $visited = 0
+  $queue = New-Object System.Collections.Generic.Queue[object]
+  $child = $walker.GetFirstChild($root)
+  while ($null -ne $child -and $queue.Count -lt $MaxNodes) {
+    $queue.Enqueue($child)
+    $child = $walker.GetNextSibling($child)
+  }
+  while ($queue.Count -gt 0) {
+    # Both limits mean the same thing here: the subtree was not read to the end.
+    if ($visited -ge $MaxNodes -or $watch.ElapsedMilliseconds -ge $LimitMs) { $facts.truncated = $true; break }
+    $element = $queue.Dequeue()
+    $visited++
+    $text = ''
+    try { $text = [string]$element.Current.Name } catch { }
+    if (-not $text.Trim()) {
+      # A control that carries only a value (a filled input, a document body)
+      # still shows text; the name is not the only place it can live.
+      try {
+        $pattern = $null
+        if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
+          if ($null -ne $pattern -and ([string]$pattern.Current.Value).Trim()) { $text = [string]$pattern.Current.Value }
+        }
+      } catch { }
+    }
+    if ($text.Trim()) { $facts.hasText = $true; return $facts }
+    if ($queue.Count -lt $MaxNodes) {
+      $next = $walker.GetFirstChild($element)
+      while ($null -ne $next -and $queue.Count -lt $MaxNodes) {
+        $queue.Enqueue($next)
+        $next = $walker.GetNextSibling($next)
+      }
+    }
+  }
+  return $facts
+}
+
 function Initialize-ChromiumPages {
   param([object]$Window, [object]$Traversal)
   if ($null -eq $Window) { return $null }
@@ -2832,6 +2900,7 @@ function Initialize-ChromiumPages {
   $now = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
   $status = [ordered]@{ renderers = $renderers.Count; ready = 0; waitedMs = 0; state = 'ready' }
   $pending = New-Object System.Collections.Generic.List[object]
+  $responsive = New-Object System.Collections.Generic.List[object]
   foreach ($renderer in $renderers) {
     $owner = [uint32]0
     [void][WindowsComputerUseNative]::GetWindowThreadProcessId($renderer, [ref]$owner)
@@ -2846,6 +2915,7 @@ function Initialize-ChromiumPages {
       $status["unresponsive"] = 1 + [int]$status["unresponsive"]
       continue
     }
+    $responsive.Add($renderer)
     # A provider that refuses the read (an elevated app behind UIPI, a closing
     # page) gains nothing from waiting; the next observation probes it again.
     try { $ready = Test-ChromiumPage $renderer } catch { continue }
@@ -2871,6 +2941,30 @@ function Initialize-ChromiumPages {
     $starting = @($pending | Where-Object { -not $_.page.ready -and ($now - $_.page.firstSeen) -lt 30000 }).Count
     $status.state = if ($status.ready -gt 0) { 'partial' } elseif ($starting -gt 0) { 'starting' } else { 'unavailable' }
   }
+  # Report the content separately from the attachment above, and only for
+  # renderers whose provider answered: a page that is still building has no
+  # content reading yet, which is different from a page measured as empty.
+  # ready, state and waitedMs keep their meaning, so existing callers of this
+  # window-scoped status see no change.
+  #
+  # The walk gets a budget of its own -- at most 250 ms and at most a tenth of
+  # treeTimeoutMs -- so the tree the caller asked for keeps most of the budget,
+  # and the loop stops at the first renderer that carries text.
+  $contentLimit = [Math]::Min(250, [int]($Traversal.budgetMs / 10))
+  $measured = 0
+  $foundText = $false
+  $contentTruncated = $false
+  foreach ($renderer in $responsive) {
+    $facts = Invoke-Safe { Get-ChromiumPageContent $renderer $contentLimit } $null
+    if ($null -eq $facts) { continue }
+    $measured++
+    if ($facts.hasText) { $foundText = $true; break }
+    if ($facts.truncated) { $contentTruncated = $true }
+  }
+  # contentState reports what was measured, never a guess: a walk cut short by
+  # its time limit or the node cap, a refused provider and a page tree that has
+  # not arrived all report unknown instead of claiming the page is empty.
+  $status["contentState"] = if ($foundText) { 'content' } elseif ($contentTruncated) { 'unknown' } elseif ($measured -gt 0) { 'empty' } else { 'unknown' }
   return $status
 }
 
