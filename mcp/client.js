@@ -5,7 +5,7 @@ window.__ModuleLoader__.load({
   factory: (require) => {
     const React = require('react'), h = React.createElement;
     const NS = 'windowsComputerUse.settings';
-    const PLUGIN_VERSION = '0.6.0';
+    const PLUGIN_VERSION = '0.6.1';
     const allToolNames = [
   "health",
   "snapshot",

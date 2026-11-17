@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 — 2026-11-18
+
+本版修好了 [#84](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/84)：DSH 带着 Windows 兼容性设置运行时，DSH 浏览器选 Edge 就打不开。/ This release fixes [#84](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/84): with DSH running under a Windows compatibility setting, the DSH browser did not open when it was Edge.
+
+- DSH 浏览器用 Edge 时能正常打开了。DSH 带着 Windows 兼容性设置运行时，进程环境里有 `__COMPAT_LAYER`，这个变量会传给 DSH 启动的每个程序。Edge 发现自己带着它，会关掉自己再重开一次：第一个进程大约 50 毫秒就退出，重开的进程接不上插件和浏览器之间的管道。所以在 0.6.0 里，这种情况下 DSH 浏览器每次都打不开：临时配置报 `BROWSER_DISCONNECTED`，开着“保留网站登录”报 `exited during startup (0)`。0.5.7 走调试端口，开着“保留网站登录”时，重开的 Edge 下一次调用还能接上，所以 #84 看到的只是第一次失败。现在 DSH 浏览器启动时不带这个变量，并加上 `--edge-skip-compat-layer-relaunch`（Playwright 也用这个开关），Edge 不再重开。Chrome 不受影响。/ The DSH browser opens again with Edge. With DSH running under a Windows compatibility setting, its environment carries `__COMPAT_LAYER`, which passes on to every program DSH starts. Edge that finds it closes itself and starts again: the first process exits after about 50 ms, and the new one cannot take over the pipe between the plugin and the browser. In 0.6.0 the DSH browser therefore failed every time in this case, with `BROWSER_DISCONNECTED` on a temporary profile and `exited during startup (0)` with Keep website sign-ins on. 0.5.7 used a debugging port, so with Keep website sign-ins on the next call could still reach the restarted Edge, which is why #84 saw only the first call fail. The DSH browser now starts without the variable and with `--edge-skip-compat-layer-relaunch`, the switch Playwright passes too, so Edge no longer restarts. Chrome was not affected.
+- 测试：`browser-signin` 让保留登录和临时配置两条启动路径都在带 `__COMPAT_LAYER` 的环境下打开真实的 Edge；0.6.0 在第一处就失败。/ Tests: `browser-signin` now opens real Edge under `__COMPAT_LAYER` on both the kept-profile and the temporary-profile path; 0.6.0 fails at the first.
+
 ## 0.6.0 — 2026-11-15
 
 因为更强的模型 Fable 5.2 和 4 Carbon 发布，我决定对插件代码做一次彻底的优化和重构，以提升使用体验。这次由 Fable 5.2、6.1 Sol、4 Carbon 和 Opus 5.5 四个模型分工完成，各自做了什么见本节末尾的“分工”。发布前我做了全面的人工使用评测，尽可能保证实际使用不出问题；当然，问题没法彻底避免，遇到新问题请提 issue。/ With the release of the stronger Fable 5.2 and 4 Carbon models, I decided to thoroughly optimize and refactor the plugin's code for a better experience. Four models shared the work, Fable 5.2, 6.1 Sol, 4 Carbon and Opus 5.5; see "Who did what" at the end of this entry. Before the release I evaluated it thoroughly by hand in real use to keep everyday use free of problems as far as possible; problems can never be ruled out entirely, so please open an issue if you hit a new one.
