@@ -2954,18 +2954,16 @@ function Initialize-ChromiumPages {
   $contentLimit = [Math]::Min(250, [int]($Traversal.budgetMs / 10))
   $measured = 0
   $foundText = $false
-  $contentTruncated = $false
   foreach ($renderer in $responsive) {
     $facts = Invoke-Safe { Get-ChromiumPageContent $renderer $contentLimit } $null
     if ($null -eq $facts) { continue }
-    $measured++
     if ($facts.hasText) { $foundText = $true; break }
-    if ($facts.truncated) { $contentTruncated = $true }
+    if (-not $facts.truncated) { $measured++ }
   }
   # contentState reports what was measured, never a guess: a walk cut short by
   # its time limit or the node cap, a refused provider and a page tree that has
   # not arrived all report unknown instead of claiming the page is empty.
-  $status["contentState"] = if ($foundText) { 'content' } elseif ($contentTruncated) { 'unknown' } elseif ($measured -gt 0) { 'empty' } else { 'unknown' }
+  $status["contentState"] = if ($foundText) { 'content' } elseif ($measured -eq $renderers.Count) { 'empty' } else { 'unknown' }
   return $status
 }
 

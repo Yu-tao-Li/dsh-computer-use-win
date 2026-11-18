@@ -581,10 +581,11 @@ window.__ModuleLoader__.load({
     "report": "反馈问题",
     "reportTitle": "把诊断信息保存到下载文件夹，并打开下载文件夹和 GitHub 新建问题页面",
     "reportRunning": "导出中…",
-    "reportSaved": "已将诊断信息保存到下载文件夹。",
-    "reportAttach": "检查后，可把 {file} 拖到 GitHub 的问题描述框。",
-    "reportFindFile": "可从下载文件夹找到 {file}，检查后附到 GitHub 问题中。",
-    "reportFailed": "诊断信息未能保存。仍可在 GitHub 上描述遇到的问题。",
+    "reportSaved": "已保存诊断文件",
+    "reportIssueOpened": "已打开 GitHub 新建问题页。把文件拖到描述框，写下问题后提交。",
+    "reportIssueFallback": "点下面的链接打开 GitHub，再把文件拖到问题描述框。",
+    "reportFailed": "诊断文件未能保存。",
+    "reportFailedIssueOpened": "已打开 GitHub 新建问题页，你仍可直接描述问题。",
     "reportUnconfirmed": "暂时无法确认诊断信息是否已保存。可先查看下载文件夹。",
     "reportBusy": "诊断信息正在导出，请稍等。",
     "reportOpenIssue": "打开 GitHub 新建问题页面",
@@ -860,10 +861,11 @@ window.__ModuleLoader__.load({
     "report": "Report a problem",
     "reportTitle": "Save diagnostics to your Downloads folder, then open that folder and GitHub's new-issue page",
     "reportRunning": "Exporting…",
-    "reportSaved": "Diagnostics saved to your Downloads folder.",
-    "reportAttach": "Review {file}, then drag it into the description on GitHub.",
-    "reportFindFile": "Find {file} in Downloads, review it, and attach it to your issue on GitHub.",
-    "reportFailed": "The diagnostics could not be saved. You can still describe the problem on GitHub.",
+    "reportSaved": "Diagnostics file saved",
+    "reportIssueOpened": "GitHub’s new-issue page is open. Drag the file into the description, write what happened, and submit.",
+    "reportIssueFallback": "Use the link below to open GitHub, then drag the file into the issue description.",
+    "reportFailed": "The diagnostics file could not be saved.",
+    "reportFailedIssueOpened": "GitHub’s new-issue page is open. You can still describe what happened.",
     "reportUnconfirmed": "The export could not be confirmed. Check your Downloads folder.",
     "reportBusy": "A diagnostics export is already running.",
     "reportOpenIssue": "Open a new issue on GitHub",
@@ -930,6 +932,8 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] dialog.wcu-dialog::backdrop{background:rgba(0,0,0,.32)}
       [data-wincu-settings] dialog.wcu-dialog p{margin:0;color:var(--wcu-fg);font-size:14px;line-height:1.6}
       [data-wincu-settings] dialog.wcu-dialog p.wcu-dialog-detail{margin-top:6px;color:var(--wcu-muted);font-size:12px;overflow-wrap:anywhere}
+      [data-wincu-settings] dialog.wcu-dialog .wcu-dialog-file{margin-top:8px;font-weight:600;overflow-wrap:anywhere}
+      [data-wincu-settings] dialog.wcu-dialog .wcu-dialog-path{display:block;margin-top:4px;font-size:12px;overflow-wrap:anywhere;user-select:text}
       [data-wincu-settings] .wcu-dialog-actions{display:flex;justify-content:flex-end;margin-top:16px}
       [data-wincu-settings] .wcu-spinner{width:12px;height:12px;border-radius:50%;border:2px solid color-mix(in srgb,var(--wcu-muted) 35%,transparent);border-top-color:var(--wcu-muted);animation:wcu-spin .8s linear infinite}
       @keyframes wcu-spin{to{transform:rotate(360deg)}}
@@ -1358,8 +1362,11 @@ window.__ModuleLoader__.load({
         return ()=>node.removeEventListener('close',closed);
       },[]);
       const dismiss=()=>{const node=ref.current;if(node&&typeof node.close==='function'&&node.open)node.close();else close.current();};
-      return h('dialog',{ref,className:'wcu-dialog','data-wincu-report-dialog':dialog.tone,'aria-labelledby':'wcu-report-dialog-text',...(dialog.detail?{'aria-describedby':'wcu-report-dialog-detail'}:{})},
+      const description=[dialog.fileName&&'wcu-report-dialog-file',dialog.filePath&&'wcu-report-dialog-path',dialog.detail&&'wcu-report-dialog-detail'].filter(Boolean).join(' ');
+      return h('dialog',{ref,className:'wcu-dialog','data-wincu-report-dialog':dialog.tone,'aria-labelledby':'wcu-report-dialog-text','aria-describedby':description||undefined},
         h('p',{id:'wcu-report-dialog-text'},dialog.text),
+        dialog.fileName?h('p',{id:'wcu-report-dialog-file',className:'wcu-dialog-file','data-wincu-report-file':true},dialog.fileName):null,
+        dialog.filePath?h('code',{id:'wcu-report-dialog-path',className:'wcu-dialog-path','data-wincu-report-path':true},dialog.filePath):null,
         dialog.detail?h('p',{id:'wcu-report-dialog-detail',className:'wcu-dialog-detail'},dialog.detail):null,
         dialog.link?h('a',{href:REPORT_ISSUE_URL,target:'_blank',rel:'noopener noreferrer'},t('reportOpenIssue')):null,
         h('div',{className:'wcu-dialog-actions'},h('button',{type:'button',className:'wcu-small wcu-primary',autoFocus:true,onClick:dismiss},t('reportOk'))));
@@ -1375,12 +1382,13 @@ window.__ModuleLoader__.load({
         try{
           const {status,data}=await requestJson('/dsh-computer-use-win/api/diagnostics',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:120000});
           if(status===200&&data?.ok){
-            dialog={tone:'saved',text:t('reportSaved'),link:data.issueOpened!==true,
-              detail:fill(t(data.folderOpened?'reportAttach':'reportFindFile'),{file:data.fileName})};
+            dialog={tone:'saved',text:t('reportSaved'),fileName:data.fileName,filePath:data.filePath,
+              link:data.issueOpened!==true,detail:t(data.issueOpened===true?'reportIssueOpened':'reportIssueFallback')};
           }else if(status===409){
             dialog={tone:'busy',text:t('reportBusy')};
           }else if(status===500&&data?.ok===false){
-            dialog={tone:'failed',text:t('reportFailed'),link:data.issueOpened!==true};
+            dialog={tone:'failed',text:t('reportFailed'),link:data.issueOpened!==true,
+              detail:data.issueOpened===true?t('reportFailedIssueOpened'):undefined};
           }
         }catch{}
         running.current=false;

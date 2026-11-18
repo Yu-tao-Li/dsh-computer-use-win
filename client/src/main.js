@@ -68,6 +68,8 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] dialog.wcu-dialog::backdrop{background:rgba(0,0,0,.32)}
       [data-wincu-settings] dialog.wcu-dialog p{margin:0;color:var(--wcu-fg);font-size:14px;line-height:1.6}
       [data-wincu-settings] dialog.wcu-dialog p.wcu-dialog-detail{margin-top:6px;color:var(--wcu-muted);font-size:12px;overflow-wrap:anywhere}
+      [data-wincu-settings] dialog.wcu-dialog .wcu-dialog-file{margin-top:8px;font-weight:600;overflow-wrap:anywhere}
+      [data-wincu-settings] dialog.wcu-dialog .wcu-dialog-path{display:block;margin-top:4px;font-size:12px;overflow-wrap:anywhere;user-select:text}
       [data-wincu-settings] .wcu-dialog-actions{display:flex;justify-content:flex-end;margin-top:16px}
       [data-wincu-settings] .wcu-spinner{width:12px;height:12px;border-radius:50%;border:2px solid color-mix(in srgb,var(--wcu-muted) 35%,transparent);border-top-color:var(--wcu-muted);animation:wcu-spin .8s linear infinite}
       @keyframes wcu-spin{to{transform:rotate(360deg)}}
@@ -496,8 +498,11 @@ window.__ModuleLoader__.load({
         return ()=>node.removeEventListener('close',closed);
       },[]);
       const dismiss=()=>{const node=ref.current;if(node&&typeof node.close==='function'&&node.open)node.close();else close.current();};
-      return h('dialog',{ref,className:'wcu-dialog','data-wincu-report-dialog':dialog.tone,'aria-labelledby':'wcu-report-dialog-text',...(dialog.detail?{'aria-describedby':'wcu-report-dialog-detail'}:{})},
+      const description=[dialog.fileName&&'wcu-report-dialog-file',dialog.filePath&&'wcu-report-dialog-path',dialog.detail&&'wcu-report-dialog-detail'].filter(Boolean).join(' ');
+      return h('dialog',{ref,className:'wcu-dialog','data-wincu-report-dialog':dialog.tone,'aria-labelledby':'wcu-report-dialog-text','aria-describedby':description||undefined},
         h('p',{id:'wcu-report-dialog-text'},dialog.text),
+        dialog.fileName?h('p',{id:'wcu-report-dialog-file',className:'wcu-dialog-file','data-wincu-report-file':true},dialog.fileName):null,
+        dialog.filePath?h('code',{id:'wcu-report-dialog-path',className:'wcu-dialog-path','data-wincu-report-path':true},dialog.filePath):null,
         dialog.detail?h('p',{id:'wcu-report-dialog-detail',className:'wcu-dialog-detail'},dialog.detail):null,
         dialog.link?h('a',{href:REPORT_ISSUE_URL,target:'_blank',rel:'noopener noreferrer'},t('reportOpenIssue')):null,
         h('div',{className:'wcu-dialog-actions'},h('button',{type:'button',className:'wcu-small wcu-primary',autoFocus:true,onClick:dismiss},t('reportOk'))));
@@ -513,12 +518,13 @@ window.__ModuleLoader__.load({
         try{
           const {status,data}=await requestJson('/dsh-computer-use-win/api/diagnostics',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:120000});
           if(status===200&&data?.ok){
-            dialog={tone:'saved',text:t('reportSaved'),link:data.issueOpened!==true,
-              detail:fill(t(data.folderOpened?'reportAttach':'reportFindFile'),{file:data.fileName})};
+            dialog={tone:'saved',text:t('reportSaved'),fileName:data.fileName,filePath:data.filePath,
+              link:data.issueOpened!==true,detail:t(data.issueOpened===true?'reportIssueOpened':'reportIssueFallback')};
           }else if(status===409){
             dialog={tone:'busy',text:t('reportBusy')};
           }else if(status===500&&data?.ok===false){
-            dialog={tone:'failed',text:t('reportFailed'),link:data.issueOpened!==true};
+            dialog={tone:'failed',text:t('reportFailed'),link:data.issueOpened!==true,
+              detail:data.issueOpened===true?t('reportFailedIssueOpened'):undefined};
           }
         }catch{}
         running.current=false;
