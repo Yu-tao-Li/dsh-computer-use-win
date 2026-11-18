@@ -561,7 +561,7 @@ app.whenReady().then(async()=>{
   assert.deepEqual(reportCall,[{method:'POST',header:'1',type:'application/json'}],'One POST with the plugin header');
   const savedDialog=await evaluate("(()=>{const d=document.querySelector('dialog[data-wincu-report-dialog=saved]'),ok=d.querySelector('button'),box=d.getBoundingClientRect();return {open:d.open,modal:d.matches(':modal'),texts:[...d.querySelectorAll('p')].map(p=>p.textContent),path:d.querySelector('[data-wincu-report-path]')?.textContent,button:ok.textContent,focused:document.activeElement===ok,centered:Math.abs(box.left+box.width/2-document.documentElement.clientWidth/2)<2,idle:!!document.querySelector('[data-wincu-report=idle]')};})()");
   assert.deepEqual(savedDialog,{open:true,modal:true,texts:['已保存诊断文件',reportFileName,'已打开 GitHub 新建问题页。把文件拖到描述框，写下问题后提交。'],path:reportFilePath,button:'确定',focused:true,centered:true,idle:true},'A modal dialog names the file and shows its full path and GitHub status');
-  assert.equal(await evaluate("!!document.querySelector('dialog a')"),false,'No redundant link when GitHub has opened');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('dialog a')].map(a=>[a.href,a.textContent])"),[[ISSUE_PAGE,'GitHub 新建问题页']],'The page name also links directly to the issue form');
   assert.deepEqual(await evaluate('window.opened'),[],'The plugin opened the folder and the issue page; the page opens nothing more');
   await evaluate("document.querySelector('dialog[data-wincu-report-dialog=saved] button').click()");
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
@@ -570,7 +570,7 @@ app.whenReady().then(async()=>{
   await until("document.querySelector('dialog[data-wincu-report-dialog=saved]')?.open");
   assert.equal(await evaluate("document.querySelector('dialog a').href"),ISSUE_PAGE,'The exact issue URL is available when launch fails');
   assert.equal(await evaluate("document.querySelector('[data-wincu-report-path]').textContent"),reportFilePath,'The path is available even when neither window opens');
-  assert.equal(await evaluate("document.querySelector('.wcu-dialog-detail').textContent"),'点下面的链接打开 GitHub，再把文件拖到问题描述框。');
+  assert.equal(await evaluate("document.querySelector('.wcu-dialog-detail').textContent"),'打开 GitHub 新建问题页，把文件拖到描述框，写下问题后提交。');
   win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   await resetReport("{status:500,body:{ok:false,issueOpened:true}}");

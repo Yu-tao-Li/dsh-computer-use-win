@@ -489,23 +489,26 @@ window.__ModuleLoader__.load({
     // A modal <dialog>: the browser keeps it above the page, traps focus and
     // closes it on Esc.
     function ReportDialog({t,dialog,onClose}){
-      const ref=React.useRef(null),close=React.useRef(onClose);close.current=onClose;
+      const ref=React.useRef(null),ok=React.useRef(null),close=React.useRef(onClose);close.current=onClose;
       React.useEffect(()=>{
         const node=ref.current;if(!node)return;
         const closed=()=>close.current();
         node.addEventListener('close',closed);
         try{if(!node.open)node.showModal();}catch{node.setAttribute('open','');}
+        ok.current?.focus({preventScroll:true});
         return ()=>node.removeEventListener('close',closed);
       },[]);
       const dismiss=()=>{const node=ref.current;if(node&&typeof node.close==='function'&&node.open)node.close();else close.current();};
       const description=[dialog.fileName&&'wcu-report-dialog-file',dialog.filePath&&'wcu-report-dialog-path',dialog.detail&&'wcu-report-dialog-detail'].filter(Boolean).join(' ');
+      const [beforeLink,afterLink]=String(dialog.detail??'').split('{issueLink}');
       return h('dialog',{ref,className:'wcu-dialog','data-wincu-report-dialog':dialog.tone,'aria-labelledby':'wcu-report-dialog-text','aria-describedby':description||undefined},
         h('p',{id:'wcu-report-dialog-text'},dialog.text),
         dialog.fileName?h('p',{id:'wcu-report-dialog-file',className:'wcu-dialog-file','data-wincu-report-file':true},dialog.fileName):null,
         dialog.filePath?h('code',{id:'wcu-report-dialog-path',className:'wcu-dialog-path','data-wincu-report-path':true},dialog.filePath):null,
-        dialog.detail?h('p',{id:'wcu-report-dialog-detail',className:'wcu-dialog-detail'},dialog.detail):null,
+        dialog.detail?h('p',{id:'wcu-report-dialog-detail',className:'wcu-dialog-detail'},beforeLink,
+          afterLink!==undefined?h('a',{href:REPORT_ISSUE_URL,target:'_blank',rel:'noopener noreferrer'},t('reportIssuePage')):null,afterLink):null,
         dialog.link?h('a',{href:REPORT_ISSUE_URL,target:'_blank',rel:'noopener noreferrer'},t('reportOpenIssue')):null,
-        h('div',{className:'wcu-dialog-actions'},h('button',{type:'button',className:'wcu-small wcu-primary',autoFocus:true,onClick:dismiss},t('reportOk'))));
+        h('div',{className:'wcu-dialog-actions'},h('button',{ref:ok,type:'button',className:'wcu-small wcu-primary',onClick:dismiss},t('reportOk'))));
     }
     function ReportButton({t}){
       const [state,setState]=React.useState({phase:'idle',dialog:null});
@@ -519,7 +522,7 @@ window.__ModuleLoader__.load({
           const {status,data}=await requestJson('/dsh-computer-use-win/api/diagnostics',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:120000});
           if(status===200&&data?.ok){
             dialog={tone:'saved',text:t('reportSaved'),fileName:data.fileName,filePath:data.filePath,
-              link:data.issueOpened!==true,detail:t(data.issueOpened===true?'reportIssueOpened':'reportIssueFallback')};
+              detail:t(data.issueOpened===true?'reportIssueOpened':'reportIssueFallback')};
           }else if(status===409){
             dialog={tone:'busy',text:t('reportBusy')};
           }else if(status===500&&data?.ok===false){
