@@ -13,6 +13,7 @@ import { execFile, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, openSync, readSync, closeSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { SETTINGS_SCHEMA, STOP_SHORTCUT_PATTERN } from './settings-schema.mjs';
 
 export const ISSUE_URL = 'https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new';
 export const DIAGNOSTICS_ROUTE = '/dsh-computer-use-win/api/diagnostics';
@@ -21,6 +22,7 @@ const LOG_LINE_LIMIT = 200;
 const LOG_TAIL_BYTES = 2 * 1024 * 1024;
 // Argument values that can carry what the user typed or read: kept as a length.
 const VALUE_KEYS = new Set(['text', 'value', 'keys', 'thenKeys', 'query', 'url', 'path', 'paths', 'title', 'windowTitle', 'name', 'content', 'password', 'script', 'arguments', 'args', 'prompt', 'filter']);
+const LABEL_KEYS = new Set(['action', 'button', 'direction', 'elementId', 'scope', 'browserTab']);
 const PLUGIN_MARKERS = ['windows-computer-use', 'dsh-computer-use-win', 'wincu', 'WCU_'];
 
 const desktopCall = name => /^(?:mcp__wincu__)?windows_computer_use_[a-z_]+$/.test(String(name ?? ''));
@@ -33,16 +35,22 @@ const clip = (text, max) => text.length > max ? text.slice(0, max - 1) + '…' :
 
 // Replaces every Windows user-profile path (8.3 short forms and forward
 // slashes too), then the user and computer names as whole words.
-export function makeRedactor({ user = safeUserName(), host = os.hostname(), secrets = [] } = {}) {
+export function makeRedactor({ user = safeUserName(), host = os.hostname(), home = os.homedir(), secrets = [] } = {}) {
   const words = [];
   for (const [value, mark] of [[user, '<user>'], [host, '<computer>']]) {
     if (typeof value === 'string' && value.trim().length >= 3) words.push([new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(value.trim())}(?![A-Za-z0-9])`, 'gi'), mark]);
   }
   const hidden = secrets.filter(secret => typeof secret === 'string' && secret.length >= 8);
+  const homePath = home && new RegExp(home.split(/[\\/]+/).map(escapeRegExp).join('[\\\\/]+'), 'gi');
   return value => {
     let text = String(value ?? '');
     for (const secret of hidden) text = text.split(secret).join('<secret>');
+    if (homePath) text = text.replace(homePath, '%USERPROFILE%');
     text = text.replace(/[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s"'<>|*?]+/gi, '%USERPROFILE%');
+    text = text.replace(/\b(?:https?|wss?):\/\/[^\s"'<>]+/gi, '<url>');
+    text = text.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '<email>');
+    text = text.replace(/\b(?:Bearer\s+[A-Za-z0-9._~+\/-]+|(?:gh[pousr]_|github_pat_|npm_)[A-Za-z0-9_]{16,})/gi, '<secret>');
+    text = text.replace(/(["']?(?:access[_-]?token|api[_-]?key|authorization|cookie|password|proxy[_-]?authorization|secret)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)(?=\s|[,;}]|$)/gi, '$1<secret>');
     for (const [pattern, mark] of words) text = text.replace(pattern, mark);
     return text;
   };
@@ -58,7 +66,7 @@ export function describeArgs(value, redact = text => text, depth = 0) {
   for (const [key, item] of Object.entries(args)) {
     if (item === undefined) continue;
     if (VALUE_KEYS.has(key) && (typeof item === 'string' || Array.isArray(item))) out[key] = typeof item === 'string' ? `<${[...item].length} chars>` : `<${item.length} items>`;
-    else if (typeof item === 'string') out[key] = clip(redact(item), 80);
+    else if (typeof item === 'string') out[key] = LABEL_KEYS.has(key) && /^[\w:-]{1,64}$/.test(item) ? redact(item) : `<${[...item].length} chars>`;
     else if (typeof item === 'number' || typeof item === 'boolean' || item === null) out[key] = item;
     else if (Array.isArray(item)) out[key] = depth < 2 ? item.slice(0, 12).map(entry => entry && typeof entry === 'object' ? describeArgs(entry, redact, depth + 1) : typeof entry === 'string' ? `<${[...entry].length} chars>` : entry) : `<${item.length} items>`;
     else if (typeof item === 'object') out[key] = depth < 2 ? describeArgs(item, redact, depth + 1) : '<object>';
@@ -115,6 +123,7 @@ $cv=Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion'
 $o.windows=[ordered]@{product=$cv.ProductName;display=$cv.DisplayVersion;build=$cv.CurrentBuild;ubr=$cv.UBR;edition=$cv.EditionID}
 $o.powershell=$PSVersionTable.PSVersion.ToString()
 $o.pwsh=[bool](Get-Command pwsh -ErrorAction SilentlyContinue)
+try{$o.desktopVersions=@(Get-Process -Name 'DSH Desktop' | ForEach-Object {$_.FileVersion} | Where-Object {$_ -match '^\\d+(\\.\\d+){1,3}$'} | Sort-Object -Unique)}catch{}
 try{Add-Type -AssemblyName System.Windows.Forms,System.Drawing;$g=[System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero);$o.systemDpi=[int]$g.DpiX;$g.Dispose();$o.screens=@([System.Windows.Forms.Screen]::AllScreens|ForEach-Object{[ordered]@{primary=$_.Primary;bounds="$($_.Bounds.Width)x$($_.Bounds.Height)@$($_.Bounds.X),$($_.Bounds.Y)"}})}catch{}
 $k='HKCU:\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https'
 $o.defaultBrowser=(Get-ItemProperty "$k\\UserChoiceLatest\\ProgId").ProgId
@@ -144,6 +153,12 @@ export function browserVersions(env = process.env) {
       if (versions.length) { found[key] = versions[0]; break; }
     } catch { }
   }
+  for (const root of roots) {
+    try {
+      const version = /^Version=([0-9.]+[a-z\d]*)\r?$/im.exec(readFileSync(path.join(root, 'Mozilla Firefox', 'application.ini'), 'utf8'))?.[1];
+      if (version) { found.firefox = version; break; }
+    } catch { }
+  }
   return found;
 }
 
@@ -164,7 +179,7 @@ export async function runSelfTest(serverPath, { timeout = 45000, env = process.e
       ok: backend.ok, powershell: backend.powershell, mode: backend.mode, uiAutomation: backend.uiAutomation,
       screenshot: backend.screenshot, sendInput: backend.sendInput, postmessage: backend.postmessage, ocr: backend.ocr,
       homing: backend.homing, targetResponsive: backend.targetResponsive, inputDesktopAvailable: backend.inputDesktopAvailable,
-      virtualScreen: backend.virtualScreen, activeWindowClass: backend.activeWindow?.className, error: backend.error,
+      virtualScreen: backend.virtualScreen, error: backend.error,
     },
     capture: { ok: data.screenshot?.ok, bytes: data.screenshot?.bytes, bounds: data.screenshot?.bounds },
   };
@@ -208,9 +223,9 @@ export function dshLogDirs(env = process.env) {
 export function environmentSummary(facts) {
   const s = facts.settings ?? {};
   const rows = [
-    `插件 / Plugin: ${facts.version}${facts.installSpec ? ` (${facts.installSpec})` : ''}`,
-    `宿主 / Host: ${facts.host ?? 'unknown'}${facts.mcpClient ? `, dsh-mcp-client ${facts.mcpClient}` : ''}${facts.electron ? `, Electron ${facts.electron}` : ''}, Node ${facts.node}`,
-    `Windows: ${[facts.windows?.product, facts.windows?.display, facts.windows?.build ? `build ${facts.windows.build}${facts.windows.ubr != null ? '.' + facts.windows.ubr : ''}` : ''].filter(Boolean).join(' ') || facts.osRelease}`,
+    `插件 / Plugin: ${facts.version}${facts.installSource ? ` (${facts.installSource})` : ''}`,
+    `宿主 / Host: ${facts.host ?? 'unknown'}${facts.desktopVersions?.length ? ` ${facts.desktopVersions.join(' / ')}` : ''}${facts.mcpClient ? `, dsh-mcp-client ${facts.mcpClient}` : ''}${facts.electron ? `, Electron ${facts.electron}` : ''}, Node ${facts.node}`,
+    `Windows: ${[facts.windows?.product, facts.windows?.display, facts.windows?.build ? `build ${facts.windows.build}${facts.windows.ubr != null ? '.' + facts.windows.ubr : ''}` : ''].filter(Boolean).join(' ') || facts.osRelease}${facts.arch ? ` (${facts.arch})` : ''}`,
     `PowerShell: ${facts.powershell ?? 'unknown'}${facts.pwsh ? ' (pwsh available)' : ''}`,
     `屏幕 / Screens: ${(facts.screens ?? []).map(screen => screen.bounds + (screen.primary ? '*' : '')).join(' ') || 'unknown'}${facts.systemDpi ? `, ${facts.systemDpi} dpi` : ''}`,
     `语言 / Locale: DSH ${facts.dshLocale ?? '?'}, ${facts.culture ?? '?'} / UI ${facts.uiCulture ?? '?'}`,
@@ -233,8 +248,8 @@ export function diagnosticsText(facts, { calls = [], logs = [], at = new Date() 
   return [
     'dsh-computer-use-win 诊断信息 / diagnostics',
     `导出时间 / Exported: ${at.toISOString()} · 插件 / plugin ${facts.version}`,
-    '用户目录、用户名和计算机名已经替换；输入的文字只保留长度；文件里没有截图。上传前可以先看一遍。',
-    'User folders, the user name and the computer name are replaced; typed text is kept as its length only; there are no screenshots. Look it over before you upload it.',
+    '上传前请检查日志和错误信息。工具输入文字只保留长度，报告不包含截图。',
+    'Review the logs and errors before attaching this file. Tool input text is kept as its length; screenshots are excluded.',
     ...section('环境 / Environment', environmentSummary(facts)),
     ...section('设置 / Settings', JSON.stringify(facts.settings ?? {}, null, 2)),
     ...section('自检 / Self-test', JSON.stringify(facts.selfTest ?? { ok: false, error: 'not run' }, null, 2)),
@@ -249,46 +264,66 @@ const stamp = (at = new Date()) => {
   return `${at.getFullYear()}${pad(at.getMonth() + 1)}${pad(at.getDate())}-${pad(at.getHours())}${pad(at.getMinutes())}${pad(at.getSeconds())}`;
 };
 
+function diagnosticSettings(settings) {
+  const result = {};
+  for (const [key, field] of Object.entries(SETTINGS_SCHEMA)) {
+    if (field.command || key === 'communityNote') continue;
+    const value = settings[key];
+    if (field.type === 'text' && typeof value === 'string') result[key] = `<${[...value].length} chars>`;
+    if (field.type === 'boolean' && typeof value === 'boolean') result[key] = value;
+    if (field.type === 'integer' && Number.isSafeInteger(value)) result[key] = value;
+    if (field.type === 'enum' && field.values.includes(value)) result[key] = value;
+    if (field.type === 'shortcut' && typeof value === 'string' && STOP_SHORTCUT_PATTERN.test(value)) result[key] = value;
+    if (field.type === 'tools' && settings.toolPreset === 'custom' && Array.isArray(value)) result[key] = value.filter(tool => field.default.includes(tool));
+  }
+  return result;
+}
+
 // Collects, writes and returns { file, fileName }. Settings keep their shape;
 // the banner text the user wrote is kept as its length.
-export async function exportDiagnostics({ version, settings = {}, calls = [], host, mcpClient, dshLocale, installSpec, serverPath, defaultBrowser, env = process.env, at = new Date(), outDir, selfTest, facts: given } = {}) {
-  const redact = makeRedactor({ secrets: [env.WCU_APPROVAL_SECRET].filter(Boolean) });
-  const system = given?.system ?? await systemFacts();
-  const cleanSettings = { ...settings };
-  if (typeof cleanSettings.indicatorText === 'string') cleanSettings.indicatorText = `<${[...cleanSettings.indicatorText].length} chars>`;
-  // Button tokens say nothing; a tool list matters only for a custom preset.
-  for (const key of Object.keys(cleanSettings)) if (/Token$/.test(key)) delete cleanSettings[key];
-  if (cleanSettings.toolPreset !== 'custom') delete cleanSettings.enabledTools;
+export async function exportDiagnostics({ version, settings = {}, calls = [], host, mcpClient, dshLocale, installSpec, serverPath, defaultBrowser, env = process.env, secrets = [], at = new Date(), outDir, selfTest, facts: given } = {}) {
+  const redact = makeRedactor({ secrets: [...secrets, env.WCU_APPROVAL_SECRET] });
+  const [system,health] = await Promise.all([
+    given?.system ?? systemFacts(),
+    selfTest ?? (serverPath ? runSelfTest(serverPath, { env }) : undefined),
+  ]);
+  const installSource = !installSpec ? undefined : /^(?:file|link):/.test(installSpec) ? 'local' : /^(?:git|https?:|github:)/.test(installSpec) ? 'git' : 'registry';
   const facts = {
-    version, host, mcpClient, dshLocale, installSpec: installSpec ? redact(installSpec) : undefined, settings: cleanSettings,
-    node: process.versions.node, electron: process.versions.electron, osRelease: `${os.type()} ${os.release()}`,
+    version, host, mcpClient, dshLocale, installSource, settings: diagnosticSettings(settings),
+    desktopVersions: host === 'DSH Desktop' ? system.desktopVersions : undefined,
+    node: process.versions.node, electron: process.versions.electron, arch: process.arch, osRelease: `${os.type()} ${os.release()}`,
     windows: system.windows, powershell: system.powershell, pwsh: system.pwsh, screens: system.screens, systemDpi: system.systemDpi,
     culture: system.culture, uiCulture: system.uiCulture, browsers: given?.browsers ?? browserVersions(env), defaultBrowser: defaultBrowser ?? system.defaultBrowser,
     compatLayer: Object.entries(env).find(([key]) => key.toUpperCase() === '__COMPAT_LAYER')?.[1],
-    selfTest: selfTest ?? (serverPath ? await runSelfTest(serverPath, { env }) : undefined),
+    selfTest: health,
   };
   const logs = (given?.logs ?? pluginLogLines(dshLogDirs(env))).map(redact);
   // A BOM and CRLF line ends, so every Notepad shows the Chinese and the lines right.
   const text = redact(diagnosticsText(facts, { calls, logs, at })).replace(/\r?\n/g, '\r\n');
-  const folder = outDir ?? (system.downloads && existsSync(system.downloads) ? system.downloads : path.join(os.homedir(), 'Downloads'));
+  const folder = outDir ?? (system.downloads || path.join(os.homedir(), 'Downloads'));
   mkdirSync(folder, { recursive: true });
   const fileName = `wincu-diagnostics-${stamp(at)}.txt`;
   const file = path.join(folder, fileName);
-  writeFileSync(file, '\ufeff' + text, 'utf8');
-  return { file, fileName, bytes: Buffer.byteLength(text) };
+  writeFileSync(file, '\ufeff' + text, { encoding: 'utf8', flag: 'wx' });
+  return { file, fileName };
 }
 
-const launch = (command, args) => { const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: false }); child.on('error', () => { }); child.unref(); };
+const launch = (command, args) => new Promise(resolve => {
+  const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+  child.once('error', () => resolve(false));
+  child.once('spawn', () => { child.unref(); resolve(true); });
+});
 
 // Two windows and no more: File Explorer on the Downloads folder with the file
 // selected, and the default browser on the new-issue page. The page goes
 // through ShellExecute (url.dll, as Go's pkg/browser does): explorer.exe given
 // a URL with a query opened its default folder, Documents, and no browser.
-export function revealAndOpen({ file, url = ISSUE_URL }, run = launch) {
-  if (process.platform !== 'win32') return false;
-  if (file) run(path.join(windowsDir(), 'explorer.exe'), ['/select,', file]);
-  if (url) run(path.join(windowsDir(), 'System32', 'rundll32.exe'), ['url.dll,FileProtocolHandler', url]);
-  return true;
+export async function revealAndOpen({ file }, run = launch) {
+  if (process.platform !== 'win32') return { folderOpened: false, issueOpened: false };
+  const opened = (command, args) => Promise.resolve().then(() => run(command, args)).catch(() => false);
+  const folderOpened = Boolean(file) && await opened(path.join(windowsDir(), 'explorer.exe'), ['/select,', file]);
+  const issueOpened = await opened(path.join(windowsDir(), 'System32', 'rundll32.exe'), ['url.dll,FileProtocolHandler', ISSUE_URL]);
+  return { folderOpened, issueOpened };
 }
 
 // A request from the DSH page itself: loopback host, not cross-site, the same
@@ -310,23 +345,23 @@ const sendJson = (response, status, body) => {
   response.end(JSON.stringify(body));
 };
 
-// POST runs one export at a time and answers { ok, fileName, issueUrl }.
+// POST runs one export at a time. The issue page remains available if saving fails.
 export function createDiagnosticsHandler({ collect, open = revealAndOpen, logger } = {}) {
-  let running = null;
+  let running = false;
   return async (request, response) => {
     if (request.method !== 'POST') { response.writeHead(405, { allow: 'POST' }); response.end(); return; }
     if (!trustedRequest(request)) { sendJson(response, 403, { ok: false, error: 'untrusted request' }); return; }
     if (running) { sendJson(response, 409, { ok: false, error: 'an export is already running' }); return; }
-    running = (async () => collect())();
+    running = true;
     try {
-      const result = await running;
-      let opened = false;
-      try { opened = open(result) !== false; } catch (error) { logger?.warn?.('dsh-computer-use-win: could not open the diagnostics: %s', error?.message ?? error); }
-      sendJson(response, 200, { ok: true, fileName: result.fileName, issueUrl: ISSUE_URL, opened });
-    } catch (error) {
-      logger?.warn?.('dsh-computer-use-win: diagnostics export failed: %s', error?.message ?? error);
-      sendJson(response, 500, { ok: false, error: clip(String(error?.message ?? error), 300) });
-    } finally { running = null; }
+      let result;
+      try { result = await collect(); }
+      catch (error) { logger?.warn?.('dsh-computer-use-win: diagnostics export failed: %s', error?.message ?? error); }
+      let opened;
+      try { opened = await open(result ?? {}); }
+      catch (error) { logger?.warn?.('dsh-computer-use-win: could not open the diagnostics: %s', error?.message ?? error); }
+      sendJson(response, result ? 200 : 500, { ok: Boolean(result), fileName: result?.fileName, ...opened });
+    } finally { running = false; }
   };
 }
 

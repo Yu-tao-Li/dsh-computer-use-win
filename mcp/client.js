@@ -568,6 +568,10 @@ window.__ModuleLoader__.load({
     "updateFailed": "更新失败",
     "updateBusy": "插件市场正忙",
     "updateRetry": "重试",
+    "updateUnconfirmed": "更新状态待确认",
+    "updateRecheck": "确认版本",
+    "updateMarketWaiting": "插件市场的版本与 npm 不一致，请稍后重试。",
+    "updateNpmUnavailable": "暂时无法确认 npm 上的最新版本，请重试。",
     "updateForce": "仍要更新",
     "updateTooFresh": "新版本刚发布，插件市场暂时没有装上它；可以点“仍要更新”。",
     "updateMismatch": "装上的不是新版本，请稍后再试。",
@@ -578,7 +582,12 @@ window.__ModuleLoader__.load({
     "reportTitle": "把诊断信息保存到下载文件夹，并打开下载文件夹和 GitHub 新建问题页面",
     "reportRunning": "导出中…",
     "reportSaved": "已将诊断信息保存到下载文件夹。",
-    "reportFailed": "诊断信息没有保存成功，已打开 GitHub 新建问题页面。",
+    "reportAttach": "检查后，可把 {file} 拖到 GitHub 的问题描述框。",
+    "reportFindFile": "可从下载文件夹找到 {file}，检查后附到 GitHub 问题中。",
+    "reportFailed": "诊断信息未能保存。仍可在 GitHub 上描述遇到的问题。",
+    "reportUnconfirmed": "暂时无法确认诊断信息是否已保存。可先查看下载文件夹。",
+    "reportBusy": "诊断信息正在导出，请稍等。",
+    "reportOpenIssue": "打开 GitHub 新建问题页面",
     "reportOk": "确定"
   },
   "en": {
@@ -838,6 +847,10 @@ window.__ModuleLoader__.load({
     "updateFailed": "Update failed",
     "updateBusy": "Plugin market busy",
     "updateRetry": "Retry",
+    "updateUnconfirmed": "Update status unknown",
+    "updateRecheck": "Confirm version",
+    "updateMarketWaiting": "The plugin market and npm list different versions. Try again later.",
+    "updateNpmUnavailable": "The latest version on npm could not be confirmed. Try again.",
     "updateForce": "Update anyway",
     "updateTooFresh": "The new version is very recent, so the plugin market did not install it yet; choose Update anyway.",
     "updateMismatch": "The installed version is not the new one; try again later.",
@@ -848,7 +861,12 @@ window.__ModuleLoader__.load({
     "reportTitle": "Save diagnostics to your Downloads folder, then open that folder and GitHub's new-issue page",
     "reportRunning": "Exporting…",
     "reportSaved": "Diagnostics saved to your Downloads folder.",
-    "reportFailed": "The diagnostics could not be saved; GitHub's new-issue page is open.",
+    "reportAttach": "Review {file}, then drag it into the description on GitHub.",
+    "reportFindFile": "Find {file} in Downloads, review it, and attach it to your issue on GitHub.",
+    "reportFailed": "The diagnostics could not be saved. You can still describe the problem on GitHub.",
+    "reportUnconfirmed": "The export could not be confirmed. Check your Downloads folder.",
+    "reportBusy": "A diagnostics export is already running.",
+    "reportOpenIssue": "Open a new issue on GitHub",
     "reportOk": "OK"
   }
 };
@@ -1175,16 +1193,11 @@ window.__ModuleLoader__.load({
       lock:locked=>drawing(box(locked?'a-win a-edge':'a-win a-frame',18,12,62,45,4.5),box('a-ink',25,23,36,2.6,1.3),box('a-ink',25,30,42,2.6,1.3),box('a-ink',25,37,28,2.6,1.3),box(locked?'a-acc':'a-win',68,9,22,22,5.5),...(!locked?[box('a-frame',68,9,22,22,5.5)]:[]),h('path',{className:locked?'a-lock':'a-lock-open',d:locked?'M76 19.5v-2.2a3 3 0 0 1 6 0v2.2M74.8 19.5h8.4v6.2h-8.4z':'M76 19.5v-2.4a3 3 0 0 1 5.6-1.4M74.8 19.5h8.4v6.2h-8.4z'}),...(locked?[arrow(48,31)]:[]))
     };
 
-    // Plugin updates. The check runs once per DSH start, when this client
-    // loads, and again on request. It uses the public update API of DSH's
-    // plugin market (dshmarket, bundled with DSH Desktop): discovery first, then
-    // a check of this one package; an update starts only from a click, as DSH
-    // Desktop's plugin contract requires for any package change. The market
-    // installs it and checks the version pnpm put on disk. Without the market
-    // the latest version comes from npm, and the page links the upgrade steps.
+    // npm's latest tag supplies the target. DSH's market identifies the active
+    // profile's install and performs the install on a click. Local installs and
+    // older hosts get the upgrade instructions.
     const UPDATE_PACKAGE='dsh-computer-use-win';
     const UPDATE_SCHEMA='dsh-market/update-api/v1';
-    const UPDATE_RELEASES='https://github.com/Yu-tao-Li/dsh-computer-use-win/releases';
     const UPDATE_FORCE_CODES=['RELEASE_TOO_FRESH','VERSION_UNCHANGED'];
     const UPDATE_TERMINAL=['succeeded','failed','cancelled','rolled-back'];
     const versionParts=value=>{const m=/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(value??'').trim());return m?{core:[+m[1],+m[2],+m[3]],pre:m[4]?m[4].split('.'):[]}:null;};
@@ -1225,54 +1238,59 @@ window.__ModuleLoader__.load({
       }catch{updateMarket=null;}
       return updateMarket;
     }
-    function settleUpdateCheck({source,installed,latest,updateAvailable}){
+    async function marketPackage(market,{fresh=false}={}){
+      if(!market)return null;
+      try{
+        const {status,data}=await requestJson(market.endpoints.updates+'?name='+UPDATE_PACKAGE+(fresh?'&force=1':''),{timeoutMs:30000});
+        return status===200&&versionParts(data?.package?.installedVersion)?data.package:null;
+      }catch{return null;}
+    }
+    async function latestNpmVersion(){
+      try{
+        const {ok,data}=await requestJson('https://registry.npmjs.org/'+UPDATE_PACKAGE+'/latest');
+        return ok&&versionParts(data?.version)?data.version:null;
+      }catch{return null;}
+    }
+    function settleUpdateCheck({found,latest}){
+      const installed=found?.installedVersion??PLUGIN_VERSION;
+      const source=found?.source==='npm'?'market':'help';
       // A newer version already on disk is an update waiting for a restart.
-      const phase=compareVersions(installed,PLUGIN_VERSION)>0?'updated':updateAvailable?'available':compareVersions(latest,installed)>0?'held':'latest';
+      const phase=compareVersions(installed,PLUGIN_VERSION)>0?'updated':compareVersions(latest,installed)>0?'available':latest?'latest':'unknown';
       updateStore.set({phase,source,installed,latest,failure:null,checkedAt:Date.now(),restartRequired:phase==='updated',refreshRequired:false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
     }
     // Checks run on their own: once per DSH start, and again when the settings
     // page opens on a result that is old or missing. Nothing to click.
-    function checkUpdate(){
+    function checkUpdate({fresh=false}={}){
       if(updateStore.state.phase==='updating')return Promise.resolve();
       if(updateChecking)return updateChecking;
       updateStore.set({checking:true});
       updateChecking=(async()=>{
-        const market=await discoverMarket();
-        if(market){
-          try{
-            const {status,data}=await requestJson(market.endpoints.updates+'?name='+UPDATE_PACKAGE,{timeoutMs:30000});
-            const found=data?.package;
-            // The market updates registry installs; a file: or link: install
-            // ("linked") updates from its own source, so it gets the steps.
-            if(status===200&&found&&versionParts(found.installedVersion))return settleUpdateCheck({source:found.source==='linked'?'help':'market',installed:found.installedVersion,latest:versionParts(found.latestVersion)?found.latestVersion:found.installedVersion,updateAvailable:found.updateAvailable===true});
-          // Not a package of this profile (a GitHub or local install): the market
-          // cannot update it, and npm still tells whether a newer version exists.
-          }catch{}
-        }
-        try{
-          const {ok,data}=await requestJson('https://registry.npmjs.org/'+UPDATE_PACKAGE+'/latest');
-          if(ok&&versionParts(data?.version))return settleUpdateCheck({source:'help',installed:PLUGIN_VERSION,latest:data.version,updateAvailable:compareVersions(data.version,PLUGIN_VERSION)>0});
-        }catch{}
-        updateStore.set({phase:'unknown',checkedAt:Date.now()});
+        const [found,latest]=await Promise.all([discoverMarket().then(market=>marketPackage(market,{fresh})),latestNpmVersion()]);
+        settleUpdateCheck({found,latest});
       })().finally(()=>{updateChecking=undefined;updateStore.set({checking:false});});
       return updateChecking;
     }
     function failUpdate(failure){updateStore.set({phase:'failed',percent:null,failure:{code:String(failure?.code||'UPDATE_FAILED'),message:String(failure?.message||'').slice(0,300),retryable:failure?.retryable!==false}});}
     async function startUpdate({force=false}={}){
       const state=updateStore.state,market=updateMarket;
-      if(!market||state.source!=='market'||state.phase==='updating')return;
-      const target=state.latest;
-      updateStore.set({phase:'updating',percent:null,failure:null,target});
+      if(!market||state.source!=='market'||state.checking||!['available','failed'].includes(state.phase))return;
+      updateStore.set({phase:'updating',percent:null,failure:null});
       try{
+        const [checked,target]=await Promise.all([marketPackage(market),latestNpmVersion()]);
+        if(!target)return failUpdate({code:'NPM_CHECK_FAILED'});
+        if(checked?.source==='linked'||(checked&&compareVersions(checked.installedVersion,target)>=0))return settleUpdateCheck({found:checked,latest:target});
+        const found=compareVersions(checked?.latestVersion,target)===0?checked:await marketPackage(market,{fresh:true});
+        if(found?.source==='linked'||(found&&compareVersions(found.installedVersion,target)>=0))return settleUpdateCheck({found,latest:target});
+        if(found?.source!=='npm'||compareVersions(found.latestVersion,target)!==0)return failUpdate({code:'MARKET_NOT_SYNCED'});
         const {status,data}=await requestJson(market.endpoints.updates,{method:'POST',body:{packageName:UPDATE_PACKAGE,...(force?{force:true}:{})},timeoutMs:30000});
         let operation=data?.operation;
         if(status!==202||!operation?.operationId)return failUpdate(data?.failure??{code:status===409?'OPERATION_BUSY':'UPDATE_FAILED',message:data?.error||('HTTP '+status),retryable:status===409});
         const id=operation.operationId,deadline=Date.now()+15*60000;
         while(!UPDATE_TERMINAL.includes(operation.state)){
-          if(Date.now()>deadline)return failUpdate({code:'UPDATE_TIMEOUT'});
+          if(Date.now()>deadline)return failUpdate({code:'UPDATE_STATUS_UNKNOWN'});
           await new Promise(resolve=>setTimeout(resolve,1000));
           const polled=await requestJson(market.endpoints.operations+'?operationId='+encodeURIComponent(id),{timeoutMs:15000}).catch(()=>null);
-          if(polled?.status===404)return failUpdate({code:'UPDATE_LOST'});
+          if(polled?.status===404)return failUpdate({code:'UPDATE_STATUS_UNKNOWN'});
           if(polled?.data?.operation?.operationId===id)operation=polled.data.operation;
           const percent=operation.progress?.percent;
           updateStore.set({percent:Number.isFinite(percent)?Math.max(0,Math.min(100,Math.round(percent))):null});
@@ -1280,16 +1298,19 @@ window.__ModuleLoader__.load({
         if(operation.state!=='succeeded')return failUpdate(operation.failure??{code:operation.state==='cancelled'?'UPDATE_CANCELLED':'UPDATE_FAILED'});
         // The API asks each client to compare the installed version with the
         // version it offered before it reports success or offers a restart.
-        if(!(compareVersions(operation.installedVersion,target)>=0))return failUpdate({code:'RESOLVED_VERSION_MISMATCH',message:String(operation.installedVersion??'')});
+        if(!(compareVersions(operation.installedVersion,target)>=0&&compareVersions(operation.installedVersion,found.installedVersion)>0)
+          || compareVersions(operation.installedVersion,operation.beforeVersion)<0)return failUpdate({code:'RESOLVED_VERSION_MISMATCH',message:String(operation.installedVersion??'')});
+        if(compareVersions(operation.installedVersion,target)>0&&!(compareVersions(await latestNpmVersion(),operation.installedVersion)>=0))return failUpdate({code:'UPDATE_STATUS_UNKNOWN'});
         updateStore.set({phase:'updated',installed:operation.installedVersion,percent:null,restartRequired:operation.outcome?.restartRequired===true,refreshRequired:operation.outcome?.refreshRequired===true});
-      }catch(error){failUpdate({code:'UPDATE_FAILED',message:error?.message});}
+      }catch{failUpdate({code:'UPDATE_STATUS_UNKNOWN'});}
     }
     async function restartForUpdate(){
       const market=updateMarket;
       if(!updateStore.state.restartSupported||!market)return;
       updateStore.set({restarting:true});
-      try{const {ok,data}=await requestJson(market.endpoints.restart,{method:'POST',body:{},timeoutMs:15000});if(!ok)updateStore.set({restarting:false,phase:'failed',failure:{code:'RESTART_FAILED',message:String(data?.error||''),retryable:false}});}
-      catch{/* the host is going away */}
+      try{const {ok}=await requestJson(market.endpoints.restart,{method:'POST',body:{},timeoutMs:15000});if(ok)return;}
+      catch{/* A successful restart may disconnect the page before it replies. */}
+      updateStore.set({restarting:false,restartSupported:false});
     }
     const fill=(text,values)=>String(text).replace(/\{(\w+)\}/g,(_,key)=>values[key]??'');
     const UPDATE_STALE_MS=6*60*60*1000;
@@ -1300,11 +1321,11 @@ window.__ModuleLoader__.load({
       const state=React.useSyncExternalStore(listener=>updateStore.subscribe(listener),()=>updateStore.state);
       // DSH can stay open for days: an old or failed check is repeated when
       // the page opens.
-      React.useEffect(()=>{const current=updateStore.state;if(current.phase==='unknown'||(['latest','held'].includes(current.phase)&&Date.now()-(current.checkedAt??0)>UPDATE_STALE_MS))void checkUpdate();},[]);
+      React.useEffect(()=>{const current=updateStore.state;if(current.phase==='unknown'||(['latest','available'].includes(current.phase)&&Date.now()-(current.checkedAt??0)>UPDATE_STALE_MS))void checkUpdate();},[]);
       const small=(text,props)=>h('button',{type:'button',className:'wcu-small',...props},text);
       const wrap=(tone,...children)=>h('span',{className:'wcu-update','data-wincu-update':state.phase,'data-tone':tone||undefined},...children);
       if(state.phase==='available')return wrap('',state.source==='market'
-        ?small(t('updateNow'),{'data-wincu-update-now':true,title:fill(t('updateAvailable'),{version:state.latest}),onClick:()=>{void startUpdate();}})
+        ?small(t('updateNow'),{'data-wincu-update-now':true,disabled:state.checking,title:fill(t('updateAvailable'),{version:state.latest}),onClick:()=>{void startUpdate();}})
         :h('a',{className:'wcu-update-link',href:t('updateHelpUrl'),target:'_blank',rel:'noopener noreferrer',title:fill(t('updateAvailable'),{version:state.latest})+' · '+t('updateHow'),'data-wincu-update-help':true},t('updateNow')));
       if(state.phase==='updating')return wrap('',h('span',{className:'wcu-spinner','aria-hidden':true}),h('span',null,t('updateRunning')+(state.percent!=null?' '+state.percent+'%':'')));
       // What finishes it comes from the market: a restart (a button, or the note
@@ -1314,15 +1335,16 @@ window.__ModuleLoader__.load({
         !state.restartRequired&&state.refreshRequired&&small(t('updateRefresh'),{'data-wincu-update-refresh':true,onClick:()=>{try{window.location.reload();}catch{}}}));
       if(state.phase==='failed'){
         const code=state.failure?.code;
-        return wrap('error',h('span',null,t(code==='OPERATION_BUSY'?'updateBusy':'updateFailed')),
+        return wrap('error',h('span',null,t(code==='OPERATION_BUSY'?'updateBusy':code==='UPDATE_STATUS_UNKNOWN'?'updateUnconfirmed':'updateFailed')),
           UPDATE_FORCE_CODES.includes(code)?small(t('updateForce'),{'data-wincu-update-force':true,onClick:()=>{void startUpdate({force:true});}})
+          :code==='UPDATE_STATUS_UNKNOWN'?small(t('updateRecheck'),{'data-wincu-update-recheck':true,disabled:state.checking,onClick:()=>{void checkUpdate({fresh:true});}})
           :state.failure?.retryable&&updateMarket&&state.source==='market'?small(t('updateRetry'),{'data-wincu-update-retry':true,onClick:()=>{void startUpdate();}}):null);
       }
       return null;
     }
     // "Report a problem": the plugin writes the diagnostics to Downloads, then
     // opens that folder and the new-issue page (mcp/diagnostics.mjs); this page
-    // says where the file went. If the export fails, the issue page still opens.
+    // says where the file went, and offers a link if the browser could not start.
     const REPORT_ISSUE_URL='https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new';
     // A modal <dialog>: the browser keeps it above the page, traps focus and
     // closes it on Esc.
@@ -1336,28 +1358,36 @@ window.__ModuleLoader__.load({
         return ()=>node.removeEventListener('close',closed);
       },[]);
       const dismiss=()=>{const node=ref.current;if(node&&typeof node.close==='function'&&node.open)node.close();else close.current();};
-      return h('dialog',{ref,className:'wcu-dialog','data-wincu-report-dialog':dialog.tone,'aria-labelledby':'wcu-report-dialog-text'},
+      return h('dialog',{ref,className:'wcu-dialog','data-wincu-report-dialog':dialog.tone,'aria-labelledby':'wcu-report-dialog-text',...(dialog.detail?{'aria-describedby':'wcu-report-dialog-detail'}:{})},
         h('p',{id:'wcu-report-dialog-text'},dialog.text),
-        dialog.detail?h('p',{className:'wcu-dialog-detail'},dialog.detail):null,
+        dialog.detail?h('p',{id:'wcu-report-dialog-detail',className:'wcu-dialog-detail'},dialog.detail):null,
+        dialog.link?h('a',{href:REPORT_ISSUE_URL,target:'_blank',rel:'noopener noreferrer'},t('reportOpenIssue')):null,
         h('div',{className:'wcu-dialog-actions'},h('button',{type:'button',className:'wcu-small wcu-primary',autoFocus:true,onClick:dismiss},t('reportOk'))));
     }
     function ReportButton({t}){
       const [state,setState]=React.useState({phase:'idle',dialog:null});
-      const openIssuePage=()=>{try{window.open(REPORT_ISSUE_URL,'_blank','noopener');}catch{}};
+      const running=React.useRef(false);
       const run=async()=>{
-        if(state.phase==='running')return;
+        if(running.current)return;
+        running.current=true;
         setState({phase:'running',dialog:null});
-        let detail='';
+        let dialog={tone:'failed',text:t('reportUnconfirmed'),link:true};
         try{
           const {status,data}=await requestJson('/dsh-computer-use-win/api/diagnostics',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:120000});
-          if(status===200&&data?.ok){if(!data.opened)openIssuePage();setState({phase:'idle',dialog:{tone:'saved',text:t('reportSaved')}});return;}
-          if(typeof data?.error==='string')detail=data.error;
+          if(status===200&&data?.ok){
+            dialog={tone:'saved',text:t('reportSaved'),link:data.issueOpened!==true,
+              detail:fill(t(data.folderOpened?'reportAttach':'reportFindFile'),{file:data.fileName})};
+          }else if(status===409){
+            dialog={tone:'busy',text:t('reportBusy')};
+          }else if(status===500&&data?.ok===false){
+            dialog={tone:'failed',text:t('reportFailed'),link:data.issueOpened!==true};
+          }
         }catch{}
-        openIssuePage();
-        setState({phase:'idle',dialog:{tone:'failed',text:t('reportFailed'),detail}});
+        running.current=false;
+        setState({phase:'idle',dialog});
       };
       const button=state.phase==='running'
-        ?h('span',{className:'wcu-update','data-wincu-report':'running'},h('span',{className:'wcu-spinner','aria-hidden':true}),h('span',null,t('reportRunning')))
+        ?h('span',{className:'wcu-update','data-wincu-report':'running',role:'status'},h('span',{className:'wcu-spinner','aria-hidden':true}),h('span',null,t('reportRunning')))
         :h('button',{type:'button',className:'wcu-small','data-wincu-report':'idle',title:t('reportTitle'),onClick:run},t('report'));
       return h(React.Fragment,null,button,state.dialog?h(ReportDialog,{t,dialog:state.dialog,onClose:()=>setState(current=>({...current,dialog:null}))}):null);
     }
@@ -1366,8 +1396,8 @@ window.__ModuleLoader__.load({
     function UpdateNote({t}){
       const state=React.useSyncExternalStore(listener=>updateStore.subscribe(listener),()=>updateStore.state);
       if(state.phase==='updated'&&state.restartRequired&&!state.restartSupported)return h('p',{className:'wcu-update-note','data-wincu-update-note':'restart'},t(state.runtime==='web'?'updateRestartWeb':'updateRestartDesktop'));
-      if(state.phase==='failed'&&state.failure?.code!=='OPERATION_BUSY')return h('p',{className:'wcu-update-note','data-tone':'error','data-wincu-update-note':'failed'},
-        t(UPDATE_FORCE_CODES.includes(state.failure.code)?'updateTooFresh':state.failure.code==='RESOLVED_VERSION_MISMATCH'?'updateMismatch':'updateFailedHint')+(state.failure.message?' ('+state.failure.message.slice(0,160)+') ':' '),
+      if(state.phase==='failed'&&!['OPERATION_BUSY','UPDATE_STATUS_UNKNOWN'].includes(state.failure?.code))return h('p',{className:'wcu-update-note','data-tone':'error','data-wincu-update-note':'failed'},
+        t(UPDATE_FORCE_CODES.includes(state.failure.code)?'updateTooFresh':state.failure.code==='RESOLVED_VERSION_MISMATCH'?'updateMismatch':state.failure.code==='MARKET_NOT_SYNCED'?'updateMarketWaiting':state.failure.code==='NPM_CHECK_FAILED'?'updateNpmUnavailable':'updateFailedHint')+(state.failure.message?' ('+state.failure.message.slice(0,160)+') ':' '),
         h('a',{href:t('updateHelpUrl'),target:'_blank',rel:'noopener noreferrer'},t('updateHow')));
       return null;
     }
@@ -1714,7 +1744,7 @@ window.__ModuleLoader__.load({
       ctx.effect(()=>{
         const delay=Number.isFinite(globalThis.__wcuUpdateDelayMs)?globalThis.__wcuUpdateDelayMs:8000;
         // Tests set the delay; they also get a way back to a fresh, unchecked state.
-        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,target:undefined,source:undefined,runtime:null,restartSupported:false,restarting:false,restartRequired:false,refreshRequired:false});}};
+        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restarting:false,restartRequired:false,refreshRequired:false});}};
         if(updateStarted||delay<0||typeof setTimeout!=='function'||typeof fetch!=='function')return ()=>{};
         updateStarted=true;
         const timer=setTimeout(()=>{void checkUpdate();},delay);

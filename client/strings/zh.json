@@ -255,6 +255,10 @@
   "updateFailed": "更新失败",
   "updateBusy": "插件市场正忙",
   "updateRetry": "重试",
+  "updateUnconfirmed": "更新状态待确认",
+  "updateRecheck": "确认版本",
+  "updateMarketWaiting": "插件市场的版本与 npm 不一致，请稍后重试。",
+  "updateNpmUnavailable": "暂时无法确认 npm 上的最新版本，请重试。",
   "updateForce": "仍要更新",
   "updateTooFresh": "新版本刚发布，插件市场暂时没有装上它；可以点“仍要更新”。",
   "updateMismatch": "装上的不是新版本，请稍后再试。",
@@ -265,6 +269,11 @@
   "reportTitle": "把诊断信息保存到下载文件夹，并打开下载文件夹和 GitHub 新建问题页面",
   "reportRunning": "导出中…",
   "reportSaved": "已将诊断信息保存到下载文件夹。",
-  "reportFailed": "诊断信息没有保存成功，已打开 GitHub 新建问题页面。",
+  "reportAttach": "检查后，可把 {file} 拖到 GitHub 的问题描述框。",
+  "reportFindFile": "可从下载文件夹找到 {file}，检查后附到 GitHub 问题中。",
+  "reportFailed": "诊断信息未能保存。仍可在 GitHub 上描述遇到的问题。",
+  "reportUnconfirmed": "暂时无法确认诊断信息是否已保存。可先查看下载文件夹。",
+  "reportBusy": "诊断信息正在导出，请稍等。",
+  "reportOpenIssue": "打开 GitHub 新建问题页面",
   "reportOk": "确定"
 }

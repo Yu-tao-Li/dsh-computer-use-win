@@ -29,11 +29,11 @@ app.whenReady().then(async()=>{
     "window.bump=v=>v.replace(/(\\d+)$/,n=>String(+n+1));"+
     "window.fakeMarket=o=>{let n=0;const schema='dsh-market/update-api/v1';return call=>{const u=call.url;"+
       "if(u==='/dsh-market/api/v1/capabilities')return o.absent?{status:404,body:null}:{status:200,body:{schema,apiVersion:1,runtime:o.runtime||'desktop',features:{check:true,update:true,progress:true,rollback:true,restart:!!o.restart,updatesSummary:true},restart:{supported:!!o.restart,managedBy:o.restart?'market':'desktop-host'},endpoints:{updates:'/dsh-market/api/v1/updates',updatesSummary:'/dsh-market/api/v1/updates/summary',operations:'/dsh-market/api/v1/operations',rollback:'/dsh-market/api/v1/rollback',restart:'/dsh-market/api/v1/restart'}}};"+
-      "if(u.startsWith('/dsh-market/api/v1/updates?name=dsh-computer-use-win'))return {status:200,body:{schema,package:{name:'dsh-computer-use-win',source:'npm',installedVersion:o.installed,latestVersion:o.latest,updateAvailable:!!o.available,channelSwitch:null}}};"+
+      "if(u.startsWith('/dsh-market/api/v1/updates?name=dsh-computer-use-win'))return {status:200,body:{schema,package:{name:'dsh-computer-use-win',source:o.source||'npm',installedVersion:o.installed,latestVersion:u.includes('force=1')?o.freshLatest??o.latest:o.latest,updateAvailable:!!o.available,channelSwitch:null}}};"+
       "if(u==='/dsh-market/api/v1/updates'&&call.method==='POST'){if(o.busy)return {status:409,body:{schema,error:'busy',failure:{code:'OPERATION_BUSY',message:'busy',retryable:true}}};n++;return {status:202,body:{schema,operation:{schema,operationId:'boot-update-'+n,state:'running',progress:{percent:0}}}};}"+
-      "if(u.startsWith('/dsh-market/api/v1/operations?operationId=boot-update-')){const next=o.operations.shift()||{state:'running'};return {status:200,body:{schema,operation:{schema,operationId:decodeURIComponent(u.split('=')[1]),kind:'update',packageName:'dsh-computer-use-win',beforeVersion:o.installed,installedVersion:o.installed,progress:{percent:null},outcome:{refreshRequired:false,restartRequired:true},failure:null,...next}}};}"+
+      "if(u.startsWith('/dsh-market/api/v1/operations?operationId=boot-update-')){if(o.lost)return {status:404,body:null};const next=o.operations.shift()||{state:'running'};return {status:200,body:{schema,operation:{schema,operationId:decodeURIComponent(u.split('=')[1]),kind:'update',packageName:'dsh-computer-use-win',beforeVersion:o.installed,installedVersion:o.installed,progress:{percent:null},outcome:{refreshRequired:false,restartRequired:true},failure:null,...next}}};}"+
       "if(u==='/dsh-market/api/v1/restart'&&call.method==='POST')return {status:200,body:{ok:true}};"+
-      "if(u==='https://registry.npmjs.org/dsh-computer-use-win/latest')return o.npm?{status:200,body:{name:'dsh-computer-use-win',version:o.npm}}:{status:404,body:{error:'Not found'}};"+
+      "if(u==='https://registry.npmjs.org/dsh-computer-use-win/latest'){const npm=o.npm===undefined?o.latest:o.npm;return npm?{status:200,body:{name:'dsh-computer-use-win',version:npm}}:{status:404,body:{error:'Not found'}};}"+
       "return {status:404,body:null};};};"+
     "window.V="+JSON.stringify(require('../package.json').version)+";window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.V,available:false});"+
     // A settings nav button like DSH's, so the update dot can be checked.
@@ -54,7 +54,7 @@ app.whenReady().then(async()=>{
   );
   await until("!!document.getElementById('wincu-page-tool-screenshot')");
   // The check ran at start, without asking the market to skip its short cache,
-  // and found this version current: only the quiet "check for updates" stays.
+  // and found this version current, leaving the update control hidden.
   await until("window.fetchCalls.some(c=>c.url.startsWith('/dsh-market/api/v1/updates?name=dsh-computer-use-win'))&&window.__wcuUpdateTest.state().phase==='latest'");
   assert.equal(await evaluate("!!document.querySelector('[data-wincu-update]')"),false,'Nothing next to GitHub while there is no update');
   assert.equal(await evaluate("document.querySelector('.wcu-title-row h2').textContent"),'电脑操控','The title is the name alone');
@@ -548,41 +548,48 @@ app.whenReady().then(async()=>{
   const posts="window.fetchCalls.filter(c=>c.method==='POST'&&c.url==='/dsh-market/api/v1/updates')";
   // Report a problem: the plugin writes the file and opens the Downloads folder
   // and the new-issue page; the page shows a modal dialog saying where the file
-  // went. When the plugin cannot open the issue page, the page opens it; when
-  // the export fails, the page opens it and says so.
+  // went. A link is available when the plugin cannot open the browser.
   const ISSUE_PAGE='https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new';
-  await evaluate("window.opened=[];window.open=url=>{window.opened.push(String(url));return null;};window.reportReply={status:200,body:{ok:true,fileName:'wincu-diagnostics-20261118-020304.txt',issueUrl:'"+ISSUE_PAGE+"',opened:true}};window.baseFetch=window.fakeFetch;window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/diagnostics'?window.reportReply:window.baseFetch?window.baseFetch(call):{status:404,body:null};void 0");
+  await evaluate("window.opened=[];window.open=url=>{window.opened.push(String(url));return null;};window.reportReply={status:200,body:{ok:true,fileName:'wincu-diagnostics-20261118-020304.txt',folderOpened:true,issueOpened:true}};window.baseFetch=window.fakeFetch;window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/diagnostics'?window.reportReply:window.baseFetch?window.baseFetch(call):{status:404,body:null};void 0");
   assert.ok(await evaluate("(()=>{const b=document.querySelector('[data-wincu-report=idle]');return !!b&&b.textContent==='反馈问题'&&getComputedStyle(b).backgroundColor==='rgba(0, 0, 0, 0)'})()"),'A transparent Report a problem button');
   await evaluate("document.querySelector('[data-wincu-report=idle]').click()");
-  await until("!!document.querySelector('dialog[data-wincu-report-dialog=saved]')");
+  await until("document.querySelector('dialog[data-wincu-report-dialog=saved]')?.open");
   const reportCall=await evaluate("window.fetchCalls.filter(c=>c.url==='/dsh-computer-use-win/api/diagnostics').map(c=>({method:c.method,header:c.headers['x-wcu-request'],type:c.headers['content-type']}))");
   assert.deepEqual(reportCall,[{method:'POST',header:'1',type:'application/json'}],'One POST with the plugin header');
   const savedDialog=await evaluate("(()=>{const d=document.querySelector('dialog[data-wincu-report-dialog=saved]'),ok=d.querySelector('button'),box=d.getBoundingClientRect();return {open:d.open,modal:d.matches(':modal'),texts:[...d.querySelectorAll('p')].map(p=>p.textContent),button:ok.textContent,focused:document.activeElement===ok,centered:Math.abs(box.left+box.width/2-document.documentElement.clientWidth/2)<2,idle:!!document.querySelector('[data-wincu-report=idle]')};})()");
-  assert.deepEqual(savedDialog,{open:true,modal:true,texts:['已将诊断信息保存到下载文件夹。'],button:'确定',focused:true,centered:true,idle:true},'A modal dialog says the file is in Downloads');
+  assert.deepEqual(savedDialog,{open:true,modal:true,texts:['已将诊断信息保存到下载文件夹。','检查后，可把 wincu-diagnostics-20261118-020304.txt 拖到 GitHub 的问题描述框。'],button:'确定',focused:true,centered:true,idle:true},'A modal dialog says the file is in Downloads');
   assert.deepEqual(await evaluate('window.opened'),[],'The plugin opened the folder and the issue page; the page opens nothing more');
   await evaluate("document.querySelector('dialog[data-wincu-report-dialog=saved] button').click()");
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   const resetReport=async reply=>{await evaluate("window.reportReply="+reply+";window.root.render(React.createElement('span',null,'closed'))");await evaluate("window.renderPage('zh')");await until("!!document.querySelector('[data-wincu-report=idle]')");await evaluate("document.querySelector('[data-wincu-report=idle]').click()");};
-  await resetReport("{status:200,body:{ok:true,fileName:'f.txt',issueUrl:'"+ISSUE_PAGE+"',opened:false}}");
-  await until("!!document.querySelector('dialog[data-wincu-report-dialog=saved]')");
-  assert.deepEqual(await evaluate('window.opened'),[ISSUE_PAGE],'The page opens the plain new-issue page when the plugin could not');
+  await resetReport("{status:200,body:{ok:true,fileName:'f.txt',folderOpened:false,issueOpened:false}}");
+  await until("document.querySelector('dialog[data-wincu-report-dialog=saved]')?.open");
+  assert.equal(await evaluate("document.querySelector('dialog a').href"),ISSUE_PAGE,'The exact issue URL is available when launch fails');
   win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
-  await resetReport("{status:500,body:{ok:false,error:'disk full'}}");
+  await resetReport("{status:500,body:{ok:false,issueOpened:true}}");
   await until("!!document.querySelector('dialog[data-wincu-report-dialog=failed]')");
-  assert.equal(await evaluate('window.opened.at(-1)'),ISSUE_PAGE,'A failed export still opens the new-issue page');
-  assert.deepEqual(await evaluate("[...document.querySelectorAll('dialog[data-wincu-report-dialog=failed] p')].map(p=>p.textContent)"),['诊断信息没有保存成功，已打开 GitHub 新建问题页面。','disk full']);
+  assert.equal(await evaluate("!!document.querySelector('dialog a')"),false,'No extra issue link when it opened despite the failed write');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('dialog[data-wincu-report-dialog=failed] p')].map(p=>p.textContent)"),['诊断信息未能保存。仍可在 GitHub 上描述遇到的问题。']);
   await evaluate("document.querySelector('dialog[data-wincu-report-dialog=failed] button').click()");
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   await evaluate("window.fakeFetch=window.baseFetch;void 0");
   const recheck=async market=>{await evaluate("window.__wcuUpdateTest.reset();window.fetchCalls=[];window.fakeFetch="+market+";window.__wcuUpdateTest.check();void 0");};
-  // A release the market still holds back is named, with no button.
+  // The npm version controls the button, including during a market hold.
   await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:false})");
-  await until("window.__wcuUpdateTest.state().phase==='held'");
-  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update]')"),false,'A held release shows nothing yet');
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),npm:window.V,available:true})");
+  await until("window.__wcuUpdateTest.state().phase==='latest'");
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update]')"),false,'A newer market channel cannot override npm latest');
+  await recheck("window.fakeMarket({installed:window.V,latest:window.V,npm:window.bump(window.V),available:false})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("window.__wcuUpdateTest.state().failure?.code==='MARKET_NOT_SYNCED'");
+  assert.equal(await evaluate(posts+'.length'),0,'A stale market must not install a different version');
+  assert.equal(await evaluate("window.fetchCalls.some(c=>c.url.includes('force=1'))"),true,'Check the market again before asking the user to retry');
   // A local (file:/link:) install: the market reports it as linked and cannot
   // replace it, so Update opens the upgrade steps instead of installing.
-  await recheck("(o=>{const market=window.fakeMarket(o);return call=>{const r=market(call);if(call.url.startsWith('/dsh-market/api/v1/updates?'))r.body.package.source='linked';return r;};})({installed:window.V,latest:window.bump(window.V),available:true,operations:[]})");
+  await recheck("window.fakeMarket({source:'linked',installed:window.V,latest:null,npm:window.bump(window.V),operations:[]})");
   await until("!!document.querySelector('[data-wincu-update-help]')");
   assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-now]')"),false,'No in-place update for a local install');
   // Without the market: npm tells the version, the page links the upgrade steps.
@@ -627,6 +634,14 @@ app.whenReady().then(async()=>{
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
   await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='failed'");
   assert.ok(await evaluate(noteText+".includes('装上的不是新版本')"));
+  // A lost operation is checked against the versions before any second POST.
+  await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),lost:true})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("!!document.querySelector('[data-wincu-update-recheck]')");
+  await evaluate("window.fakeFetch=window.fakeMarket({installed:window.bump(window.V),latest:window.bump(window.V)});document.querySelector('[data-wincu-update-recheck]').click()");
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
+  assert.equal(await evaluate(posts+'.length'),1,'Confirming the outcome cannot issue a second install');
   // dsh web with a market that restarts it: a restart button, no tray note.
   await recheck("window.fakeMarket({runtime:'web',restart:true,installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]})");
   await until("!!document.querySelector('[data-wincu-update-now]')");

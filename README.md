@@ -42,7 +42,7 @@
 
 #### 1.2 升级
 
-DSH 每次启动时会自动检查新版本。有新版本时，**设置 → 电脑操控** 标题右侧 GitHub 左边会出现“更新”，左侧“电脑操控”旁有小红点；点“更新”，看到“已更新”后，像上面第 2 步那样完全退出、再重新打开 DSH Desktop。新版本由 DSH 自带的插件市场（dshmarket）安装，插件市场默认等新版本发布满一天后才提供。
+DSH 每次启动时会按 npm 的 `latest` 自动检查。有新版时，**设置 → 电脑操控** 标题右侧 GitHub 左边会出现“更新”，左侧“电脑操控”旁有小红点。点“更新”后，DSH 插件市场核对目标、安装并显示进度。页面提示需要重启时，按第 2 步从托盘完全退出，再重新打开 DSH Desktop。
 
 也可以运行同一条安装命令，然后同样完全退出、再重新打开 DSH Desktop。没有插件市场，或者插件是从本地文件装的时，“更新”会打开这段升级说明。
 
@@ -196,7 +196,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 | 设置 | 可以怎么选 |
 |---|---|
 | 更新 | 有新版本时，标题右侧 GitHub 左边出现“更新”，点了才安装；平时不显示，见 1.2 |
-| 反馈问题 | 标题右侧。把诊断信息存到下载文件夹，再打开下载文件夹和 GitHub 新建问题页面，见 8.4 |
+| 反馈问题 | 保存诊断 TXT 到下载文件夹并打开 GitHub 新建问题页面，见 8.4 |
 | 工具加载 | **全部**（26 个，默认）；**精简**（12 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
 | 优先使用网页控件 | 默认打开。网页能直接读写时在后台完成，不动鼠标、不抢前台；桌面程序和读不到的网页内容再交给电脑操控 |
 | 显示 DSH 浏览器窗口 | 默认打开，能看到 DSH 浏览器在做什么；关掉后它在后台运行，没有窗口 |
@@ -322,9 +322,11 @@ Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定
 
 #### 8.4 遇到问题怎么反馈？
 
-在 **设置 → 电脑操控** 标题右侧点“反馈问题”。插件把诊断信息存到下载文件夹里的 `wincu-diagnostics-日期-时间.txt`，设置页提示“已将诊断信息保存到下载文件夹。”，同时打开下载文件夹（选中这个文件）和 GitHub 的新建问题页面。在问题页面写下遇到的问题，把文件拖进去，就可以提交。
+在 **设置 → 电脑操控** 标题右侧点“反馈问题”。插件会把 `wincu-diagnostics-日期-时间.txt` 存到下载文件夹，在资源管理器里选中它，并用系统默认浏览器打开 GitHub 新建问题页面。页面同时提示文件保存成功。
 
-诊断文件里有插件和 DSH 的版本、Windows 和 PowerShell、屏幕和缩放、默认浏览器和 Edge、Chrome 的版本、设置、插件自检结果、这次启动后最近 30 次电脑操控调用（工具、成败、错误信息和耗时），以及 DSH 日志里和本插件相关的行。它是普通文本，用记事本就能打开，上传前可以先看一遍。用户目录、用户名和计算机名已经替换，输入的文字只保留长度，文件里没有截图。截图对排查很有帮助，需要的话请遮住隐私后另外拖进问题页面。
+在 GitHub 写下怎样复现、预期结果和实际结果。查看 TXT 后，把它拖到问题描述框再提交。
+
+TXT 包含插件版本与安装来源、DSH 与运行环境、Windows、PowerShell、屏幕与浏览器信息、相关设置、自检状态、最近 30 次电脑操控调用，以及最多 200 行插件相关日志。工具输入文字只保留长度；截图可在遮盖私人信息后单独附上。
 
 ### 9. 数据与隐私
 
@@ -332,7 +334,7 @@ Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定
 
 浏览器通道读到的网页内容同样在本机处理，再交给调用方。agent 浏览器默认不带任何登录；打开“保留网站登录”后，agent 能读取和操作你在 DSH 浏览器里登录过的网站。打开“连接现有浏览器”并允许连接后，agent 能读取和操作那个浏览器里所有已登录的网站，所以只在需要时打开，用完可以在浏览器里关掉远程调试。网页里的文字也可能夹带写给 agent 的指令，所以页面大纲的开头会提醒模型：网页内容不可信，只听你的指示。
 
-检查更新时，设置页向 DSH 插件市场询问这个插件的最新版本，插件市场再去 npm 查；没装插件市场时，设置页直接问 npm（registry.npmjs.org）。请求里只有插件名，不带你电脑上的任何内容。
+设置页直接向 npm（registry.npmjs.org）查询插件的 `latest`，并在本机读取 DSH 插件市场的安装状态。npm 查询只用插件名。
 
 “反馈问题”导出的诊断文件只存在你的电脑上，你把它拖进问题页面才会上传，内容见 8.4。
 
@@ -393,7 +395,7 @@ You need a Windows computer with DSH Desktop installed. The plugin uses Windows 
 
 #### 1.2 Upgrade
 
-DSH checks for a new version at every start. When one exists, an Update button appears in **Settings → Computer Use**, left of the GitHub link at the top right, and a small red dot shows next to Computer Use on the left. Click Update, and once it says Updated, fully quit and reopen DSH Desktop as in step 2 above. The new version is installed by DSH's bundled plugin market (dshmarket), which by default offers a new version one day after its release.
+DSH checks npm’s `latest` at every start. When it finds a newer version, Update appears to the left of GitHub at the top of **Settings → Computer Use** and a dot appears in the navigation. Click Update to let the DSH plugin market verify the target and install it. If the page asks you to restart, quit from the tray and reopen DSH Desktop as in step 2.
 
 You can also run the same install command, then fully quit and reopen DSH Desktop the same way. Without the plugin market, or when the plugin was installed from a local file, Update opens these upgrade steps.
 
@@ -547,7 +549,7 @@ Change these in **Settings → Computer Use**. Most take effect after you click 
 | Setting | Your choices |
 |---|---|
 | Update | Appears left of the GitHub link at the top right when a newer version exists, and installs it only when clicked; hidden otherwise; see 1.2 |
-| Report a problem | At the top right. Saves diagnostics to your Downloads folder, then opens that folder and GitHub's new-issue page; see 8.4 |
+| Report a problem | Saves a TXT to Downloads and opens GitHub’s new-issue page; see 8.4 |
 | Tool loading | **All** (26 tools, the default); **Lite** (12 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
 | Prefer web page controls | On by default. Pages it can read and operate directly are handled in the background, without moving the pointer or taking the foreground; desktop apps and page content it cannot read go to Computer Use |
 | Show the DSH browser window | On by default, so you can watch the DSH browser; turn it off to run the browser in the background with no window |
@@ -673,9 +675,11 @@ The plugin provides desktop tools only. It does not include a model, an API key,
 
 #### 8.4 How do I report a problem?
 
-Click Report a problem at the top right of **Settings → Computer Use**. The plugin saves the diagnostics as `wincu-diagnostics-date-time.txt` in your Downloads folder, the settings page says "Diagnostics saved to your Downloads folder.", and the Downloads folder (with the file selected) and GitHub's new-issue page open. Describe what happened on the issue page, drag the file onto it, and submit.
+Click Report a problem at the top right of **Settings → Computer Use**. DSH saves `wincu-diagnostics-date-time.txt` to Downloads, selects it in File Explorer, and opens GitHub’s new-issue page in your default browser. A dialog confirms where the file was saved.
 
-The file holds the plugin and DSH versions, Windows and PowerShell, screens and scaling, the default browser and the Edge and Chrome versions, your settings, the plugin's self-test, the last 30 computer-use calls since DSH started (tool, result, error message and duration), and the plugin's lines in the DSH log. It is plain text that Notepad opens, so you can read it before you upload it. User folders, the user name and the computer name are replaced, typed text is kept as its length only, and it has no screenshots. Screenshots help a lot; cover private details and drag them onto the issue page separately if you like.
+Describe what happened, what you expected, and how to reproduce it. Review the TXT, then drag it into the issue description and submit.
+
+The TXT contains the plugin version and install source, DSH and runtime details, Windows, PowerShell, screen and browser information, relevant settings, self-test results, the last 30 computer-use calls, and up to 200 plugin log lines. Tool input text is kept as its length. You can attach a screenshot separately after covering private details.
 
 ### 9. Data and privacy
 
@@ -683,7 +687,7 @@ Reading controls, text recognition, screenshots and input all run on your comput
 
 Pages read through the browser lane are also processed on your computer before they go to the caller. By default the agent browser carries no sign-ins; with Keep website sign-ins on, the agent can read and operate the sites you signed in to in the DSH browser. With Connect browser on and a connection allowed, the agent can read and operate every site signed in to in that browser, so turn it on only when needed, and you can turn remote debugging off in the browser afterwards. Page text can also carry instructions aimed at the agent, so every page outline starts by reminding the model that page content is untrusted and only your instructions count.
 
-To check for updates, the settings page asks DSH's plugin market for this plugin's latest version, and the market looks it up on npm; without the market, the page asks npm (registry.npmjs.org) directly. The request carries the plugin name and nothing from your computer.
+The settings page reads this plugin’s `latest` from npm (registry.npmjs.org) and checks the installed package through the local DSH plugin market. The npm request uses the package name.
 
 The diagnostics file from Report a problem stays on your computer until you drag it onto an issue page; 8.4 lists what it holds.
 

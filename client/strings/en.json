@@ -255,6 +255,10 @@
   "updateFailed": "Update failed",
   "updateBusy": "Plugin market busy",
   "updateRetry": "Retry",
+  "updateUnconfirmed": "Update status unknown",
+  "updateRecheck": "Confirm version",
+  "updateMarketWaiting": "The plugin market and npm list different versions. Try again later.",
+  "updateNpmUnavailable": "The latest version on npm could not be confirmed. Try again.",
   "updateForce": "Update anyway",
   "updateTooFresh": "The new version is very recent, so the plugin market did not install it yet; choose Update anyway.",
   "updateMismatch": "The installed version is not the new one; try again later.",
@@ -265,6 +269,11 @@
   "reportTitle": "Save diagnostics to your Downloads folder, then open that folder and GitHub's new-issue page",
   "reportRunning": "Exporting…",
   "reportSaved": "Diagnostics saved to your Downloads folder.",
-  "reportFailed": "The diagnostics could not be saved; GitHub's new-issue page is open.",
+  "reportAttach": "Review {file}, then drag it into the description on GitHub.",
+  "reportFindFile": "Find {file} in Downloads, review it, and attach it to your issue on GitHub.",
+  "reportFailed": "The diagnostics could not be saved. You can still describe the problem on GitHub.",
+  "reportUnconfirmed": "The export could not be confirmed. Check your Downloads folder.",
+  "reportBusy": "A diagnostics export is already running.",
+  "reportOpenIssue": "Open a new issue on GitHub",
   "reportOk": "OK"
 }

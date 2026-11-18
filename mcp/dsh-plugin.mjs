@@ -164,8 +164,9 @@ export async function apply(ctx, config) {
     const profiles = ctx.get?.('desktopProfiles');
     let current; try { current = profiles?.current; } catch {}
     let version = 'unknown'; try { version = JSON.parse(readFileSync(path.join(pluginRoot, 'package.json'), 'utf8')).version; } catch {}
-    return exportDiagnostics({ version, settings: desired, calls: callLog.list(), host: current ? `DSH Desktop (profile ${current.name})` : 'DSH',
-      mcpClient: bridgeSupport().version, dshLocale: getLocale(), installSpec: readInstallSpec(pluginRoot, current?.dir), serverPath: fileURLToPath(new URL('./server.mjs', import.meta.url)) });
+    return exportDiagnostics({ version, settings: desired, calls: callLog.list(), host: current ? 'DSH Desktop' : 'DSH',
+      mcpClient: bridgeSupport().version, dshLocale: getLocale(), installSpec: readInstallSpec(pluginRoot, current?.dir),
+      secrets: [runtime.approvalSecret], serverPath: fileURLToPath(new URL('./server.mjs', import.meta.url)) });
   };
   ctx.inject(['webServer'], owner => {
     if (typeof owner.webServer.register === 'function') owner.effect(() => {

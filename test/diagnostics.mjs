@@ -15,6 +15,7 @@ const redact = makeRedactor({ user: 'Alice', host: 'DESK-42', secrets: ['approva
 assert.equal(redact('C:\\Users\\Alice\\AppData\\x.log c:/users/alice/y C:\\Users\\ALICE~1\\Temp\\z'), '%USERPROFILE%\\AppData\\x.log %USERPROFILE%/y %USERPROFILE%\\Temp\\z');
 assert.equal(redact('Alice on DESK-42; Malice and Alice2 stay'), '<user> on <computer>; Malice and Alice2 stay');
 assert.equal(redact('token approval-secret-123456 end'), 'token <secret> end');
+assert.equal(redact('https://example.test/private?q=123 alice@example.test Bearer abc.123 api_key="private data"'), '<url> <email> <secret> api_key=<secret>');
 assert.equal(makeRedactor({ user: 'li', host: '' })('li liang'), 'li liang', 'Names shorter than three characters are left alone');
 
 // A call's shape, never what it typed.
@@ -23,6 +24,7 @@ assert.deepEqual(describeArgs({ text: '我的密码是 hunter2', elementId: 'uia
 assert.deepEqual(describeArgs('{"steps":[{"action":"type_text","arguments":{"text":"abc"}}],"browserTab":"t1a2b"}'),
   { steps: [{ action: 'type_text', arguments: { text: '<3 chars>' } }], browserTab: 't1a2b' });
 assert.deepEqual(describeArgs({ keys: ['ctrl', 'v'] }), { keys: '<2 items>' });
+assert.deepEqual(describeArgs({ unexpectedText: 'private', nested: { clipboardText: 'too' } }), { unexpectedText: '<7 chars>', nested: { clipboardText: '<3 chars>' } });
 
 // The call log keeps desktop calls only, the last thirty, errors redacted.
 const handlers = [];
@@ -68,9 +70,9 @@ try {
   const out = path.join(root, 'Downloads');
   const env = { ...process.env, WCU_APPROVAL_SECRET: 'approval-secret-abcdef', __COMPAT_LAYER: 'RunAsInvoker' };
   const result = await exportDiagnostics({
-    version: '0.6.1', settings: { ...facts.settings, indicatorText: 'DSH 正在控制电脑' }, calls: log.list().slice(-2), host: facts.host, mcpClient: facts.mcpClient, dshLocale: 'zh-CN',
+    version: '0.6.1', settings: { ...facts.settings, indicatorText: 'DSH 正在控制电脑', unknownField: 'private' }, calls: log.list().slice(-2), host: 'DSH Desktop', mcpClient: facts.mcpClient, dshLocale: 'zh-CN',
     installSpec: `file:${os.homedir()}\\x.tgz`, env, outDir: out, at: new Date(2026, 10, 18, 2, 3, 4),
-    selfTest: { ok: true, backend: { powershell: '5.1' } }, facts: { system: { windows: facts.windows, powershell: '5.1', screens: facts.screens }, browsers: facts.browsers, logs: [`dsh.log: windows-computer-use ready at ${os.homedir()}\\a approval-secret-abcdef`] },
+    selfTest: { ok: true, backend: { powershell: '5.1' } }, facts: { system: { windows: facts.windows, powershell: '5.1', screens: facts.screens, desktopVersions: ['2.0.18'] }, browsers: facts.browsers, logs: [`dsh.log: windows-computer-use ready at ${os.homedir()}\\a approval-secret-abcdef`] },
   });
   assert.equal(result.fileName, 'wincu-diagnostics-20261118-020304.txt');
   assert.equal(path.dirname(result.file), out);
@@ -82,15 +84,19 @@ try {
   assert.ok(saved.includes('"indicatorText": "<10 chars>"'), 'The banner text is kept as a length');
   assert.ok(saved.includes('__COMPAT_LAYER: RunAsInvoker'));
   assert.ok(saved.includes('Windows: Windows 11 Pro 25H2'));
+  assert.ok(saved.includes('DSH Desktop 2.0.18'));
+  assert.ok(saved.includes('0.6.1 (local)'));
+  assert.ok(!saved.includes('unknownField') && !saved.includes('x.tgz'));
 
   // Two windows: Explorer on the file, and the new-issue page through
   // ShellExecute (explorer.exe opened Documents for a URL).
   const runs = [];
-  const shown = revealAndOpen(result, (command, args) => runs.push([path.basename(command).toLowerCase(), ...args]));
+  const shown = await revealAndOpen(result, (command, args) => { runs.push([path.basename(command).toLowerCase(), ...args]); return true; });
   if (process.platform === 'win32') {
-    assert.equal(shown, true);
+    assert.deepEqual(shown, { folderOpened: true, issueOpened: true });
     assert.deepEqual(runs, [['explorer.exe', '/select,', result.file], ['rundll32.exe', 'url.dll,FileProtocolHandler', ISSUE_URL]]);
-  } else assert.deepEqual([shown, runs], [false, []]);
+    assert.deepEqual(await revealAndOpen(result, cmd => !cmd.endsWith('explorer.exe')), { folderOpened: false, issueOpened: true });
+  } else assert.deepEqual([shown, runs], [{ folderOpened: false, issueOpened: false }, []]);
 
   // The profile that lists the plugin is found from pnpm's nested folder.
   const profile = path.join(root, 'profile'), nested = path.join(profile, 'node_modules', '.pnpm', 'dsh-computer-use-win@file+x', 'node_modules', 'dsh-computer-use-win');
@@ -129,20 +135,20 @@ assert.equal(trustedRequest({ headers: { 'x-wcu-request': '1' } }), true, 'A pro
 
 const response = () => { const r = { status: 0, headers: {}, body: '' }; r.writeHead = (status, headers) => { r.status = status; r.headers = headers ?? {}; }; r.end = body => { r.body = body ?? ''; }; return r; };
 let collected = 0, opened = [];
-const handler = createDiagnosticsHandler({ collect: async () => { collected++; await new Promise(resolve => setTimeout(resolve, 30)); return { file: 'C:/x/wincu.txt', fileName: 'wincu.txt' }; }, open: result => { opened.push(result.fileName); return true; } });
+const handler = createDiagnosticsHandler({ collect: async () => { collected++; await new Promise(resolve => setTimeout(resolve, 30)); return { file: 'C:/x/wincu.txt', fileName: 'wincu.txt' }; }, open: result => { opened.push(result.fileName); return { folderOpened: true, issueOpened: true }; } });
 let r = response(); await handler({ method: 'GET', headers: page }, r); assert.equal(r.status, 405);
 r = response(); await handler({ method: 'POST', headers: { ...page, 'x-wcu-request': undefined } }, r); assert.equal(r.status, 403); assert.equal(collected, 0);
 const [a, b] = [response(), response()];
 await Promise.all([handler({ method: 'POST', headers: page }, a), handler({ method: 'POST', headers: page }, b)]);
 assert.deepEqual([a.status, b.status].sort(), [200, 409], 'One export at a time');
 const ok = JSON.parse([a, b].find(x => x.status === 200).body);
-assert.deepEqual(ok, { ok: true, fileName: 'wincu.txt', issueUrl: ISSUE_URL, opened: true });
+assert.deepEqual(ok, { ok: true, fileName: 'wincu.txt', folderOpened: true, issueOpened: true });
 assert.deepEqual(opened, ['wincu.txt']);
-const failing = createDiagnosticsHandler({ collect: async () => { throw new Error('disk full at C:\\Users\\Alice'); } });
+const failing = createDiagnosticsHandler({ collect: async () => { throw new Error('disk full at C:\\Users\\Alice'); }, open: ({ file }) => { assert.equal(file, undefined); return { folderOpened: false, issueOpened: true }; } });
 r = response(); await failing({ method: 'POST', headers: page }, r);
-assert.equal(r.status, 500); assert.equal(JSON.parse(r.body).ok, false);
-const notWindows = createDiagnosticsHandler({ collect: async () => ({ fileName: 'f.txt' }), open: () => false });
+assert.equal(r.status, 500); assert.deepEqual(JSON.parse(r.body), { ok: false, folderOpened: false, issueOpened: true });
+const notWindows = createDiagnosticsHandler({ collect: async () => ({ fileName: 'f.txt' }), open: () => ({ folderOpened: false, issueOpened: false }) });
 r = response(); await notWindows({ method: 'POST', headers: page }, r);
-assert.equal(JSON.parse(r.body).opened, false, 'The page opens the issue page itself when the plugin could not');
+assert.equal(JSON.parse(r.body).issueOpened, false, 'The page can offer the issue link when the plugin could not open it');
 
 console.log(JSON.stringify({ passed: true, redaction: true, callLog: true, textFile: true, windows: true, export: true, route: true }));
