@@ -319,21 +319,33 @@ export async function exportDiagnostics({ version, settings = {}, calls = [], ho
   return { file, fileName };
 }
 
-const launch = (command, args) => new Promise(resolve => {
-  const child = spawn(command, args, { detached: true, stdio: 'ignore' });
-  child.once('error', () => resolve(false));
-  child.once('spawn', () => { child.unref(); resolve(true); });
-});
+async function launch(command, args, { waitForExit = false } = {}) {
+  if (waitForExit) return !(await runFile(command, args, { timeout: 10000 })).error;
+  return new Promise(resolve => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+    child.once('error', () => resolve(false));
+    child.once('spawn', () => { child.unref(); resolve(true); });
+  });
+}
+
+// ShellExecute uses the registered HTTPS handler, including an already-open
+// browser. The wrapper reports an error if Windows rejects the URL request.
+const issueOpenScript = `
+$ErrorActionPreference='Stop'
+$start=[System.Diagnostics.ProcessStartInfo]::new()
+$start.FileName='${ISSUE_URL}'
+$start.UseShellExecute=$true
+$start.WindowStyle=[System.Diagnostics.ProcessWindowStyle]::Normal
+[void][System.Diagnostics.Process]::Start($start)
+`;
 
 // Two windows and no more: File Explorer on the Downloads folder with the file
-// selected, and the default browser on the new-issue page. The page goes
-// through ShellExecute (url.dll, as Go's pkg/browser does): explorer.exe given
-// a URL with a query opened its default folder, Documents, and no browser.
+// selected, and the default browser on the new-issue page.
 export async function revealAndOpen({ file }, run = launch) {
   if (process.platform !== 'win32') return { folderOpened: false, issueOpened: false };
-  const opened = (command, args) => Promise.resolve().then(() => run(command, args)).catch(() => false);
+  const opened = (command, args, options) => Promise.resolve().then(() => run(command, args, options)).catch(() => false);
   const folderOpened = Boolean(file) && await opened(path.join(windowsDir(), 'explorer.exe'), ['/select,', file]);
-  const issueOpened = await opened(path.join(windowsDir(), 'System32', 'rundll32.exe'), ['url.dll,FileProtocolHandler', ISSUE_URL]);
+  const issueOpened = await opened(powershellPath(), ['-NoProfile', '-NonInteractive', '-Command', issueOpenScript], { waitForExit: true });
   return { folderOpened, issueOpened };
 }
 

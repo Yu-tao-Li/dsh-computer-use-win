@@ -92,14 +92,20 @@ try {
   assert.ok(saved.includes('0.6.1 (local)'));
   assert.ok(!saved.includes('unknownField') && !saved.includes('x.tgz'));
 
-  // Two windows: Explorer on the file, and the new-issue page through
-  // ShellExecute (explorer.exe opened Documents for a URL).
+  // Explorer selects the TXT. The browser launcher reports ShellExecute's
+  // result rather than treating the helper process starting as success.
   const runs = [];
-  const shown = await revealAndOpen(result, (command, args) => { runs.push([path.basename(command).toLowerCase(), ...args]); return true; });
+  const shown = await revealAndOpen(result, (command, args, options) => { runs.push([path.basename(command).toLowerCase(),args,options]); return true; });
   if (process.platform === 'win32') {
     assert.deepEqual(shown, { folderOpened: true, issueOpened: true });
-    assert.deepEqual(runs, [['explorer.exe', '/select,', result.file], ['rundll32.exe', 'url.dll,FileProtocolHandler', ISSUE_URL]]);
+    assert.equal(runs.length,2);
+    assert.deepEqual(runs[0], ['explorer.exe', ['/select,', result.file], undefined]);
+    assert.equal(runs[1][0], 'powershell.exe');
+    assert.deepEqual(runs[1][1].slice(0,3), ['-NoProfile', '-NonInteractive', '-Command']);
+    assert.ok(runs[1][1][3].includes(ISSUE_URL) && runs[1][1][3].includes('UseShellExecute=$true'));
+    assert.deepEqual(runs[1][2], {waitForExit:true});
     assert.deepEqual(await revealAndOpen(result, cmd => !cmd.endsWith('explorer.exe')), { folderOpened: false, issueOpened: true });
+    assert.deepEqual(await revealAndOpen(result, cmd => !cmd.endsWith('powershell.exe')), { folderOpened: true, issueOpened: false });
   } else assert.deepEqual([shown, runs], [{ folderOpened: false, issueOpened: false }, []]);
 
   // The profile that lists the plugin is found from pnpm's nested folder.
