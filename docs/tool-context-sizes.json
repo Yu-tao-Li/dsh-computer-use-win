@@ -1,5 +1,5 @@
 {
-  "version": "0.6.0",
+  "version": "0.6.1",
   "measurement": "JSON.stringify({tools: tools/list.tools}); instructions measured separately; no token estimate",
   "modes": [
     {

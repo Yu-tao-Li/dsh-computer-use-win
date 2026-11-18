@@ -39,6 +39,19 @@ const CLOSE_MS = 3000;
 // The process id of the server that runs the browser of a kept profile.
 const OWNER_FILE = 'dsh-server-pid';
 const LEASE_PREFIX = 'dsh-client-';
+// A process that runs under a Windows compatibility layer passes
+// __COMPAT_LAYER on to every process it starts, and Edge relaunches itself
+// without the layer: the first process exits 0 about 50 ms after the start,
+// and the new one lacks the DevTools pipe, so every start of the DSH browser
+// failed (issue #84, Edge 157). The browser starts without the variable, and
+// the switch keeps Edge from relaunching for a layer applied any other way
+// (Playwright passes the same switch); other browsers ignore it.
+const NO_COMPAT_RELAUNCH = '--edge-skip-compat-layer-relaunch';
+export function browserEnv(env = process.env) {
+  const clean = { ...env };
+  for (const key of Object.keys(clean)) if (key.toUpperCase() === '__COMPAT_LAYER') delete clean[key];
+  return clean;
+}
 
 // Serialize starting/stopping a kept profile across MCP processes. Chromium's
 // singleton prevents two browsers, but does not serialize our port/owner files.
@@ -144,6 +157,7 @@ async function hostKeptProfile(configFile) {
 
   const child = spawn(executablePath, args, {
     stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'],
+    env: browserEnv(),
     windowsHide: true,
     detached: false,
   });
@@ -1168,6 +1182,7 @@ export class BrowserLane {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-search-engine-choice-screen',
+      NO_COMPAT_RELAUNCH,
       '--disable-sync',
       '--disable-extensions',
       '--mute-audio',
@@ -1240,6 +1255,7 @@ export class BrowserLane {
     }
     const child = this.agentChild = spawn(executable.path, launchArgs, {
       stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'],
+      env: browserEnv(),
       windowsHide: true,
       detached: false,
     });
