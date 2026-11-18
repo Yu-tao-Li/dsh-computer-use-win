@@ -18,6 +18,12 @@ await writeFile(path.join(root,'scripts/windows-uia.ps1'),`param([switch]$Persis
   $result=@{id=$r.id;ok=$true;action=$r.action;args=$r.args}
   if($r.action -eq 'wait'){Start-Sleep -Milliseconds $r.args.milliseconds}
   if($r.action -eq 'keypress'){$result.deliveredTo=@{title='Fixture';via=$(if($r.args.keys[0] -eq 'f2'){'front window'}else{'window target'})}}
+  if($r.action -eq 'type_text'){
+    $result.deliveredTo=@{title='Fixture';via='window target'}
+    $result.verified=($r.args.text -eq 'observed')
+    $result.verification=if($result.verified){'observed'}else{'unconfirmed'}
+    if(-not $result.verified){$result.note='Could not verify the edited field'}
+  }
   if($r.action -eq 'tree' -or $r.action -eq 'snapshot'){$result.nodeCount=6;$result.tree=@{name='Fixture'}}
   if($r.action -eq 'find') {
     if($r.args.query -eq 'stall'){Start-Sleep -Seconds 10}
@@ -31,7 +37,7 @@ await writeFile(path.join(root,'scripts/windows-uia.ps1'),`param([switch]$Persis
   [Console]::WriteLine(($result | ConvertTo-Json -Depth 20 -Compress))
 }
 `);
-const client=new McpTestClient(process.execPath,[path.join(root,'mcp/server.mjs')],{env:{...process.env,WINDOWS_CU_POWERSHELL:process.env.WINDOWS_CU_POWERSHELL||'powershell.exe'}});
+const client=new McpTestClient(process.execPath,[path.join(root,'mcp/server.mjs')],{env:{...process.env,NODE_ENV:'test',WCU_TEST_NO_TAKEOVER:'1',WINDOWS_CU_POWERSHELL:process.env.WINDOWS_CU_POWERSHELL||'powershell.exe'}});
 const call=(name,args={})=>client.call('windows_computer_use_'+name,args);
 const data=r=>JSON.parse(r.content.find(c=>c.type==='text').text);
 try{
@@ -46,9 +52,11 @@ try{
   assert.equal((await readFile(path.join(root,'started.txt'),'utf8')).trim().split('\n').length,1);
   const hit=data(await call('find',{query:'visible'}));
   assert.equal(hit.source,'uia+ocr');assert.equal(hit.results[0].source,'ocr');assert.equal(hit.results[0].x,140);assert.equal(hit.results[0].id,undefined);assert.equal(hit.ocr.args.resolveControl,false);
-  const miss=data(await call('find',{query:'search'}));assert.equal(miss.results.length,0);assert.equal(miss.ocr.lines[0].text,'visible placeholder');
-  assert.equal(data(await call('find',{query:'visible',ocrFallback:false})).ocr,undefined);
-  assert.equal(data(await call('find',{query:'visible',controlType:'Edit'})).ocr,undefined);
+  assert.match(hit.hint,/OCR fallback found visible text/);
+  const miss=data(await call('find',{query:'search'}));assert.equal(miss.results.length,0);assert.equal(miss.ocr.lines[0].text,'visible placeholder');assert.match(miss.hint,/no literal match/);
+  const optedOut=data(await call('find',{query:'visible',ocrFallback:false}));assert.equal(optedOut.ocr,undefined);assert.equal(optedOut.ocrSkipped,undefined);
+  const typedSearch=data(await call('find',{query:'visible',controlType:'Edit'}));
+  assert.equal(typedSearch.ocr,undefined);assert.equal(typedSearch.ocrSkipped,'controlType');assert.match(typedSearch.hint,/skipped because controlType/);
   const snapshot=await call('snapshot',{includeScreenshot:false});assert.ok(!snapshot.content[0].text.includes('\n'));assert.match(data(snapshot).hint,/sparse/);
   const timed=await call('find',{query:'stall',treeTimeoutMs:100});assert.equal(timed.isError,true);assert.equal(data(timed).truncationReason,'backendTimeout');assert.equal(timed.content[1].type,'image');
   assert.equal((await call('wait',{milliseconds:1})).isError,undefined);
@@ -56,6 +64,8 @@ try{
   // Issue #82: keys that went to whatever window was in front are not "sent".
   const guessed=data(await call('keypress',{keys:['f2']}));assert.equal(guessed.verification,'unconfirmed');assert.match(guessed.verificationNote,/window in front/);assert.equal(guessed.deliveredTo.via,'front window');
   const aimed=data(await call('keypress',{keys:['f3'],nativeWindowHandle:42}));assert.equal(aimed.verification,'sent');assert.equal(aimed.deliveredTo.via,'window target');
+  const verified=data(await call('type_text',{text:'observed',method:'sendinput',nativeWindowHandle:42}));assert.equal(verified.verification,'observed');assert.match(verified.verificationNote,/contained the expected text/);
+  const unverified=data(await call('type_text',{text:'other',method:'sendinput',nativeWindowHandle:42}));assert.equal(unverified.verification,'unconfirmed');assert.match(unverified.verificationNote,/Could not verify/);
   console.log('PASS schema/default validation before worker launch, queued deadlines, OCR hit/miss provenance, explicit opt-out, compact JSON, timed-out UIA screenshot, worker recovery and key delivery verification');
 }finally{
   client.child.stdin.end();const timer=setTimeout(()=>client.child.kill(),5000);

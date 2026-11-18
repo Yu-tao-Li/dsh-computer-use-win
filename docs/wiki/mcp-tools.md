@@ -111,7 +111,7 @@ List top-level windows visible to Windows UI Automation, in Z order. Minimized w
 
 ### find
 
-Find UIA elements by name, automation id, class, value or type. When UIA is sparse or incomplete and no match is found, automatically read visible text with OCR. OCR candidates have SCREEN coordinates and source:'ocr', not UIA element ids. If the literal query misses, inspect ocr.lines and reformulate using the visible text (a search box may say '大家都在搜').
+Find UIA elements by name, automation id, class, value or type. When UIA is sparse or incomplete and no match is found, the default OCR fallback reads visible text. If a controlType was requested, ocrSkipped:'controlType' explains why the search kept the UIA type filter. OCR candidates have SCREEN coordinates and source:'ocr', not UIA element ids. If the literal query misses, inspect ocr.lines and reformulate using the visible text (a search box may say '大家都在搜').
 
 | Argument | Type | Default / bounds |
 |---|---|---|
@@ -125,7 +125,7 @@ Find UIA elements by name, automation id, class, value or type. When UIA is spar
 | includeOffscreen | boolean | default: false |
 | treeTimeoutMs | integer | default: 5000; min: 100; max: 30000 |
 | controlType | string |  |
-| ocrFallback | boolean | default: true |
+| ocrFallback | boolean | default: true; only runs without controlType |
 | maxDepth | integer | default: 8; min: 0; max: 12 |
 | maxNodes | integer | default: 1200; min: 1; max: 5000 |
 | maxResults | integer | default: 25; min: 1; max: 200 |
@@ -232,7 +232,9 @@ Scroll at a screen coordinate or an element. An element scrolls in the backgroun
 
 ### type_text
 
-Type text into the focused control of the target (or active) window. method:'auto' (default) = a focused Win32 edit takes the text in the background (EM_REPLACESEL at the caret: no clipboard, keyboard or foreground; text with line breaks is pasted instead); any other control gets a clipboard paste with the window borrowed for it (reliable for CJK; the clipboard is restored and the paste kept out of clipboard history); method:'clipboard' always pastes; method:'sendinput' sends each character as a KEYEVENTF_UNICODE SendInput event (no clipboard, best for ASCII/short text); method:'background' posts WM_CHAR to the control with the keyboard focus in the target window — no clipboard, no foreground steal; checked on Win32 edits, unverified elsewhere, refused when nothing in the window has the focus. After a background write, or with a window target and focusMode:'main', the result includes verifyValue (the text control's value after typing, truncated to 200 chars).
+Type text into the focused control of the target (or active) window. method:'auto' (default) types into a focused Win32 edit in the background using EM_REPLACESEL. Other controls and text with line breaks use clipboard paste. method:'clipboard' always pastes. method:'background' posts WM_CHAR to the focused control of the specified window. Background typing does not borrow the foreground. Some methods can include verifyValue, truncated to 200 characters.
+
+method:'sendinput' queues Unicode keystrokes without using the clipboard. For a plain Win32 edit it checks the expected value before returning the foreground. A confirmed edit reports verification:'observed'. Password fields and other controls without safe readback report verification:'unconfirmed'. If the complete text could not be written to a readable edit, the call reports INPUT_TEXT_INCOMPLETE. Inspect the field before retrying because a prefix may already have been entered.
 
 | Argument | Type | Default / bounds |
 |---|---|---|

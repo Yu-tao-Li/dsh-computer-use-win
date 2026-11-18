@@ -1,13 +1,14 @@
 ﻿# Input lease behavior is exercised across real processes in input-mutex.mjs.
 function Enter-DesktopInput { return $null }
 function Exit-DesktopInput { param($Lease) }
+function Test-Failsafe { return $true }
 # Real guard/action bodies with deterministic windows and UIA. No user input.
 $ErrorActionPreference = 'Stop'
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/windows-uia.ps1'), [Text.Encoding]::UTF8)
 $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Backend does not parse'}
-foreach($name in @('Get-Prop','Invoke-Safe','Test-TargetMatch','Select-TargetWindow','Assert-InputProcess','Assert-NativeInputTarget','Test-InputWindow','Assert-InFront','Assert-PointOnTarget','Assert-ElementFocus','Assert-ElementPoint','Confirm-ElementPoint','Register-ObservedElement','Resolve-Element','Invoke-Action')) {
+foreach($name in @('Get-Prop','Invoke-Safe','Test-TargetMatch','Select-TargetWindow','Assert-InputProcess','Assert-NativeInputTarget','Test-InputWindow','Assert-InFront','Assert-PointOnTarget','Assert-ElementFocus','Assert-ElementPoint','Confirm-ElementPoint','Register-ObservedElement','Resolve-Element','Get-SendInputEdit','Wait-SendInputEdit','Invoke-Action')) {
   $f=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
   $body=$f.Extent.Text.Replace('System.Windows.Automation.AutomationElement','Fixture.Element').Replace('System.Windows.Automation.TreeWalker','Fixture.Walker').Replace('System.Windows.Point','Fixture.Point').Replace('System.Windows.Forms','Fixture.Forms')
   . ([scriptblock]::Create($body))
@@ -17,6 +18,11 @@ using System; using System.Collections.Generic; using System.Text;
 public static class WindowsComputerUseNative {
  public static bool SendKeyChord(string[] keys){Fixture.Forms.SendKeys.SendWait(keys.Length==2&&keys[0]=="ctrl"?"^"+keys[1]:keys[keys.Length-1]);return true;}
  public static long Front=200,Hit=200;
+ public static long Focus=190;
+ public static bool EditPassword;
+ public static string EditBefore;
+ public static Queue<string> EditReads=new Queue<string>();
+ public const uint WM_GETTEXTLENGTH=0x000E;
  public static Dictionary<long,long> Owners=new Dictionary<long,long>();
  public static List<long> Popups=new List<long>(),Hidden=new List<long>();
  public static bool IsWindowVisible(IntPtr h){return !Hidden.Contains(h.ToInt64());}
@@ -26,7 +32,15 @@ public static class WindowsComputerUseNative {
  public static IntPtr GetWindow(IntPtr h,uint command){long owner;return new IntPtr(Owners.TryGetValue(h.ToInt64(),out owner)?owner:0);}
  public static long[] VisiblePopups(uint pid){return Popups.ToArray();}
  public static int GetWindowText(IntPtr h,StringBuilder b,int n){return 0;}
- public static int GetClassName(IntPtr h,StringBuilder b,int n){return 0;}
+ public static int GetClassName(IntPtr h,StringBuilder b,int n){if(h.ToInt64()!=190)return 0;b.Append("Edit");return 4;}
+ public static int GetWindowLong(IntPtr h,int index){return EditPassword?0x20:0;}
+ public static IntPtr FocusedWindow(IntPtr h){return new IntPtr(Focus);}
+ public static string ReadEditText(IntPtr h,int capacity){return EditReads.Count!=0?EditReads.Dequeue():EditBefore;}
+ public static int[] ReadEditSelection(IntPtr h){return new int[]{2,4};}
+ public static IntPtr SendMessageTimeout(IntPtr h,uint msg,UIntPtr w,IntPtr l,uint flags,uint timeout,out UIntPtr result) {
+   result=msg==WM_GETTEXTLENGTH?new UIntPtr((uint)EditBefore.Length):UIntPtr.Zero;
+   return new IntPtr(1);
+ }
 }
 namespace Fixture {
  public struct Point {public double X,Y;public Point(double x,double y){X=x;Y=y;}}
@@ -65,6 +79,11 @@ Expect-Error {Assert-NativeInputTarget 0} 'INPUT_TARGET_UNAVAILABLE'
 $env:WCU_HOST_PID='999999';Assert-NativeInputTarget 200
 Expect-Error {Assert-InputProcess $PID} 'HOST_INPUT_DENIED'
 $env:WCU_HOST_PID=''
+function Get-Process { param($Id,$ErrorAction) if ($Id -eq 3) { throw 'Process exited' }; [pscustomobject]@{Path=$null} }
+$env:WCU_HOST_EXECUTABLE='C:\fixture\dsh.exe'
+Expect-Error {Assert-InputProcess 2} 'INPUT_TARGET_ACCESS_UNCONFIRMED:.+administrator.+No input was sent'
+Expect-Error {Assert-InputProcess 3} 'INPUT_TARGET_UNAVAILABLE:.+process.+No input was sent'
+$env:WCU_HOST_EXECUTABLE=''
 Assert-Equal (Test-InputWindow 200 200 $state) $true
 Assert-Equal (Test-InputWindow 201 200 $state) $false
 [WindowsComputerUseNative]::Owners[202]=200
@@ -83,6 +102,22 @@ Expect-Error {Assert-InFront $state} 'no longer in front'
 [WindowsComputerUseNative]::Hit=201
 Expect-Error {Assert-PointOnTarget 10 20 200 $state} 'POINT_COVERED'
 [WindowsComputerUseNative]::Front=200;[WindowsComputerUseNative]::Hit=200
+
+$script:NativeEditClass='^Edit$'
+[WindowsComputerUseNative]::EditBefore='ab12cd'
+$edit=Get-SendInputEdit ([IntPtr]190) 'XYZ'
+Assert-Equal $edit.expected 'abXYZcd'
+[WindowsComputerUseNative]::EditReads.Enqueue('abXcd')
+[WindowsComputerUseNative]::EditReads.Enqueue('abXYZcd')
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit) $true
+[WindowsComputerUseNative]::EditBefore='abXcd'
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit) $false
+[WindowsComputerUseNative]::Focus=191
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit) $null
+[WindowsComputerUseNative]::Focus=190
+[WindowsComputerUseNative]::EditPassword=$true
+Assert-Equal (Get-SendInputEdit ([IntPtr]190) 'XYZ') $null
+[WindowsComputerUseNative]::EditPassword=$false
 
 function Get-NativeWindowList {param($IncludeInvisible,$MaxWindows) return $script:Windows}
 $script:Windows=@(
@@ -147,7 +182,6 @@ function Resolve-Element {param($Id,$InputObject) return $script:Element}
 function Set-ElementValue {param($Element,$Value) return $null}
 function Add-BackgroundReport {param($Result)}
 function Assert-InputAllowed {param($What)}
-function Test-Failsafe {return $true}
 function Get-ElementWindow {param($Element) return 200}
 function Start-Input {param($InputObject,$Hwnd) return @{target=200;procId=2;popups=@(210)}}
 function Complete-Input {param($State,$Result) $script:Cleanups++}

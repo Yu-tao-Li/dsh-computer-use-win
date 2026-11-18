@@ -16,6 +16,17 @@ assert.equal(redact('"C:\\Users\\Alice\\AppData\\x.log" "c:/users/alice/y" "C:\\
 assert.equal(redact('ENOENT: D:\\Private projects\\name\\notes.txt\nRead \\'+ '\\server\\shared folder\\secret.txt'), 'ENOENT: <path>\nRead <path>');
 assert.equal(redact('Cookie: sid=SAMPLE-1; session=SAMPLE-2\nSet-Cookie: key=SAMPLE-3; SameSite=Lax\nProxy-Authorization: Basic SAMPLE-4'), 'Cookie: <secret>\nSet-Cookie: <secret>\nProxy-Authorization: <secret>');
 assert.deepEqual(JSON.parse(redact('{"Cookie":"sid=SAMPLE-1; session=SAMPLE-2","status":403}')), {Cookie:'<secret>',status:403});
+const sensitiveLogs = [
+  JSON.stringify({ headers: { 'Set-Cookie': ['sid=fixture-private-array', 'session=fixture-private-array2'] }, status: 403 }),
+  JSON.stringify({ message: JSON.stringify({ Authorization: { value: 'fixture-private-nested' } }) }),
+  JSON.stringify({ headers: [['Cookie', 'sid=fixture-private-pair'], ['Accept', 'text/plain']] }),
+  JSON.stringify({ headers: [{ name: 'Proxy-Authorization', value: 'fixture-private-header-object' }] }),
+  JSON.stringify({ password: ['fixture-private-multiline'] }, null, 2),
+  'Authorization: Basic fold\r\n  fixture-private-header-folded',
+  String.raw`wincu: {"message":"Read D:\u005cPrivate folder\u005cfixture-private-path.txt"}`,
+  String.raw`wincu: {"message":"Read D:\/Private folder\/fixture-private-slash.txt"}`,
+];
+for (const line of sensitiveLogs) assert.doesNotMatch(redact(line), /fixture-private/);
 assert.equal(redact('Alice on DESK-42; Malice and Alice2 stay'), '<user> on <computer>; Malice and Alice2 stay');
 assert.equal(redact('token approval-secret-123456 end'), 'token <secret> end');
 assert.equal(redact('https://example.test/private?q=123 alice@example.test Bearer abc.123 api_key="private data"'), '<url> <email> <secret> api_key=<secret>');
@@ -75,7 +86,7 @@ try {
   const result = await exportDiagnostics({
     version: '0.6.1', settings: { ...facts.settings, indicatorText: 'DSH 正在控制电脑', unknownField: 'private' }, calls: log.list().slice(-2), host: 'DSH Desktop', mcpClient: facts.mcpClient, dshLocale: 'zh-CN',
     installSpec: `file:${os.homedir()}\\x.tgz`, env, outDir: out, at: new Date(2026, 10, 18, 2, 3, 4),
-    selfTest: { ok: true, backend: { powershell: '5.1', error: 'Read failed: D:\\Private project\\record.txt' } }, facts: { system: { windows: facts.windows, powershell: '5.1', screens: facts.screens, desktopVersions: ['2.0.18'] }, browsers: facts.browsers, logs: [`dsh.log: windows-computer-use ready at ${os.homedir()}\\a approval-secret-abcdef`, 'wincu: Cookie: first=fixture-private-a; second=fixture-private-b'] },
+    selfTest: { ok: true, backend: { powershell: '5.1', error: 'Read failed: D:\\Private project\\record.txt' } }, facts: { system: { windows: facts.windows, powershell: '5.1', screens: facts.screens, desktopVersions: ['2.0.18'] }, browsers: facts.browsers, logs: [`dsh.log: windows-computer-use ready at ${os.homedir()}\\a approval-secret-abcdef`, 'wincu: Cookie: first=fixture-private-a; second=fixture-private-b', ...sensitiveLogs] },
   });
   assert.equal(result.fileName, 'wincu-diagnostics-20261118-020304.txt');
   assert.equal(path.dirname(result.file), out);

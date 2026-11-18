@@ -5,8 +5,8 @@
     "helpers":  {
                     "native":  {
                                    "file":  "wcu-native-netfx.dll",
-                                   "sourceHash":  "940e107f4add454d",
-                                   "sha256":  "605c2e859000b6aef72c0b597f16a539b944dde4a50bbe8e1f3a43b6635d4036"
+                                   "sourceHash":  "ba0fee6f29e16d58",
+                                   "sha256":  "582fe3048e3d9e659c03c1c1e24243e923e5fd99a9131f6778f4addf3ab5a1f6"
                                },
                     "ocr":  {
                                 "file":  "wcu-ocr-netfx.dll",

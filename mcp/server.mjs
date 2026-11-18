@@ -215,7 +215,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_find",
-    description: "Find UIA elements by name, automation id, class, value or type. When UIA is sparse or incomplete and no match is found, automatically read visible text with OCR. OCR candidates have SCREEN coordinates and source:'ocr', not UIA element ids. If the literal query misses, inspect ocr.lines and reformulate using the visible text (a search box may say '大家都在搜'). With browserTab, search that page's accessibility outline instead and return page element ids.",
+    description: "Find UIA elements by name, automation id, class, value or type. When UIA is sparse or incomplete and no match is found, read visible text with OCR if ocrFallback is enabled and controlType is unset. OCR cannot verify UIA control types. OCR candidates have SCREEN coordinates and source:'ocr', not UIA element ids. If the literal query misses, inspect ocr.lines and reformulate using the visible text (a search box may say '大家都在搜'). With browserTab, search that page's accessibility outline instead and return page element ids.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -228,7 +228,7 @@ const tools = [
         ...treeViewProperties,
         ...treeBudgetProperties,
         controlType: { type: "string" },
-        ocrFallback: { type: "boolean", default: true, description: "Use OCR after an empty sparse/incomplete UIA search. Disable for UIA-only diagnostics. No input is sent." },
+        ocrFallback: { type: "boolean", default: true, description: "Use OCR after an empty sparse/incomplete UIA search without controlType. Disable for UIA-only diagnostics. No input is sent." },
         maxDepth: { type: "integer", minimum: 0, maximum: 12, default: 8, description: maxDepthDescription },
         maxNodes: { type: "integer", minimum: 1, maximum: 5000, default: 1200 },
         maxResults: { type: "integer", minimum: 1, maximum: 200, default: 25 }
@@ -350,7 +350,7 @@ const tools = [
   },
   {
     name: "windows_computer_use_type_text",
-    description: "Type text into the focused control of the target (or active) window. method:'auto' (default) = a focused Win32 edit takes the text in the background (EM_REPLACESEL at the caret: no clipboard, keyboard or foreground; text with line breaks is pasted instead); any other control gets a clipboard paste with the window borrowed for it (reliable for CJK; the clipboard is restored and the paste kept out of clipboard history); method:'clipboard' always pastes; method:'sendinput' sends each character as a KEYEVENTF_UNICODE SendInput event (no clipboard, best for ASCII/short text); method:'background' posts WM_CHAR to the control with the keyboard focus in the target window — no clipboard, no foreground steal; checked on Win32 edits, unverified elsewhere, refused when nothing in the window has the focus. After a background write, or with a window target and focusMode:'main', the result includes verifyValue (the text control's value after typing, truncated to 200 chars). With browserTab, insert the text at that page's focused field inside the browser: no clipboard, pointer or foreground change.",
+    description: "Type text into the focused control of the target (or active) window. method:'auto' (default) = a focused Win32 edit takes the text in the background (EM_REPLACESEL at the caret: no clipboard, keyboard or foreground; text with line breaks is pasted instead); any other control gets a clipboard paste with the window borrowed for it (reliable for CJK; the clipboard is restored and the paste kept out of clipboard history); method:'clipboard' always pastes; method:'sendinput' sends Unicode key events without the clipboard and checks readable plain Win32 edits before returning the foreground. An unavailable readback returns verification:'unconfirmed'; inspect the field before retrying any unconfirmed write. method:'background' posts WM_CHAR to the control with the keyboard focus in the target window — no clipboard, no foreground steal; checked on Win32 edits, unverified elsewhere, refused when nothing in the window has the focus. Other methods may include verifyValue (the control's value after typing, truncated to 200 chars). With browserTab, insert the text at that page's focused field inside the browser: no clipboard, pointer or foreground change.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -1228,15 +1228,25 @@ async function observeBackend(action, args, request) {
         + "If it is still empty, " + wait;
     }
   }
-  if (action === "find" && args.ocrFallback && !args.controlType && result.results?.length === 0 && (sparse || result.truncated) && result.targetResponsive !== false && !request?.cancelled) {
+  if (action === "find" && args.ocrFallback && result.results?.length === 0 && (sparse || result.truncated) && result.targetResponsive !== false && !request?.cancelled) {
+    if (args.controlType) {
+      result.ocrSkipped = "controlType";
+      result.hint = "OCR fallback was skipped because controlType requires a UI Automation type. Remove controlType to search visible text, or use OCR separately.";
+      return result;
+    }
     try {
       const ocr = await runBackend("ocr", { ...args, resolveControl: false, maxWidth: 0 }, 20000, request);
       result.ocr = ocr;
       result.results = (ocr.matched || []).map(hit => ({ source: "ocr", name: hit.word.text, boundingBox: hit.boundingBox, x: hit.word.x, y: hit.word.y }));
       result.source = "uia+ocr";
+      result.hint = result.results.length
+        ? "OCR fallback found visible text. The matches contain screen coordinates; check the target before acting."
+        : "OCR fallback found no literal match. Inspect ocr.lines for the visible text or check a screenshot.";
+      if (ocr.warning) result.hint += " " + ocr.warning;
     } catch (error) {
       if (request?.cancelled) throw error;
       result.ocrError = error.message;
+      result.hint = "OCR fallback failed. Inspect ocrError or check a screenshot.";
     }
   }
   return result;
@@ -1367,9 +1377,11 @@ async function backendText(action, args, timeoutMs, request) {
     // Keys and text without a window target, before DSH has worked in any
     // window this turn, reach whatever window is in front (issue #82).
     const guessed = result.deliveredTo?.via === "front window";
-    result.verification = guessed || result.moved === false || result.posted === false || result.activated === false ? "unconfirmed" : "sent";
+    result.verification = guessed || result.moved === false || result.posted === false || result.activated === false ? "unconfirmed" : result.verification ?? "sent";
     result.verificationNote = guessed ? "No window target was given and DSH had not worked in a window this turn, so this went to the window in front (deliveredTo). If another window was meant, pass its nativeWindowHandle and check that window."
-      : result.verification === "sent" ? "The action was dispatched. Use wait_for or a fresh observation to verify the expected effect." : "Windows did not confirm dispatch. Inspect the warning and observe the target before retrying.";
+      : result.verification === "observed" ? "The focused edit contained the expected text after input."
+      : result.verification === "sent" ? "The action was dispatched. Use wait_for or a fresh observation to verify the expected effect."
+      : result.note ?? "Windows did not confirm dispatch. Inspect the warning and observe the target before retrying.";
   }
   return imageResult(result, false);
 }

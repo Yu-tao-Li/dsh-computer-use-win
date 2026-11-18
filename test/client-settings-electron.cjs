@@ -548,7 +548,7 @@ app.whenReady().then(async()=>{
   const posts="window.fetchCalls.filter(c=>c.method==='POST'&&c.url==='/dsh-market/api/v1/updates')";
   // Report a problem: the plugin writes the file and opens the Downloads folder
   // and the new-issue page; the page shows a modal dialog saying where the file
-  // went. A link is available when the plugin cannot open the browser.
+  // went. The issue link stays available regardless of the browser launch.
   const ISSUE_PAGE='https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new';
   const reportFileName='wincu-diagnostics-20261118-020304.txt';
   const reportFilePath=path.win32.join('D:\\已重定向的下载目录',reportFileName);
@@ -560,9 +560,9 @@ app.whenReady().then(async()=>{
   const reportCall=await evaluate("window.fetchCalls.filter(c=>c.url==='/dsh-computer-use-win/api/diagnostics').map(c=>({method:c.method,header:c.headers['x-wcu-request'],type:c.headers['content-type']}))");
   assert.deepEqual(reportCall,[{method:'POST',header:'1',type:'application/json'}],'One POST with the plugin header');
   const savedDialog=await evaluate("(()=>{const d=document.querySelector('dialog[data-wincu-report-dialog=saved]'),ok=d.querySelector('button'),box=d.getBoundingClientRect();return {open:d.open,modal:d.matches(':modal'),texts:[...d.querySelectorAll('p')].map(p=>p.textContent),path:d.querySelector('[data-wincu-report-path]')?.textContent,button:ok.textContent,focused:document.activeElement===ok,centered:Math.abs(box.left+box.width/2-document.documentElement.clientWidth/2)<2,idle:!!document.querySelector('[data-wincu-report=idle]')};})()");
-  assert.deepEqual(savedDialog,{open:true,modal:true,texts:['已保存诊断文件',reportFileName,'已打开 GitHub 新建问题页。把文件拖到描述框，写下问题后提交。'],path:reportFilePath,button:'确定',focused:true,centered:true,idle:true},'A modal dialog names the file and shows its full path and GitHub status');
+  assert.deepEqual(savedDialog,{open:true,modal:true,texts:['已保存诊断文件',reportFileName,'请在 GitHub 新建问题页描述问题，并附上此文件。'],path:reportFilePath,button:'确定',focused:true,centered:true,idle:true},'The modal names the file, shows its full path and explains what to attach');
   assert.deepEqual(await evaluate("[...document.querySelectorAll('dialog a')].map(a=>[a.href,a.textContent])"),[[ISSUE_PAGE,'GitHub 新建问题页']],'The page name also links directly to the issue form');
-  assert.deepEqual(await evaluate('window.opened'),[],'The plugin opened the folder and the issue page; the page opens nothing more');
+  assert.deepEqual(await evaluate('window.opened'),[],'The settings UI requests no additional browser launch');
   await evaluate("document.querySelector('dialog[data-wincu-report-dialog=saved] button').click()");
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   const resetReport=async reply=>{await evaluate("window.reportReply="+reply+";window.root.render(React.createElement('span',null,'closed'))");await evaluate("window.renderPage('zh')");await until("!!document.querySelector('[data-wincu-report=idle]')");await evaluate("document.querySelector('[data-wincu-report=idle]').click()");};
@@ -570,13 +570,13 @@ app.whenReady().then(async()=>{
   await until("document.querySelector('dialog[data-wincu-report-dialog=saved]')?.open");
   assert.equal(await evaluate("document.querySelector('dialog a').href"),ISSUE_PAGE,'The exact issue URL is available when launch fails');
   assert.equal(await evaluate("document.querySelector('[data-wincu-report-path]').textContent"),reportFilePath,'The path is available even when neither window opens');
-  assert.equal(await evaluate("document.querySelector('.wcu-dialog-detail').textContent"),'打开 GitHub 新建问题页，把文件拖到描述框，写下问题后提交。');
+  assert.equal(await evaluate("document.querySelector('.wcu-dialog-detail').textContent"),savedDialog.texts[2]);
   win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   await resetReport("{status:500,body:{ok:false,issueOpened:true}}");
   await until("!!document.querySelector('dialog[data-wincu-report-dialog=failed]')");
-  assert.equal(await evaluate("!!document.querySelector('dialog a')"),false,'No extra issue link when it opened despite the failed write');
-  assert.deepEqual(await evaluate("[...document.querySelectorAll('dialog[data-wincu-report-dialog=failed] p')].map(p=>p.textContent)"),['诊断文件未能保存。','已打开 GitHub 新建问题页，你仍可直接描述问题。']);
+  assert.equal(await evaluate("document.querySelector('dialog a').href"),ISSUE_PAGE,'A failed write can still be reported directly');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('dialog[data-wincu-report-dialog=failed] p')].map(p=>p.textContent)"),['诊断文件未能保存。','你仍可在 GitHub 新建问题页描述问题。']);
   await evaluate("document.querySelector('dialog[data-wincu-report-dialog=failed] button').click()");
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   await evaluate("window.fakeFetch=window.baseFetch;void 0");
