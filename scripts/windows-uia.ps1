@@ -2856,10 +2856,11 @@ function Get-ChromiumPageContent {
   $visited = 0
   $queue = New-Object System.Collections.Generic.Queue[object]
   $child = $walker.GetFirstChild($root)
-  while ($null -ne $child -and $queue.Count -lt $MaxNodes) {
+  while ($null -ne $child -and $queue.Count -lt $MaxNodes -and $watch.ElapsedMilliseconds -lt $LimitMs) {
     $queue.Enqueue($child)
     $child = $walker.GetNextSibling($child)
   }
+  if ($null -ne $child) { $facts.truncated = $true }
   while ($queue.Count -gt 0) {
     # Both limits mean the same thing here: the subtree was not read to the end.
     if ($visited -ge $MaxNodes -or $watch.ElapsedMilliseconds -ge $LimitMs) { $facts.truncated = $true; break }
@@ -2877,14 +2878,14 @@ function Get-ChromiumPageContent {
         }
       } catch { }
     }
-    if ($text.Trim()) { $facts.hasText = $true; return $facts }
-    if ($queue.Count -lt $MaxNodes) {
-      $next = $walker.GetFirstChild($element)
-      while ($null -ne $next -and $queue.Count -lt $MaxNodes) {
-        $queue.Enqueue($next)
-        $next = $walker.GetNextSibling($next)
-      }
+    if ($text.Trim()) { return @{ hasText = $true; truncated = $false } }
+    if ($watch.ElapsedMilliseconds -ge $LimitMs) { $facts.truncated = $true; break }
+    $next = $walker.GetFirstChild($element)
+    while ($null -ne $next -and $queue.Count -lt $MaxNodes -and $watch.ElapsedMilliseconds -lt $LimitMs) {
+      $queue.Enqueue($next)
+      $next = $walker.GetNextSibling($next)
     }
+    if ($null -ne $next) { $facts.truncated = $true }
   }
   return $facts
 }

@@ -386,6 +386,34 @@ $quietRenderer.Add($quietRoot)
 $walk = Get-ShippedPageContent -Renderer ([IntPtr]115) -LimitMs 5000
 Assert-Equal $walk.hasText $false 'Page without text has no text'
 Assert-Equal $walk.truncated $false 'Finished walk of a small page is not truncated'
+# A full page-level queue can strand the next sibling outside the walk.
+$wideRenderer = New-Object Fixture.Automation.AutomationElement 2300
+$widePageRoot = New-Object Fixture.Automation.AutomationElement 2301
+$wideRenderer.Add($widePageRoot)
+[Fixture.Automation.AutomationElement]::Handles[[long]118] = $wideRenderer
+for ($i = 1; $i -le 200; $i++) {
+  $node = New-Object Fixture.Automation.AutomationElement (2301 + $i)
+  $node.Cached.Name = ''
+  $widePageRoot.Add($node)
+}
+$walk = Get-ShippedPageContent -Renderer ([IntPtr]118) -LimitMs 5000
+Assert-Equal $walk.hasText $false 'Exactly 200 unnamed siblings have no text'
+Assert-Equal $walk.truncated $false 'Exactly 200 leaf nodes fit within the budget'
+$lateText = New-Object Fixture.Automation.AutomationElement 2502
+$lateText.Cached.Name = 'Text after the node budget'
+$widePageRoot.Add($lateText)
+$walk = Get-ShippedPageContent -Renderer ([IntPtr]118) -LimitMs 5000
+Assert-Equal $walk.hasText $false 'The 201st sibling was outside the budget'
+Assert-Equal $walk.truncated $true 'Unvisited root siblings make a negative result inconclusive'
+$script:PageContentAt=@{'118'=$walk}
+[WindowsComputerUseNative]::Renderers=@([IntPtr]118); $script:PageReadyAt=@{'118'=1}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{})
+Assert-Equal $result.webContent.contentState unknown 'Text after the node budget must not produce empty'
+$widePageRoot.Children[0].Cached.Name = 'Text inside the node budget'
+$walk = Get-ShippedPageContent -Renderer ([IntPtr]118) -LimitMs 5000
+Assert-Equal $walk.hasText $true 'Text inside a wide page is still found'
+Assert-Equal $walk.truncated $false 'A positive text verdict is conclusive'
+[WindowsComputerUseNative]::Renderers=@([IntPtr]113)
 # A renderer with no first child has no page root yet: that is "not built yet",
 # which the caller reports as unknown, not as empty.
 $bareRenderer = New-Object Fixture.Automation.AutomationElement 2201
