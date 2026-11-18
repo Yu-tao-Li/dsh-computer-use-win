@@ -37,6 +37,10 @@ public static class WindowsComputerUseNative {
  public static IntPtr FocusedWindow(IntPtr h){return new IntPtr(Focus);}
  public static string ReadEditText(IntPtr h,int capacity){return EditReads.Count!=0?EditReads.Dequeue():EditBefore;}
  public static int[] ReadEditSelection(IntPtr h){return new int[]{2,4};}
+ // The target thread still holds queued keys while PaintLeft polls remain.
+ public static bool PaintSignal=true;public static int PaintLeft;
+ public static bool RequestPaint(IntPtr h){return PaintSignal;}
+ public static bool PaintPending(IntPtr h){if(PaintLeft<=0)return false;PaintLeft--;return true;}
  public static IntPtr SendMessageTimeout(IntPtr h,uint msg,UIntPtr w,IntPtr l,uint flags,uint timeout,out UIntPtr result) {
    result=msg==WM_GETTEXTLENGTH?new UIntPtr((uint)EditBefore.Length):UIntPtr.Zero;
    return new IntPtr(1);
@@ -107,17 +111,53 @@ $script:NativeEditClass='^Edit$'
 [WindowsComputerUseNative]::EditBefore='ab12cd'
 $edit=Get-SendInputEdit ([IntPtr]190) 'XYZ'
 Assert-Equal $edit.expected 'abXYZcd'
-[WindowsComputerUseNative]::EditReads.Enqueue('abXcd')
-[WindowsComputerUseNative]::EditReads.Enqueue('abXYZcd')
-Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit) $true
-[WindowsComputerUseNative]::EditBefore='abXcd'
-Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit) $false
-[WindowsComputerUseNative]::Focus=191
-Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit) $null
-[WindowsComputerUseNative]::Focus=190
-[WindowsComputerUseNative]::EditPassword=$true
+Assert-Equal $edit.head 'abXYZ'
+Assert-Equal $edit.tail 'cd'
+$native=[WindowsComputerUseNative]
+$native::EditReads.Enqueue('abXcd')
+$native::EditReads.Enqueue('abXYZcd')
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) 'observed'
+# Issue #90: a slow target keeps taking keys after 750 ms. While keys are
+# still queued (repaint pending), slow progress is not mistaken for the end.
+foreach($value in @(@('abXcd')*20+@('abXYcd')*20+@('abXYZcd'))){$native::EditReads.Enqueue($value)}
+$native::PaintLeft=1000
+$clock=[Diagnostics.Stopwatch]::StartNew()
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 40) 'observed'
+if($clock.ElapsedMilliseconds -lt 800){throw "Slow input should be waited for, returned after $($clock.ElapsedMilliseconds) ms"}
+# Keys used up (repainted) and the text unchanged for 400 ms: incomplete.
+$native::PaintLeft=0;$native::EditReads.Clear();$native::EditBefore='abXcd'
+$clock.Restart()
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) 'incomplete'
+if($clock.ElapsedMilliseconds -lt 400){throw 'Incomplete was reported before 400 ms without change'}
+# Keys still queued at the cap: incomplete, never 'changed'.
+$native::PaintLeft=100000;$native::EditBefore='abXYZsuggestcd'
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) 'incomplete'
+# All typed text arrived and the application added to it or changed its case.
+$native::PaintLeft=0
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) 'changed'
+$native::EditBefore='ABXYZCD'
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) 'changed'
+$native::EditBefore='abXYZ'
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) 'incomplete'
+$native::Focus=191
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) $null
+$native::Focus=190
+# A control without readback: at least 150 ms, and until its queue is drained.
+$clock.Restart()
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $null 40) $null
+if($clock.ElapsedMilliseconds -lt 150){throw 'The short grace was skipped'}
+$native::PaintLeft=40
+$clock.Restart()
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $null 40) $null
+if($native::PaintLeft -ne 0 -or $clock.ElapsedMilliseconds -lt 300){throw 'Queued keys were not waited for'}
+$native::PaintSignal=$false;$native::PaintLeft=1000
+$clock.Restart()
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $null 40) $null
+if($clock.ElapsedMilliseconds -ge 1000){throw 'Without a repaint signal the grace stays short'}
+$native::PaintSignal=$true;$native::PaintLeft=0
+$native::EditPassword=$true
 Assert-Equal (Get-SendInputEdit ([IntPtr]190) 'XYZ') $null
-[WindowsComputerUseNative]::EditPassword=$false
+$native::EditPassword=$false
 
 function Get-NativeWindowList {param($IncludeInvisible,$MaxWindows) return $script:Windows}
 $script:Windows=@(

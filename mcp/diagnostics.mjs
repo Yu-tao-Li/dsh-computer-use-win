@@ -25,11 +25,14 @@ const VALUE_KEYS = new Set(['text', 'value', 'keys', 'thenKeys', 'query', 'url',
 const LABEL_KEYS = new Set(['action', 'button', 'direction', 'elementId', 'scope', 'browserTab']);
 const PLUGIN_MARKERS = ['windows-computer-use', 'dsh-computer-use-win', 'wincu', 'WCU_'];
 const CREDENTIAL_HEADER = 'cookie|set-cookie|authorization|proxy-authorization';
-const CREDENTIAL_FIELD = CREDENTIAL_HEADER + '|cookies|(?:access|refresh|id)[_-]?token|api[_-]?key|password|secret';
+// A field named token, alone or with a prefix: token, access_token, idToken, csrftoken.
+const TOKEN_FIELD = '[a-z]*[_-]?token';
+const CREDENTIAL_FIELD = CREDENTIAL_HEADER + `|cookies|${TOKEN_FIELD}|api[_-]?key|password|secret`;
 const SENSITIVE_FIELD = new RegExp(`^(?:${CREDENTIAL_FIELD})$`, 'i');
 const QUOTED_CREDENTIAL = new RegExp(`(["'](?:${CREDENTIAL_FIELD})["'][ \\t]*[:=][ \\t]*)(?:"(?:\\\\.|[^"\\\\\\r\\n])*"|'(?:\\\\.|[^'\\\\\\r\\n])*')`, 'gi');
 const RAW_CREDENTIAL = new RegExp(`(\\b(?:${CREDENTIAL_HEADER})[ \\t]*[:=][ \\t]*)[^\\r\\n]*(?:\\r?\\n[ \\t]+[^\\r\\n]*)*`, 'gi');
 const MASKED_CREDENTIAL = new RegExp(`(?:["'](?:${CREDENTIAL_FIELD})["']|\\b(?:${CREDENTIAL_FIELD}))\\s*[:=]\\s*(?:"<secret>"|<secret>)`, 'gi');
+const LABELED_SECRET = new RegExp(`(["']?(?:${TOKEN_FIELD}|api[_-]?key|password|secret)["']?\\s*[:=]\\s*)(?:"[^"\\r\\n]*"|'[^'\\r\\n]*'|[^\\s,;]+)(?=\\s|[,;}]|$)`, 'gi');
 const STRUCTURED_CREDENTIAL = new RegExp(`["'](?:${CREDENTIAL_FIELD})["']\\s*[:,=]|[=:]\\s*["'](?:${CREDENTIAL_HEADER})["']|\\b(?:${CREDENTIAL_FIELD})\\s*[:=]\\s*[\\[{]`, 'i');
 // Unquoted Windows paths can contain spaces. In a free-form message, remove
 // the whole ambiguous path span up to a quote or line boundary.
@@ -73,8 +76,9 @@ export function makeRedactor({ user = safeUserName(), host = os.hostname(), home
     text = text.replace(WINDOWS_PATH, '<path>');
     if (homePath) text = text.replace(homePath, '<path>');
     text = text.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '<email>');
-    text = text.replace(/\b(?:Bearer\s+[A-Za-z0-9._~+\/-]+|(?:gh[pousr]_|github_pat_|npm_)[A-Za-z0-9_]{16,})/gi, '<secret>');
-    text = text.replace(/(["']?(?:(?:access|refresh|id)[_-]?token|api[_-]?key|password|secret)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)(?=\s|[,;}]|$)/gi, '$1<secret>');
+    // Bearer tokens, GitHub and npm tokens, and sk- API keys (DeepSeek, OpenAI, Anthropic) even without a label.
+    text = text.replace(/\b(?:Bearer\s+[A-Za-z0-9._~+\/-]+|(?:gh[pousr]_|github_pat_|npm_)[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9][A-Za-z0-9_-]{15,})/gi, '<secret>');
+    text = text.replace(LABELED_SECRET, '$1<secret>');
     for (const [pattern, mark] of words) text = text.replace(pattern, mark);
     return text;
   };

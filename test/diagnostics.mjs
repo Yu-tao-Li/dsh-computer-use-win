@@ -25,8 +25,13 @@ const sensitiveLogs = [
   'Authorization: Basic fold\r\n  fixture-private-header-folded',
   String.raw`wincu: {"message":"Read D:\u005cPrivate folder\u005cfixture-private-path.txt"}`,
   String.raw`wincu: {"message":"Read D:\/Private folder\/fixture-private-slash.txt"}`,
+  JSON.stringify({ token: 'fixture-private-bare-token' }),
+  JSON.stringify({ auth: { idToken: 'fixture-private-id-token', csrftoken: 'fixture-private-csrf' } }),
+  'wincu: request failed for key sk-fixture-private-0123456789abcdef',
 ];
 for (const line of sensitiveLogs) assert.doesNotMatch(redact(line), /fixture-private/);
+// Counts and ordinary words that merely contain "token" or "sk-" stay readable.
+assert.equal(redact('{"maxTokens":4096,"tokenCount":12} Unexpected token } task-abcdefghijklmnopqrstu'), '{"maxTokens":4096,"tokenCount":12} Unexpected token } task-abcdefghijklmnopqrstu');
 assert.equal(redact('Alice on DESK-42; Malice and Alice2 stay'), '<user> on <computer>; Malice and Alice2 stay');
 assert.equal(redact('token approval-secret-123456 end'), 'token <secret> end');
 assert.equal(redact('https://example.test/private?q=123 alice@example.test Bearer abc.123 api_key="private data"'), '<url> <email> <secret> api_key=<secret>');

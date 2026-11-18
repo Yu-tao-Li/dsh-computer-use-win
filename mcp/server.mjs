@@ -1379,7 +1379,7 @@ async function backendText(action, args, timeoutMs, request) {
     const guessed = result.deliveredTo?.via === "front window";
     result.verification = guessed || result.moved === false || result.posted === false || result.activated === false ? "unconfirmed" : result.verification ?? "sent";
     result.verificationNote = guessed ? "No window target was given and DSH had not worked in a window this turn, so this went to the window in front (deliveredTo). If another window was meant, pass its nativeWindowHandle and check that window."
-      : result.verification === "observed" ? "The focused edit contained the expected text after input."
+      : result.verification === "observed" ? result.note ?? "The focused edit contained the expected text after input."
       : result.verification === "sent" ? "The action was dispatched. Use wait_for or a fresh observation to verify the expected effect."
       : result.note ?? "Windows did not confirm dispatch. Inspect the warning and observe the target before retrying.";
   }

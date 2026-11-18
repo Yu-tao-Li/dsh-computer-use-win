@@ -20,9 +20,10 @@ await writeFile(path.join(root,'scripts/windows-uia.ps1'),`param([switch]$Persis
   if($r.action -eq 'keypress'){$result.deliveredTo=@{title='Fixture';via=$(if($r.args.keys[0] -eq 'f2'){'front window'}else{'window target'})}}
   if($r.action -eq 'type_text'){
     $result.deliveredTo=@{title='Fixture';via='window target'}
-    $result.verified=($r.args.text -eq 'observed')
+    $result.verified=($r.args.text -eq 'observed' -or $r.args.text -eq 'changed')
     $result.verification=if($result.verified){'observed'}else{'unconfirmed'}
-    if(-not $result.verified){$result.note='Could not verify the edited field'}
+    if($r.args.text -eq 'changed'){$result.note='The field holds the typed text, and the application changed it'}
+    elseif(-not $result.verified){$result.note='Could not verify the edited field'}
   }
   if($r.action -eq 'tree' -or $r.action -eq 'snapshot'){$result.nodeCount=6;$result.tree=@{name='Fixture'}}
   if($r.action -eq 'find') {
@@ -66,6 +67,7 @@ try{
   const aimed=data(await call('keypress',{keys:['f3'],nativeWindowHandle:42}));assert.equal(aimed.verification,'sent');assert.equal(aimed.deliveredTo.via,'window target');
   const verified=data(await call('type_text',{text:'observed',method:'sendinput',nativeWindowHandle:42}));assert.equal(verified.verification,'observed');assert.match(verified.verificationNote,/contained the expected text/);
   const unverified=data(await call('type_text',{text:'other',method:'sendinput',nativeWindowHandle:42}));assert.equal(unverified.verification,'unconfirmed');assert.match(unverified.verificationNote,/Could not verify/);
+  const changed=data(await call('type_text',{text:'changed',method:'sendinput',nativeWindowHandle:42}));assert.equal(changed.verification,'observed');assert.match(changed.verificationNote,/application changed it/);
   console.log('PASS schema/default validation before worker launch, queued deadlines, OCR hit/miss provenance, explicit opt-out, compact JSON, timed-out UIA screenshot, worker recovery and key delivery verification');
 }finally{
   client.child.stdin.end();const timer=setTimeout(()=>client.child.kill(),5000);

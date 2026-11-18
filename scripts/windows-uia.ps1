@@ -501,6 +501,24 @@ public static class WindowsComputerUseNative {
     return new int[] { (int)start, (int)end };
   }
 
+  [DllImport("user32.dll")] private static extern bool InvalidateRect(IntPtr hwnd, IntPtr rect, bool erase);
+  [DllImport("user32.dll")] private static extern bool GetUpdateRect(IntPtr hwnd, IntPtr rect, bool erase);
+  [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
+
+  // A thread gets WM_PAINT only when no posted message or input is waiting
+  // for it. Request a repaint after queueing input: once the window's update
+  // region is empty again, its thread has taken all of that input. A message
+  // sent to the window cannot tell, since it is handled before queued input.
+  public static bool RequestPaint(IntPtr hwnd) {
+    RECT client;
+    return hwnd != IntPtr.Zero && IsWindowVisible(hwnd) && GetClientRect(hwnd, out client) &&
+      client.right > client.left && client.bottom > client.top && InvalidateRect(hwnd, IntPtr.Zero, false);
+  }
+
+  public static bool PaintPending(IntPtr hwnd) {
+    return hwnd != IntPtr.Zero && GetUpdateRect(hwnd, IntPtr.Zero, false);
+  }
+
   // The window with the keyboard focus in hwnd's thread. Each thread keeps its
   // own focus, also while its windows are in the background (zero when none).
   public static IntPtr FocusedWindow(IntPtr hwnd) {
@@ -1561,7 +1579,8 @@ function Get-SendInputEdit {
   # EM_GETPASSWORDCHAR can identify a password mask installed at runtime.
   if ([WindowsComputerUseNative]::SendMessageTimeout($Focus, 0x00D2, [UIntPtr]::Zero, [IntPtr]::Zero, 3, 100, [ref]$reply) -eq [IntPtr]::Zero -or $reply.ToUInt64() -ne 0) { return $null }
   if ([WindowsComputerUseNative]::SendMessageTimeout($Focus, [WindowsComputerUseNative]::WM_GETTEXTLENGTH, [UIntPtr]::Zero, [IntPtr]::Zero, 3, 100, [ref]$reply) -eq [IntPtr]::Zero -or $reply.ToUInt64() + $Text.Length -gt 32768) { return $null }
-  $capacity = [int]$reply.ToUInt64() + $Text.Length + 2
+  # Leave room for text the application adds itself, such as an autocomplete suffix.
+  $capacity = [int]$reply.ToUInt64() + $Text.Length + 1026
   $before = [WindowsComputerUseNative]::ReadEditText($Focus, $capacity)
   if ($null -eq $before) { return $null }
   # RichEdit may count a line break as one selection unit but return CRLF in text.
@@ -1570,32 +1589,57 @@ function Get-SendInputEdit {
   if ($null -eq $selection) { return $null }
   $start, $end = $selection
   if ($start -gt $end -or $end -gt $before.Length) { return $null }
-  $expected = $before.Substring(0, $start) + $Text + $before.Substring($end)
+  $head = $before.Substring(0, $start) + $Text
+  $tail = $before.Substring($end)
+  $expected = $head + $tail
   if ([string]::Equals($expected, $before, [StringComparison]::Ordinal)) { return $null }
-  return @{ expected = $expected; capacity = $capacity }
+  return @{ expected = $expected; head = $head; tail = $tail; capacity = $capacity }
 }
 
+# SendInput returns once the keys sit in the target thread's input queue, but
+# a key reaches whichever window has the focus when that thread takes it out.
+# Giving the foreground back before then drops the rest of the text or sends
+# it elsewhere (issue #90). So the foreground stays until the target has taken
+# the keys; a repaint requested now arrives only after the last one.
+#  - A readable edit is done once it holds the expected text. The wait goes on
+#    while its text changes or the repaint is pending. After the repaint, reads
+#    that show no change for 400 ms mean the keys are used up.
+#  - Any other control waits at least 150 ms and until the repaint.
+# The cap grows with the text. A foreground or focus change ends the wait.
+# Returns 'observed', 'changed' (all typed text arrived, and the application
+# added text or changed letter case), 'incomplete', or $null (not verified).
 function Wait-SendInputEdit {
-  param([IntPtr]$Front, [IntPtr]$Focus, [hashtable]$Edit)
-  # SendInput only queues the keys. Keep focus in place while the target
-  # processes them. A control with no safe readback still gets a short grace.
+  param([IntPtr]$Front, [IntPtr]$Focus, [hashtable]$Edit, [int]$Length = 1)
   $wait = [Diagnostics.Stopwatch]::StartNew()
-  $limit = if ($null -eq $Edit) { 150 } else { 750 }
-  $read = $false
+  $paint = [WindowsComputerUseNative]::RequestPaint($Focus)
+  $limit = if ($null -eq $Edit) { [Math]::Min(5000, 150 + 50 * $Length) } else { [Math]::Min(15000, 1000 + 50 * $Length) }
+  $classify = {
+    param([string]$Value)
+    if ([string]::Equals($Value, $Edit.expected, [StringComparison]::OrdinalIgnoreCase) -or
+        ($Value.Length -gt $Edit.expected.Length -and $Value.StartsWith($Edit.head, [StringComparison]::Ordinal) -and $Value.EndsWith($Edit.tail, [StringComparison]::Ordinal))) { 'changed' } else { 'incomplete' }
+  }
+  $last = $null
+  $still = [Diagnostics.Stopwatch]::StartNew()
   do {
     [void](Test-Failsafe)
     if ([WindowsComputerUseNative]::GetForegroundWindow() -ne $Front -or [WindowsComputerUseNative]::FocusedWindow($Front) -ne $Focus) { return $null }
-    if ($null -ne $Edit) {
+    $taken = -not ($paint -and [WindowsComputerUseNative]::PaintPending($Focus))
+    if ($null -eq $Edit) {
+      if ($taken -and $wait.ElapsedMilliseconds -ge 150) { return $null }
+      Start-Sleep -Milliseconds 10
+    } else {
       $value = [WindowsComputerUseNative]::ReadEditText($Focus, $Edit.capacity)
       if ($null -ne $value) {
-        if ([string]::Equals($value, $Edit.expected, [StringComparison]::Ordinal)) { return $true }
-        $read = $true
+        if ([string]::Equals($value, $Edit.expected, [StringComparison]::Ordinal)) { return 'observed' }
+        if ($null -eq $last -or -not [string]::Equals($value, $last, [StringComparison]::Ordinal)) { $last = $value; $still.Restart() }
+        elseif ($taken -and $still.ElapsedMilliseconds -ge 400) { return (& $classify $value) }
       }
+      Start-Sleep -Milliseconds 25
     }
-    Start-Sleep -Milliseconds 25
   } while ($wait.ElapsedMilliseconds -lt $limit)
-  if ($read) { return $false }
-  return $null
+  if ($null -eq $last) { return $null }
+  if ($still.ElapsedMilliseconds -ge 400 -and -not ($paint -and [WindowsComputerUseNative]::PaintPending($Focus))) { return (& $classify $last) }
+  return 'incomplete'
 }
 
 # Posted characters arrive after the post returns. For a Win32 edit, wait up
@@ -3791,14 +3835,15 @@ function Invoke-Action {
           }
           [void](Test-Failsafe)
           $ok = [bool][WindowsComputerUseNative]::SendUnicodeText($text, $front, $focus)
-          $typed = Wait-SendInputEdit $front $focus $edit
-          if (-not $ok -or $typed -eq $false) {
+          $typed = Wait-SendInputEdit $front $focus $edit $text.Length
+          if (-not $ok -or $typed -eq 'incomplete') {
             throw 'INPUT_TEXT_INCOMPLETE: the full text was not confirmed in the target. Some text may already be present. Inspect the field before retrying.'
           }
           $result["method"] = "sendinput-unicode"
-          $result["verified"] = ($typed -eq $true)
-          $result["verification"] = if ($typed -eq $true) { 'observed' } else { 'unconfirmed' }
-          if ($null -eq $typed) { $result["note"] = 'Windows queued the Unicode input. The edited field could not be verified. Check the field before retrying.' }
+          $result["verified"] = ($typed -eq 'observed') -or ($typed -eq 'changed')
+          $result["verification"] = if ($result["verified"]) { 'observed' } else { 'unconfirmed' }
+          if ($typed -eq 'changed') { $result["note"] = 'The field holds the typed text, and the application added text or changed letter case (for example autocomplete). Check the field if the exact value matters.' }
+          elseif ($null -eq $typed) { $result["note"] = 'Windows queued the Unicode input. The edited field could not be verified. Check the field before retrying.' }
         } else {
           $restore = [bool](Get-Prop $inputObject "restoreClipboard" $true)
           Type-Text -Text $text -RestoreClipboard $restore

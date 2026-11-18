@@ -234,7 +234,7 @@ Scroll at a screen coordinate or an element. An element scrolls in the backgroun
 
 Type text into the focused control of the target (or active) window. method:'auto' (default) types into a focused Win32 edit in the background using EM_REPLACESEL. Other controls and text with line breaks use clipboard paste. method:'clipboard' always pastes. method:'background' posts WM_CHAR to the focused control of the specified window. Background typing does not borrow the foreground. Some methods can include verifyValue, truncated to 200 characters.
 
-method:'sendinput' queues Unicode keystrokes without using the clipboard. For a plain Win32 edit it checks the expected value before returning the foreground. A confirmed edit reports verification:'observed'. Password fields and other controls without safe readback report verification:'unconfirmed'. If the complete text could not be written to a readable edit, the call reports INPUT_TEXT_INCOMPLETE. Inspect the field before retrying because a prefix may already have been entered.
+method:'sendinput' queues Unicode keystrokes without using the clipboard. The target stays in front until its window has taken the keys, so a slow app gets the time it needs. For a plain Win32 edit it also checks the value before returning the foreground. A confirmed edit reports verification:'observed'; if the application added text or changed letter case (autocomplete, for example), a note says so. Password fields and other controls without safe readback report verification:'unconfirmed'. If a readable edit stops changing without the complete text, the call reports INPUT_TEXT_INCOMPLETE. Inspect the field before retrying because a prefix may already have been entered.
 
 | Argument | Type | Default / bounds |
 |---|---|---|
