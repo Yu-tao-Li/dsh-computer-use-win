@@ -14,10 +14,15 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { appForProgId, defaultProgId } from '../mcp/browser.mjs';
+import { appForProgId, browserEnv, defaultProgId } from '../mcp/browser.mjs';
 import { McpTestClient } from './mcp-test-client.mjs';
 
 for (const [progId, app] of [['MSEdgeHTM', 'edge'], ['ChromeHTML', 'chrome'], ['FirefoxURL-308046B0AF4A39CB', 'firefox'], ['', null], [null, null]]) assert.equal(appForProgId(progId), app, String(progId));
+// The browser never inherits a Windows compatibility layer (issue #84), in any
+// spelling of the variable; everything else passes through unchanged.
+const inherited = { Path: 'C:\\Windows', __COMPAT_LAYER: 'RunAsInvoker', __compat_layer: 'HighDpiAware', WCU_X: '1' };
+assert.deepEqual(browserEnv(inherited), { Path: 'C:\\Windows', WCU_X: '1' });
+assert.equal(inherited.__COMPAT_LAYER, 'RunAsInvoker', 'the server environment is left as it is');
 const progId = await defaultProgId();
 assert.ok(progId === null || /^\S+$/.test(progId), `the default browser ProgId reads as one word: ${progId}`);
 
@@ -85,8 +90,10 @@ try {
   assert.ok(!existsSync(path.join(kept, 'DevToolsActivePort')), 'the closed browser leaves no port file');
 
   // A later server starts the browser again on the kept profile: still signed
-  // in, session cookie included, and none of the last tabs come back.
-  const second = await server({ WCU_BROWSER_SIGNIN: '1' });
+  // in, session cookie included, and none of the last tabs come back. This
+  // server runs under a Windows compatibility layer, which made Edge relaunch
+  // itself without the DevTools pipe on every start (issue #84).
+  const second = await server({ WCU_BROWSER_SIGNIN: '1', __COMPAT_LAYER: 'RunAsInvoker' });
   const again = await call(second, 'set_value', { elementId: 'new-tab', value: origin + '/who' });
   assert.ok(signedIn(again.page), again.page);
   const tabs = (await call(second, 'list_windows', {})).meta.browserLane.browsers.flatMap(browser => browser.tabs);
@@ -116,7 +123,8 @@ try {
   assert.equal(browsersOn(kept), 0);
 
   // Off: a throwaway profile, no sign-ins; the kept profile stays as it was.
-  const off = await server();
+  // Also under a compatibility layer, as the throwaway launch is a separate path.
+  const off = await server({ __COMPAT_LAYER: 'RunAsInvoker' });
   started = Date.now();
   const plain = await call(off, 'set_value', { elementId: 'new-tab', value: origin + '/who' });
   assert.match(plain.page, /heading "未登录"/);

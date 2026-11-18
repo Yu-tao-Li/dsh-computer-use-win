@@ -1,6 +1,6 @@
 # 电脑操控设置 / Computer Use settings
 
-> 当前插件版本 `0.6.0`：设置标题显示包版本，悬停说明使用统一中英文词典，预览与已停止状态互不覆盖。
+> 当前插件版本 `0.6.1`：设置标题显示包版本，悬停说明使用统一中英文词典，预览与已停止状态互不覆盖。
 
 ## 简体中文
 
@@ -9,6 +9,14 @@
 若曾为 #29 手动添加独立的 `windows-computer-use` 或 `wincu` 覆盖条目，请先备份 profile 配置，再移除该临时重复条目，使用插件 bundle 提供的入口。避免同时启动两个桌面操作服务。
 
 插件列表显示功能简介和“点击进行具体设置”，点击打开完整设置页；Star 和 Issue 链接位于完整设置页顶部；点“折叠”可将这段说明收为一个带 GitHub 标志的 dsh-computer-use-win 链接，点“展开”恢复。该选择立即保存，重启和升级后保持不变，也不会保存或放弃其他未保存的更改。无法读取宿主配置时会暂停编辑并明确提示，不再将内置默认值当作已经读取的设置。0.4.3 补齐混合版本验证器的实时字段与共享引用协议，使用宿主确认的值回读保存结果。
+
+### 更新
+
+DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询失败或结果超过 6 小时会重查。已安装版本等于或高于 `latest` 时隐藏“更新”；确认有新版时在 GitHub 左侧显示“更新”，导航同时显示小红点。点击后重核 npm 与 DSH 市场目标，由市场下载安装并核对实际版本。页面显示进度，并根据市场结果提示刷新、重启或直接生效。DSH Desktop 需要重启时，从托盘退出后重新打开。市场暂缓新版本时，按宿主结果提示“仍要更新”；市场与 npm 不一致时提示稍后重试。无市场或本地安装时，“更新”打开升级说明。
+
+### 反馈问题
+
+标题右侧的“反馈问题”调用本机 DSH 的 `POST /dsh-computer-use-win/api/diagnostics`，每次只导出一份。插件按 Windows 的下载文件夹位置写入 TXT，在资源管理器中选中文件并打开默认浏览器的 GitHub 新建问题页。对话框显示保存结果及下一步。TXT 包含运行环境、相关设置、自检、最近 30 次工具调用和最多 200 行插件日志。工具输入文字只保留长度，截图可由用户另行附上。
 
 ### 浏览器操控（Browser Use）
 
@@ -57,6 +65,10 @@ Esc 只停止当前这一轮及其排队操作，同一轮不会自动重试。�
 Upgrade and fully restart DSH Desktop, then open **Settings → Computer Use** (mouse icon; 电脑操控 in the Chinese interface). A plugin-page entry and the legacy configurable card are also available. Modern DSH uses the `mcp-dsh-computer-use-win` Config namespace; the older API uses `windows-computer-use`. Back up and remove any temporary duplicate adapter/MCP override added for #29 before using the bundled entry.
 
 The plugin list shows a short introduction that opens the complete settings page. Star and Issue links stay at the top of that page; Collapse folds that note into one dsh-computer-use-win link with the GitHub mark and Expand restores it. The choice saves at once, persists across restarts and upgrades, and neither saves nor discards other pending changes. An unavailable host form shows an explicit state and cannot be edited. Version 0.4.3 supplies live-field metadata and the shared reference protocol for mixed-version validators, and confirms saved values against the host response.
+
+DSH checks npm’s `latest` automatically at startup and repeats an old or failed check when settings open. A newer npm release shows Update left of GitHub and a navigation dot. Clicking it rechecks the npm and market targets before the market installs and verifies the package. The page shows progress and any activation step. On DSH Desktop, restart by quitting from the tray and reopening. A market release-age hold can offer Update anyway; a version mismatch between npm and the market offers a retry. Without a market or for a local install, Update opens the upgrade instructions.
+
+Report a problem calls the local DSH route `POST /dsh-computer-use-win/api/diagnostics`, with one export at a time. The plugin writes a TXT to the Windows Downloads folder, selects it in File Explorer, and opens GitHub’s new-issue page in the default browser. A dialog shows the export result and what to do next. The TXT contains environment details, relevant settings, a self-test, the last 30 tool calls, and up to 200 plugin log lines. Tool input text is kept as its length. Screenshots may be attached separately.
 
 Prefer web page controls and Show the DSH browser window are on by default. The DSH browser starts separately, in the browser chosen under Browser type (by default the Windows default browser, and an installed Chrome or Edge when that is neither), with no extensions and, by default, a temporary empty profile: none of your sign-ins, cookies or history (with Keep website sign-ins on it keeps one profile instead; see below). It closes when DSH exits, after 10 idle minutes when headless, or after two idle hours with a visible window. Its window is requested in the background and page actions never move the desktop pointer. Chrome JavaScript modal dialogs may briefly activate the window, so visible operation is not an unconditional focus guarantee. As in Codex's Browser Use, nothing covers the page: the window frame is DSH blue, so it is never taken for your own browser; the tab DSH works in shows a blue arrow as its icon until the turn ends, then its own icon again; and a small glowing arrow rests where DSH clicks. Clicks pass through the arrow, and screenshots leave it out. With Show the DSH browser window off, the browser runs in the background with no window. Browser Use, reads (screenshots, control trees, OCR, waits) and control actions done in the background show no screen edges, banner or pointer tag and arm no global Esc, so Esc keeps working in your other apps; stop such a turn with the stop button in DSH. Once a turn uses the real mouse or keyboard, the indicator and Esc apply from that call on, and a series stopped with Esc refuses its later Browser Use calls too.
 

@@ -13,6 +13,7 @@ import { systemLocale } from './overlay-strings.mjs';
 import { randomBytes } from 'node:crypto';
 import { installHostPolicy } from './policy.mjs';
 import { settingsMode,findOwnEntry,bridgeSupport } from './host-compat.mjs';
+import { installCallLog, createDiagnosticsHandler, exportDiagnostics, DIAGNOSTICS_ROUTE, readInstallSpec } from './diagnostics.mjs';
 
 export const name = 'windows-computer-use';
 export const inject = ['tools'];
@@ -154,7 +155,24 @@ export async function apply(ctx, config) {
   runtime.approvalLedger=path.join(root,'approval-grants.json');
   runtime.hostPorts = [];
   runtime.hostPortFile=path.join(root,'host-ports.json');atomicJson(runtime.hostPortFile,{ports:[],pending:true});let webServerSeen=false,hostPortsDisposed=false;const settleNoWebServer=setTimeout(()=>{if(!webServerSeen&&!hostPortsDisposed)atomicJsonAsync(runtime.hostPortFile,{ports:[]}).catch(()=>{});},1500);settleNoWebServer.unref?.();ctx.effect(()=>()=>{hostPortsDisposed=true;clearTimeout(settleNoWebServer);});
+  // "Report a problem" on the settings page: the page posts here, the export
+  // writes the diagnostics file, then opens the Downloads folder and the
+  // new-issue page (diagnostics.mjs).
+  const callLog = installCallLog(ctx);
+  const pluginRoot = fileURLToPath(new URL('..', import.meta.url));
+  const collectDiagnostics = () => {
+    const profiles = ctx.get?.('desktopProfiles');
+    let current; try { current = profiles?.current; } catch {}
+    let version = 'unknown'; try { version = JSON.parse(readFileSync(path.join(pluginRoot, 'package.json'), 'utf8')).version; } catch {}
+    return exportDiagnostics({ version, settings: desired, calls: callLog.list(), host: current ? 'DSH Desktop' : 'DSH',
+      mcpClient: bridgeSupport().version, dshLocale: getLocale(), installSpec: readInstallSpec(pluginRoot, current?.dir),
+      secrets: [runtime.approvalSecret], serverPath: fileURLToPath(new URL('./server.mjs', import.meta.url)) });
+  };
   ctx.inject(['webServer'], owner => {
+    if (typeof owner.webServer.register === 'function') owner.effect(() => {
+      try { return owner.webServer.register({ kind: 'exact', path: DIAGNOSTICS_ROUTE, handler: createDiagnosticsHandler({ collect: collectDiagnostics, logger: owner.logger }) }); }
+      catch (error) { owner.logger.warn('dsh-computer-use-win: the problem-report route is unavailable: %s', error?.message ?? error); return () => {}; }
+    });
     webServerSeen=true;clearTimeout(settleNoWebServer);if(!owner.webServer.port)atomicJson(runtime.hostPortFile,{ports:[],pending:true});
     let timer;
     const update=async()=>{
