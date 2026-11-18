@@ -550,27 +550,33 @@ app.whenReady().then(async()=>{
   // and the new-issue page; the page shows a modal dialog saying where the file
   // went. A link is available when the plugin cannot open the browser.
   const ISSUE_PAGE='https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/new';
-  await evaluate("window.opened=[];window.open=url=>{window.opened.push(String(url));return null;};window.reportReply={status:200,body:{ok:true,fileName:'wincu-diagnostics-20261118-020304.txt',folderOpened:true,issueOpened:true}};window.baseFetch=window.fakeFetch;window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/diagnostics'?window.reportReply:window.baseFetch?window.baseFetch(call):{status:404,body:null};void 0");
+  const reportFileName='wincu-diagnostics-20261118-020304.txt';
+  const reportFilePath=path.win32.join('D:\\已重定向的下载目录',reportFileName);
+  const reportReply={status:200,body:{ok:true,fileName:reportFileName,filePath:reportFilePath,folderOpened:true,issueOpened:true}};
+  await evaluate("window.opened=[];window.open=url=>{window.opened.push(String(url));return null;};window.reportReply="+JSON.stringify(reportReply)+";window.baseFetch=window.fakeFetch;window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/diagnostics'?window.reportReply:window.baseFetch?window.baseFetch(call):{status:404,body:null};void 0");
   assert.ok(await evaluate("(()=>{const b=document.querySelector('[data-wincu-report=idle]');return !!b&&b.textContent==='反馈问题'&&getComputedStyle(b).backgroundColor==='rgba(0, 0, 0, 0)'})()"),'A transparent Report a problem button');
   await evaluate("document.querySelector('[data-wincu-report=idle]').click()");
   await until("document.querySelector('dialog[data-wincu-report-dialog=saved]')?.open");
   const reportCall=await evaluate("window.fetchCalls.filter(c=>c.url==='/dsh-computer-use-win/api/diagnostics').map(c=>({method:c.method,header:c.headers['x-wcu-request'],type:c.headers['content-type']}))");
   assert.deepEqual(reportCall,[{method:'POST',header:'1',type:'application/json'}],'One POST with the plugin header');
-  const savedDialog=await evaluate("(()=>{const d=document.querySelector('dialog[data-wincu-report-dialog=saved]'),ok=d.querySelector('button'),box=d.getBoundingClientRect();return {open:d.open,modal:d.matches(':modal'),texts:[...d.querySelectorAll('p')].map(p=>p.textContent),button:ok.textContent,focused:document.activeElement===ok,centered:Math.abs(box.left+box.width/2-document.documentElement.clientWidth/2)<2,idle:!!document.querySelector('[data-wincu-report=idle]')};})()");
-  assert.deepEqual(savedDialog,{open:true,modal:true,texts:['已将诊断信息保存到下载文件夹。','检查后，可把 wincu-diagnostics-20261118-020304.txt 拖到 GitHub 的问题描述框。'],button:'确定',focused:true,centered:true,idle:true},'A modal dialog says the file is in Downloads');
+  const savedDialog=await evaluate("(()=>{const d=document.querySelector('dialog[data-wincu-report-dialog=saved]'),ok=d.querySelector('button'),box=d.getBoundingClientRect();return {open:d.open,modal:d.matches(':modal'),texts:[...d.querySelectorAll('p')].map(p=>p.textContent),path:d.querySelector('[data-wincu-report-path]')?.textContent,button:ok.textContent,focused:document.activeElement===ok,centered:Math.abs(box.left+box.width/2-document.documentElement.clientWidth/2)<2,idle:!!document.querySelector('[data-wincu-report=idle]')};})()");
+  assert.deepEqual(savedDialog,{open:true,modal:true,texts:['已保存诊断文件',reportFileName,'已打开 GitHub 新建问题页。把文件拖到描述框，写下问题后提交。'],path:reportFilePath,button:'确定',focused:true,centered:true,idle:true},'A modal dialog names the file and shows its full path and GitHub status');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('dialog a')].map(a=>[a.href,a.textContent])"),[[ISSUE_PAGE,'GitHub 新建问题页']],'The page name also links directly to the issue form');
   assert.deepEqual(await evaluate('window.opened'),[],'The plugin opened the folder and the issue page; the page opens nothing more');
   await evaluate("document.querySelector('dialog[data-wincu-report-dialog=saved] button').click()");
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   const resetReport=async reply=>{await evaluate("window.reportReply="+reply+";window.root.render(React.createElement('span',null,'closed'))");await evaluate("window.renderPage('zh')");await until("!!document.querySelector('[data-wincu-report=idle]')");await evaluate("document.querySelector('[data-wincu-report=idle]').click()");};
-  await resetReport("{status:200,body:{ok:true,fileName:'f.txt',folderOpened:false,issueOpened:false}}");
+  await resetReport(JSON.stringify({status:200,body:{...reportReply.body,folderOpened:false,issueOpened:false}}));
   await until("document.querySelector('dialog[data-wincu-report-dialog=saved]')?.open");
   assert.equal(await evaluate("document.querySelector('dialog a').href"),ISSUE_PAGE,'The exact issue URL is available when launch fails');
+  assert.equal(await evaluate("document.querySelector('[data-wincu-report-path]').textContent"),reportFilePath,'The path is available even when neither window opens');
+  assert.equal(await evaluate("document.querySelector('.wcu-dialog-detail').textContent"),'打开 GitHub 新建问题页，把文件拖到描述框，写下问题后提交。');
   win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   await resetReport("{status:500,body:{ok:false,issueOpened:true}}");
   await until("!!document.querySelector('dialog[data-wincu-report-dialog=failed]')");
   assert.equal(await evaluate("!!document.querySelector('dialog a')"),false,'No extra issue link when it opened despite the failed write');
-  assert.deepEqual(await evaluate("[...document.querySelectorAll('dialog[data-wincu-report-dialog=failed] p')].map(p=>p.textContent)"),['诊断信息未能保存。仍可在 GitHub 上描述遇到的问题。']);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('dialog[data-wincu-report-dialog=failed] p')].map(p=>p.textContent)"),['诊断文件未能保存。','已打开 GitHub 新建问题页，你仍可直接描述问题。']);
   await evaluate("document.querySelector('dialog[data-wincu-report-dialog=failed] button').click()");
   await until("!document.querySelector('dialog[data-wincu-report-dialog]')");
   await evaluate("window.fakeFetch=window.baseFetch;void 0");

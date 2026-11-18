@@ -10,9 +10,12 @@ import {
   installCallLog, makeRedactor, pluginLogLines, readInstallSpec, revealAndOpen, trustedRequest,
 } from '../mcp/diagnostics.mjs';
 
-// Every user-profile path goes, 8.3 and forward-slash forms too; user and computer names as whole words.
+// Absolute paths, credential headers and direct identifiers are redacted.
 const redact = makeRedactor({ user: 'Alice', host: 'DESK-42', secrets: ['approval-secret-123456'] });
-assert.equal(redact('C:\\Users\\Alice\\AppData\\x.log c:/users/alice/y C:\\Users\\ALICE~1\\Temp\\z'), '%USERPROFILE%\\AppData\\x.log %USERPROFILE%/y %USERPROFILE%\\Temp\\z');
+assert.equal(redact('"C:\\Users\\Alice\\AppData\\x.log" "c:/users/alice/y" "C:\\Users\\ALICE~1\\Temp\\z"'), '"<path>" "<path>" "<path>"');
+assert.equal(redact('ENOENT: D:\\Private projects\\name\\notes.txt\nRead \\'+ '\\server\\shared folder\\secret.txt'), 'ENOENT: <path>\nRead <path>');
+assert.equal(redact('Cookie: sid=SAMPLE-1; session=SAMPLE-2\nSet-Cookie: key=SAMPLE-3; SameSite=Lax\nProxy-Authorization: Basic SAMPLE-4'), 'Cookie: <secret>\nSet-Cookie: <secret>\nProxy-Authorization: <secret>');
+assert.deepEqual(JSON.parse(redact('{"Cookie":"sid=SAMPLE-1; session=SAMPLE-2","status":403}')), {Cookie:'<secret>',status:403});
 assert.equal(redact('Alice on DESK-42; Malice and Alice2 stay'), '<user> on <computer>; Malice and Alice2 stay');
 assert.equal(redact('token approval-secret-123456 end'), 'token <secret> end');
 assert.equal(redact('https://example.test/private?q=123 alice@example.test Bearer abc.123 api_key="private data"'), '<url> <email> <secret> api_key=<secret>');
@@ -37,7 +40,7 @@ assert.equal(log.list().length, 0, 'Other tools are not recorded');
 await execute('mcp__wincu__windows_computer_use_click', { elementId: 'uia:rt:1' }, { isError: true, content: [{ type: 'text', text: 'Error: denied at C:\\Users\\Alice\\file' }] });
 await assert.rejects(execute('windows_computer_use_type_text', { text: 'hello' }, null, new Error('COMPUTER_USE_STOPPED by Alice')));
 let [first, second] = log.list();
-assert.deepEqual([first.tool, first.ok, first.error, first.args], ['click', false, 'Error: denied at %USERPROFILE%\\file', { elementId: 'uia:rt:1' }]);
+assert.deepEqual([first.tool, first.ok, first.error, first.args], ['click', false, 'Error: denied at <path>', { elementId: 'uia:rt:1' }]);
 assert.deepEqual([second.tool, second.ok, second.error, second.args], ['type_text', false, 'COMPUTER_USE_STOPPED by <user>', { text: '<5 chars>' }]);
 for (let i = 0; i < 31; i++) await execute('windows_computer_use_screenshot', {}, { content: [] });
 assert.equal(log.list().length, 30, 'Only the last thirty calls stay');
@@ -72,7 +75,7 @@ try {
   const result = await exportDiagnostics({
     version: '0.6.1', settings: { ...facts.settings, indicatorText: 'DSH 正在控制电脑', unknownField: 'private' }, calls: log.list().slice(-2), host: 'DSH Desktop', mcpClient: facts.mcpClient, dshLocale: 'zh-CN',
     installSpec: `file:${os.homedir()}\\x.tgz`, env, outDir: out, at: new Date(2026, 10, 18, 2, 3, 4),
-    selfTest: { ok: true, backend: { powershell: '5.1' } }, facts: { system: { windows: facts.windows, powershell: '5.1', screens: facts.screens, desktopVersions: ['2.0.18'] }, browsers: facts.browsers, logs: [`dsh.log: windows-computer-use ready at ${os.homedir()}\\a approval-secret-abcdef`] },
+    selfTest: { ok: true, backend: { powershell: '5.1', error: 'Read failed: D:\\Private project\\record.txt' } }, facts: { system: { windows: facts.windows, powershell: '5.1', screens: facts.screens, desktopVersions: ['2.0.18'] }, browsers: facts.browsers, logs: [`dsh.log: windows-computer-use ready at ${os.homedir()}\\a approval-secret-abcdef`, 'wincu: Cookie: first=fixture-private-a; second=fixture-private-b'] },
   });
   assert.equal(result.fileName, 'wincu-diagnostics-20261118-020304.txt');
   assert.equal(path.dirname(result.file), out);
@@ -81,6 +84,7 @@ try {
   assert.ok(!/(?<!\r)\n/.test(saved), 'CRLF line ends only');
   assert.ok(!saved.includes(os.homedir()), 'No home path in the file');
   assert.ok(!saved.includes('approval-secret-abcdef'), 'No secret in the file');
+  assert.ok(!/fixture-private|Private project|record\.txt/.test(saved), 'Secondary cookie values and paths are absent from the full TXT');
   assert.ok(saved.includes('"indicatorText": "<10 chars>"'), 'The banner text is kept as a length');
   assert.ok(saved.includes('__COMPAT_LAYER: RunAsInvoker'));
   assert.ok(saved.includes('Windows: Windows 11 Pro 25H2'));
@@ -88,14 +92,20 @@ try {
   assert.ok(saved.includes('0.6.1 (local)'));
   assert.ok(!saved.includes('unknownField') && !saved.includes('x.tgz'));
 
-  // Two windows: Explorer on the file, and the new-issue page through
-  // ShellExecute (explorer.exe opened Documents for a URL).
+  // Explorer selects the TXT. The browser launcher reports ShellExecute's
+  // result rather than treating the helper process starting as success.
   const runs = [];
-  const shown = await revealAndOpen(result, (command, args) => { runs.push([path.basename(command).toLowerCase(), ...args]); return true; });
+  const shown = await revealAndOpen(result, (command, args, options) => { runs.push([path.basename(command).toLowerCase(),args,options]); return true; });
   if (process.platform === 'win32') {
     assert.deepEqual(shown, { folderOpened: true, issueOpened: true });
-    assert.deepEqual(runs, [['explorer.exe', '/select,', result.file], ['rundll32.exe', 'url.dll,FileProtocolHandler', ISSUE_URL]]);
+    assert.equal(runs.length,2);
+    assert.deepEqual(runs[0], ['explorer.exe', ['/select,', result.file], undefined]);
+    assert.equal(runs[1][0], 'powershell.exe');
+    assert.deepEqual(runs[1][1].slice(0,3), ['-NoProfile', '-NonInteractive', '-Command']);
+    assert.ok(runs[1][1][3].includes(ISSUE_URL) && runs[1][1][3].includes('UseShellExecute=$true'));
+    assert.deepEqual(runs[1][2], {waitForExit:true});
     assert.deepEqual(await revealAndOpen(result, cmd => !cmd.endsWith('explorer.exe')), { folderOpened: false, issueOpened: true });
+    assert.deepEqual(await revealAndOpen(result, cmd => !cmd.endsWith('powershell.exe')), { folderOpened: true, issueOpened: false });
   } else assert.deepEqual([shown, runs], [{ folderOpened: false, issueOpened: false }, []]);
 
   // The profile that lists the plugin is found from pnpm's nested folder.
@@ -142,7 +152,7 @@ const [a, b] = [response(), response()];
 await Promise.all([handler({ method: 'POST', headers: page }, a), handler({ method: 'POST', headers: page }, b)]);
 assert.deepEqual([a.status, b.status].sort(), [200, 409], 'One export at a time');
 const ok = JSON.parse([a, b].find(x => x.status === 200).body);
-assert.deepEqual(ok, { ok: true, fileName: 'wincu.txt', folderOpened: true, issueOpened: true });
+assert.deepEqual(ok, { ok: true, fileName: 'wincu.txt', filePath: 'C:/x/wincu.txt', folderOpened: true, issueOpened: true });
 assert.deepEqual(opened, ['wincu.txt']);
 const failing = createDiagnosticsHandler({ collect: async () => { throw new Error('disk full at C:\\Users\\Alice'); }, open: ({ file }) => { assert.equal(file, undefined); return { folderOpened: false, issueOpened: true }; } });
 r = response(); await failing({ method: 'POST', headers: page }, r);

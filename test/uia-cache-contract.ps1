@@ -336,6 +336,18 @@ $script:PageContentAt=@{'111'=@{hasText=$true;truncated=$false};'112'=@{hasText=
 $result=Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400})
 Assert-Equal $result.webContent.contentState content 'One renderer with text is content'
 Assert-Equal $result.webContent.state partial 'Mixed attachment still partial'
+# A negative verdict requires a complete read of every renderer.
+$script:PageReadyAt=@{'111'=1;'112'=1}
+$script:PageContentAt=@{'111'=@{hasText=$false;truncated=$false};'112'=$null}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400})
+Assert-Equal $result.webContent.contentState unknown 'One empty renderer and one unmeasured renderer are inconclusive'
+$script:PageContentAt['112']=@{hasText=$false;truncated=$false}
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400})
+Assert-Equal $result.webContent.contentState empty 'Two fully measured empty renderers are empty'
+[void][WindowsComputerUseNative]::Hung.Add(112)
+$result=Get-TreeResult active_window 1 10 ([pscustomobject]@{treeTimeoutMs=400})
+Assert-Equal $result.webContent.contentState unknown 'One empty renderer and one hung renderer are inconclusive'
+[void][WindowsComputerUseNative]::Hung.Clear()
 # A hung renderer is never probed for content.
 Reset-Fixture
 [void][WindowsComputerUseNative]::Gone.Clear()

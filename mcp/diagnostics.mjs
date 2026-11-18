@@ -3,7 +3,7 @@
 // self-test, its recent computer-use calls and its lines from the DSH log. It
 // then opens the Downloads folder and GitHub's new-issue page, and the user
 // drags the file there. Nothing leaves this computer unless the user attaches
-// it. User folders, the user name and the computer name are replaced, typed
+// it. Local paths, the user name and the computer name are replaced, typed
 // text is kept as its length only, and no screenshot is added.
 // Patterns: DSH Desktop's own diagnostics export (logs plus system facts in one
 // archive), dshmarket's home-path redaction, VS Code's issue reporter and
@@ -24,6 +24,12 @@ const LOG_TAIL_BYTES = 2 * 1024 * 1024;
 const VALUE_KEYS = new Set(['text', 'value', 'keys', 'thenKeys', 'query', 'url', 'path', 'paths', 'title', 'windowTitle', 'name', 'content', 'password', 'script', 'arguments', 'args', 'prompt', 'filter']);
 const LABEL_KEYS = new Set(['action', 'button', 'direction', 'elementId', 'scope', 'browserTab']);
 const PLUGIN_MARKERS = ['windows-computer-use', 'dsh-computer-use-win', 'wincu', 'WCU_'];
+const CREDENTIAL_HEADER = 'cookie|set-cookie|authorization|proxy-authorization';
+const QUOTED_CREDENTIAL = new RegExp(`(["'](?:${CREDENTIAL_HEADER})["'][ \\t]*[:=][ \\t]*)(?:"(?:\\\\.|[^"\\\\\\r\\n])*"|'(?:\\\\.|[^'\\\\\\r\\n])*')`, 'gi');
+const RAW_CREDENTIAL = new RegExp(`(\\b(?:${CREDENTIAL_HEADER})[ \\t]*[:=][ \\t]*)[^\\r\\n]*`, 'gi');
+// Unquoted Windows paths can contain spaces. In a free-form message, remove
+// the whole ambiguous path span up to a quote or line boundary.
+const WINDOWS_PATH = /(?<![\w])(?:[A-Z]:[\\/]+|\\\\+[^\\/\s"<>|]+[\\/]+|%USERPROFILE%[\\/]+)[^"<>|\r\n]*/gi;
 
 const desktopCall = name => /^(?:mcp__wincu__)?windows_computer_use_[a-z_]+$/.test(String(name ?? ''));
 const shortName = name => String(name ?? '').replace(/^(?:mcp__wincu__)?windows_computer_use_/, '');
@@ -33,24 +39,25 @@ const parseArgs = value => {
 };
 const clip = (text, max) => text.length > max ? text.slice(0, max - 1) + '…' : text;
 
-// Replaces every Windows user-profile path (8.3 short forms and forward
-// slashes too), then the user and computer names as whole words.
+// Redact complete credential headers and absolute Windows paths before making
+// free-form errors or logs available for public feedback.
 export function makeRedactor({ user = safeUserName(), host = os.hostname(), home = os.homedir(), secrets = [] } = {}) {
   const words = [];
   for (const [value, mark] of [[user, '<user>'], [host, '<computer>']]) {
     if (typeof value === 'string' && value.trim().length >= 3) words.push([new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(value.trim())}(?![A-Za-z0-9])`, 'gi'), mark]);
   }
   const hidden = secrets.filter(secret => typeof secret === 'string' && secret.length >= 8);
-  const homePath = home && new RegExp(home.split(/[\\/]+/).map(escapeRegExp).join('[\\\\/]+'), 'gi');
+  const homePath = home && new RegExp(home.split(/[\\/]+/).map(escapeRegExp).join('[\\\\/]+') + '[^"\'<>|\\r\\n]*', 'gi');
   return value => {
     let text = String(value ?? '');
     for (const secret of hidden) text = text.split(secret).join('<secret>');
-    if (homePath) text = text.replace(homePath, '%USERPROFILE%');
-    text = text.replace(/[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s"'<>|*?]+/gi, '%USERPROFILE%');
+    text = text.replace(QUOTED_CREDENTIAL, '$1"<secret>"').replace(RAW_CREDENTIAL, '$1<secret>');
     text = text.replace(/\b(?:https?|wss?):\/\/[^\s"'<>]+/gi, '<url>');
+    text = text.replace(WINDOWS_PATH, '<path>');
+    if (homePath) text = text.replace(homePath, '<path>');
     text = text.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '<email>');
     text = text.replace(/\b(?:Bearer\s+[A-Za-z0-9._~+\/-]+|(?:gh[pousr]_|github_pat_|npm_)[A-Za-z0-9_]{16,})/gi, '<secret>');
-    text = text.replace(/(["']?(?:access[_-]?token|api[_-]?key|authorization|cookie|password|proxy[_-]?authorization|secret)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)(?=\s|[,;}]|$)/gi, '$1<secret>');
+    text = text.replace(/(["']?(?:(?:access|refresh|id)[_-]?token|api[_-]?key|password|secret)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)(?=\s|[,;}]|$)/gi, '$1<secret>');
     for (const [pattern, mark] of words) text = text.replace(pattern, mark);
     return text;
   };
@@ -200,11 +207,15 @@ export function pluginLogLines(dirs, { limit = LOG_LINE_LIMIT, markers = PLUGIN_
         const size = statSync(file).size, start = Math.max(0, size - LOG_TAIL_BYTES), buffer = Buffer.alloc(size - start), fd = openSync(file, 'r');
         try { readSync(fd, buffer, 0, buffer.length, start); } finally { closeSync(fd); }
         text = buffer.toString('utf8');
+        if (start > 0) {
+          const nextLine = text.indexOf('\n');
+          text = nextLine < 0 ? '' : text.slice(nextLine + 1);
+        }
       } catch { continue; }
       for (const line of text.split(/\r?\n/)) {
         if (!line || !markers.some(marker => line.includes(marker)) || seen.has(line)) continue;
         seen.add(line);
-        lines.push(`${path.basename(dir)}/${name}: ${clip(line, 600)}`);
+        lines.push(`${path.basename(dir)}/${name}: ${line}`);
       }
     }
   }
@@ -297,10 +308,10 @@ export async function exportDiagnostics({ version, settings = {}, calls = [], ho
     compatLayer: Object.entries(env).find(([key]) => key.toUpperCase() === '__COMPAT_LAYER')?.[1],
     selfTest: health,
   };
-  const logs = (given?.logs ?? pluginLogLines(dshLogDirs(env))).map(redact);
+  const logs = (given?.logs ?? pluginLogLines(dshLogDirs(env))).map(line => clip(redact(line), 600));
   // A BOM and CRLF line ends, so every Notepad shows the Chinese and the lines right.
   const text = redact(diagnosticsText(facts, { calls, logs, at })).replace(/\r?\n/g, '\r\n');
-  const folder = outDir ?? (system.downloads || path.join(os.homedir(), 'Downloads'));
+  const folder = path.resolve(outDir ?? (system.downloads || path.join(os.homedir(), 'Downloads')));
   mkdirSync(folder, { recursive: true });
   const fileName = `wincu-diagnostics-${stamp(at)}.txt`;
   const file = path.join(folder, fileName);
@@ -308,21 +319,33 @@ export async function exportDiagnostics({ version, settings = {}, calls = [], ho
   return { file, fileName };
 }
 
-const launch = (command, args) => new Promise(resolve => {
-  const child = spawn(command, args, { detached: true, stdio: 'ignore' });
-  child.once('error', () => resolve(false));
-  child.once('spawn', () => { child.unref(); resolve(true); });
-});
+async function launch(command, args, { waitForExit = false } = {}) {
+  if (waitForExit) return !(await runFile(command, args, { timeout: 10000 })).error;
+  return new Promise(resolve => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+    child.once('error', () => resolve(false));
+    child.once('spawn', () => { child.unref(); resolve(true); });
+  });
+}
+
+// ShellExecute uses the registered HTTPS handler, including an already-open
+// browser. The wrapper reports an error if Windows rejects the URL request.
+const issueOpenScript = `
+$ErrorActionPreference='Stop'
+$start=[System.Diagnostics.ProcessStartInfo]::new()
+$start.FileName='${ISSUE_URL}'
+$start.UseShellExecute=$true
+$start.WindowStyle=[System.Diagnostics.ProcessWindowStyle]::Normal
+[void][System.Diagnostics.Process]::Start($start)
+`;
 
 // Two windows and no more: File Explorer on the Downloads folder with the file
-// selected, and the default browser on the new-issue page. The page goes
-// through ShellExecute (url.dll, as Go's pkg/browser does): explorer.exe given
-// a URL with a query opened its default folder, Documents, and no browser.
+// selected, and the default browser on the new-issue page.
 export async function revealAndOpen({ file }, run = launch) {
   if (process.platform !== 'win32') return { folderOpened: false, issueOpened: false };
-  const opened = (command, args) => Promise.resolve().then(() => run(command, args)).catch(() => false);
+  const opened = (command, args, options) => Promise.resolve().then(() => run(command, args, options)).catch(() => false);
   const folderOpened = Boolean(file) && await opened(path.join(windowsDir(), 'explorer.exe'), ['/select,', file]);
-  const issueOpened = await opened(path.join(windowsDir(), 'System32', 'rundll32.exe'), ['url.dll,FileProtocolHandler', ISSUE_URL]);
+  const issueOpened = await opened(powershellPath(), ['-NoProfile', '-NonInteractive', '-Command', issueOpenScript], { waitForExit: true });
   return { folderOpened, issueOpened };
 }
 
@@ -360,7 +383,7 @@ export function createDiagnosticsHandler({ collect, open = revealAndOpen, logger
       let opened;
       try { opened = await open(result ?? {}); }
       catch (error) { logger?.warn?.('dsh-computer-use-win: could not open the diagnostics: %s', error?.message ?? error); }
-      sendJson(response, result ? 200 : 500, { ok: Boolean(result), fileName: result?.fileName, ...opened });
+      sendJson(response, result ? 200 : 500, { ok: Boolean(result), fileName: result?.fileName, filePath: result?.file, ...opened });
     } finally { running = false; }
   };
 }
