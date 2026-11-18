@@ -305,8 +305,8 @@ public static class WindowsComputerUseNative {
   // Synthesize the text as Unicode key events (KEYEVENTF_UNICODE). No clipboard
   // is touched, so this also works on password fields and other controls that
   // reject paste. The target control must be foreground + focused. Returns
-  // false if any input event was dropped (queue full).
-  public static bool SendUnicodeText(string text) {
+  // false if any input event was dropped or the target lost focus.
+  public static bool SendUnicodeText(string text, IntPtr front, IntPtr focus) {
     if (string.IsNullOrEmpty(text)) return true;
     var chars = text.ToCharArray();
     var inputs = new INPUT[chars.Length * 2];
@@ -323,7 +323,7 @@ public static class WindowsComputerUseNative {
       // release
       inputs[n].type = 1;
       inputs[n].U.ki.wVk = 0;
-      inputs[n].U.ki.wScan = 0;
+      inputs[n].U.ki.wScan = ch;
       inputs[n].U.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
       inputs[n].U.ki.time = 0;
       inputs[n].U.ki.dwExtraInfo = new IntPtr((long)(ulong)InputMarker);
@@ -333,6 +333,7 @@ public static class WindowsComputerUseNative {
     int size = Marshal.SizeOf(typeof(INPUT));
     while (sent < n) {
       ThrowIfCancelled();
+      if (GetForegroundWindow() != front || FocusedWindow(front) != focus) return false;
       int chunk = Math.Min(64, n - sent);
       var slice = new INPUT[chunk];
       Array.Copy(inputs, sent, slice, 0, chunk);
@@ -474,8 +475,49 @@ public static class WindowsComputerUseNative {
   [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO info);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   public static extern IntPtr SendMessageTimeoutW(IntPtr hwnd, uint msg, IntPtr wParam, string lParam, uint flags, uint timeout, out UIntPtr result);
+  [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+  private static extern IntPtr ReadMessageText(IntPtr hwnd, uint msg, UIntPtr wParam, System.Text.StringBuilder text, uint flags, uint timeout, out UIntPtr result);
+  [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", ExactSpelling = true)]
+  private static extern IntPtr ReadMessageSelection(IntPtr hwnd, uint msg, out uint start, out uint end, uint flags, uint timeout, out UIntPtr result);
   public const uint BM_CLICK = 0x00F5, EM_SETSEL = 0x00B1, EM_REPLACESEL = 0x00C2;
   public const uint WM_GETTEXTLENGTH = 0x000E, WM_HSCROLL = 0x0114, WM_VSCROLL = 0x0115;
+
+  public static string ReadEditText(IntPtr hwnd, int capacity) {
+    var text = new System.Text.StringBuilder(capacity);
+    UIntPtr length;
+    // WM_GETTEXT, with one extra slot to detect a truncated read.
+    if (ReadMessageText(hwnd, 0x000D, new UIntPtr((uint)capacity), text, 3, 100, out length) == IntPtr.Zero ||
+        length.ToUInt64() >= (ulong)(capacity - 1)) return null;
+    return text.ToString();
+  }
+
+  public static int[] ReadEditSelection(IntPtr hwnd) {
+    uint start, end;
+    UIntPtr ignored;
+    // EM_GETSEL writes both UTF-16 offsets. Some superclassed edits do not
+    // populate both offsets in the packed return value.
+    if (ReadMessageSelection(hwnd, 0x00B0, out start, out end, 3, 100, out ignored) == IntPtr.Zero ||
+        start > Int32.MaxValue || end > Int32.MaxValue) return null;
+    return new int[] { (int)start, (int)end };
+  }
+
+  [DllImport("user32.dll")] private static extern bool InvalidateRect(IntPtr hwnd, IntPtr rect, bool erase);
+  [DllImport("user32.dll")] private static extern bool GetUpdateRect(IntPtr hwnd, IntPtr rect, bool erase);
+  [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
+
+  // A thread gets WM_PAINT only when no posted message or input is waiting
+  // for it. Request a repaint after queueing input: once the window's update
+  // region is empty again, its thread has taken all of that input. A message
+  // sent to the window cannot tell, since it is handled before queued input.
+  public static bool RequestPaint(IntPtr hwnd) {
+    RECT client;
+    return hwnd != IntPtr.Zero && IsWindowVisible(hwnd) && GetClientRect(hwnd, out client) &&
+      client.right > client.left && client.bottom > client.top && InvalidateRect(hwnd, IntPtr.Zero, false);
+  }
+
+  public static bool PaintPending(IntPtr hwnd) {
+    return hwnd != IntPtr.Zero && GetUpdateRect(hwnd, IntPtr.Zero, false);
+  }
 
   // The window with the keyboard focus in hwnd's thread. Each thread keeps its
   // own focus, also while its windows are in the background (zero when none).
@@ -917,8 +959,12 @@ function Assert-InputProcess {
     throw 'HOST_INPUT_DENIED: desktop input cannot target the DSH host or computer-use helper.'
   }
   if ($env:WCU_HOST_EXECUTABLE) {
-    $executable=Invoke-Safe { (Get-Process -Id $ProcessId -ErrorAction Stop).Path } $null
-    if (-not $executable) { throw 'INPUT_TARGET_UNAVAILABLE: the target executable could not be checked.' }
+    $process=Invoke-Safe { Get-Process -Id $ProcessId -ErrorAction Stop } $null
+    if ($null -eq $process) { throw 'INPUT_TARGET_UNAVAILABLE: the target process could not be opened or has exited. No input was sent.' }
+    $executable=Invoke-Safe { $process.Path } $null
+    if (-not $executable) {
+      throw 'INPUT_TARGET_ACCESS_UNCONFIRMED: Windows did not allow the target executable to be verified. The app may be running as administrator or the process may have exited. No input was sent.'
+    }
     if ([string]::Equals([IO.Path]::GetFullPath($executable),[IO.Path]::GetFullPath($env:WCU_HOST_EXECUTABLE),[StringComparison]::OrdinalIgnoreCase)) {
       throw 'HOST_INPUT_DENIED: desktop input cannot target a DSH host executable window.'
     }
@@ -1518,6 +1564,82 @@ function Get-EditTextLength {
   $reply = [UIntPtr]::Zero
   if ([WindowsComputerUseNative]::SendMessageTimeout([IntPtr]$Hwnd, [WindowsComputerUseNative]::WM_GETTEXTLENGTH, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 1000, [ref]$reply) -eq [IntPtr]::Zero) { return $null }
   return [int64]$reply.ToUInt64()
+}
+
+# Capture the expected post-input value of a small, plain Win32 edit. Treat
+# password fields and unsupported or ambiguous reads as unverified.
+function Get-SendInputEdit {
+  param([IntPtr]$Focus, [string]$Text)
+  if ($Focus -eq [IntPtr]::Zero -or $Text -match '\p{Cc}') { return $null }
+  $class = New-Object System.Text.StringBuilder 128
+  [void][WindowsComputerUseNative]::GetClassName($Focus, $class, 128)
+  if ($class.ToString() -notmatch $script:NativeEditClass) { return $null }
+  if (([WindowsComputerUseNative]::GetWindowLong($Focus, -16) -band 0x0020) -ne 0) { return $null } # ES_PASSWORD
+  $reply = [UIntPtr]::Zero
+  # EM_GETPASSWORDCHAR can identify a password mask installed at runtime.
+  if ([WindowsComputerUseNative]::SendMessageTimeout($Focus, 0x00D2, [UIntPtr]::Zero, [IntPtr]::Zero, 3, 100, [ref]$reply) -eq [IntPtr]::Zero -or $reply.ToUInt64() -ne 0) { return $null }
+  if ([WindowsComputerUseNative]::SendMessageTimeout($Focus, [WindowsComputerUseNative]::WM_GETTEXTLENGTH, [UIntPtr]::Zero, [IntPtr]::Zero, 3, 100, [ref]$reply) -eq [IntPtr]::Zero -or $reply.ToUInt64() + $Text.Length -gt 32768) { return $null }
+  # Leave room for text the application adds itself, such as an autocomplete suffix.
+  $capacity = [int]$reply.ToUInt64() + $Text.Length + 1026
+  $before = [WindowsComputerUseNative]::ReadEditText($Focus, $capacity)
+  if ($null -eq $before) { return $null }
+  # RichEdit may count a line break as one selection unit but return CRLF in text.
+  if ($class.ToString() -match 'RichEdit' -and $before -match "[`r`n]") { return $null }
+  $selection = [WindowsComputerUseNative]::ReadEditSelection($Focus)
+  if ($null -eq $selection) { return $null }
+  $start, $end = $selection
+  if ($start -gt $end -or $end -gt $before.Length) { return $null }
+  $head = $before.Substring(0, $start) + $Text
+  $tail = $before.Substring($end)
+  $expected = $head + $tail
+  if ([string]::Equals($expected, $before, [StringComparison]::Ordinal)) { return $null }
+  return @{ expected = $expected; head = $head; tail = $tail; capacity = $capacity }
+}
+
+# SendInput returns once the keys sit in the target thread's input queue, but
+# a key reaches whichever window has the focus when that thread takes it out.
+# Giving the foreground back before then drops the rest of the text or sends
+# it elsewhere (issue #90). So the foreground stays until the target has taken
+# the keys; a repaint requested now arrives only after the last one.
+#  - A readable edit is done once it holds the expected text. The wait goes on
+#    while its text changes or the repaint is pending. After the repaint, reads
+#    that show no change for 400 ms mean the keys are used up.
+#  - Any other control waits at least 150 ms and until the repaint.
+# The cap grows with the text. A foreground or focus change ends the wait.
+# Returns 'observed', 'changed' (all typed text arrived, and the application
+# added text or changed letter case), 'incomplete', or $null (not verified).
+function Wait-SendInputEdit {
+  param([IntPtr]$Front, [IntPtr]$Focus, [hashtable]$Edit, [int]$Length = 1)
+  $wait = [Diagnostics.Stopwatch]::StartNew()
+  $paint = [WindowsComputerUseNative]::RequestPaint($Focus)
+  $limit = if ($null -eq $Edit) { [Math]::Min(5000, 150 + 50 * $Length) } else { [Math]::Min(15000, 1000 + 50 * $Length) }
+  $classify = {
+    param([string]$Value)
+    if ([string]::Equals($Value, $Edit.expected, [StringComparison]::OrdinalIgnoreCase) -or
+        ($Value.Length -gt $Edit.expected.Length -and $Value.StartsWith($Edit.head, [StringComparison]::Ordinal) -and $Value.EndsWith($Edit.tail, [StringComparison]::Ordinal))) { 'changed' } else { 'incomplete' }
+  }
+  $last = $null
+  $still = [Diagnostics.Stopwatch]::StartNew()
+  do {
+    [void](Test-Failsafe)
+    if ([WindowsComputerUseNative]::GetForegroundWindow() -ne $Front -or [WindowsComputerUseNative]::FocusedWindow($Front) -ne $Focus) { return $null }
+    $taken = -not ($paint -and [WindowsComputerUseNative]::PaintPending($Focus))
+    if ($null -eq $Edit) {
+      if ($taken -and $wait.ElapsedMilliseconds -ge 150) { return $null }
+      Start-Sleep -Milliseconds 10
+    } else {
+      $value = [WindowsComputerUseNative]::ReadEditText($Focus, $Edit.capacity)
+      if ($null -ne $value) {
+        if ([string]::Equals($value, $Edit.expected, [StringComparison]::Ordinal)) { return 'observed' }
+        if ($null -eq $last -or -not [string]::Equals($value, $last, [StringComparison]::Ordinal)) { $last = $value; $still.Restart() }
+        elseif ($taken -and $still.ElapsedMilliseconds -ge 400) { return (& $classify $value) }
+      }
+      Start-Sleep -Milliseconds 25
+    }
+  } while ($wait.ElapsedMilliseconds -lt $limit)
+  if ($null -eq $last) { return $null }
+  if ($still.ElapsedMilliseconds -ge 400 -and -not ($paint -and [WindowsComputerUseNative]::PaintPending($Focus))) { return (& $classify $last) }
+  return 'incomplete'
 }
 
 # Posted characters arrive after the post returns. For a Win32 edit, wait up
@@ -3704,10 +3826,24 @@ function Invoke-Action {
         Assert-InFront $state
         $result["deliveredTo"] = $destination
         if ($method -eq "sendinput") {
-          $ok = [bool][WindowsComputerUseNative]::SendUnicodeText($text)
-          if (-not $ok) { throw "method:'sendinput' dropped some key events (input queue full). Retry, or use method:'clipboard'." }
+          $front = [WindowsComputerUseNative]::GetForegroundWindow()
+          $focus = [WindowsComputerUseNative]::FocusedWindow($front)
+          $edit = Get-SendInputEdit $focus $text
+          Assert-InFront $state
+          if ([WindowsComputerUseNative]::GetForegroundWindow() -ne $front -or [WindowsComputerUseNative]::FocusedWindow($front) -ne $focus) {
+            throw 'INPUT_FOCUS_CHANGED: focus changed before typing. No input was sent.'
+          }
+          [void](Test-Failsafe)
+          $ok = [bool][WindowsComputerUseNative]::SendUnicodeText($text, $front, $focus)
+          $typed = Wait-SendInputEdit $front $focus $edit $text.Length
+          if (-not $ok -or $typed -eq 'incomplete') {
+            throw 'INPUT_TEXT_INCOMPLETE: the full text was not confirmed in the target. Some text may already be present. Inspect the field before retrying.'
+          }
           $result["method"] = "sendinput-unicode"
-          $result["note"] = "Synthesized Unicode key events; target was foreground + focused. Works on password fields (no paste)."
+          $result["verified"] = ($typed -eq 'observed') -or ($typed -eq 'changed')
+          $result["verification"] = if ($result["verified"]) { 'observed' } else { 'unconfirmed' }
+          if ($typed -eq 'changed') { $result["note"] = 'The field holds the typed text, and the application added text or changed letter case (for example autocomplete). Check the field if the exact value matters.' }
+          elseif ($null -eq $typed) { $result["note"] = 'Windows queued the Unicode input. The edited field could not be verified. Check the field before retrying.' }
         } else {
           $restore = [bool](Get-Prop $inputObject "restoreClipboard" $true)
           Type-Text -Text $text -RestoreClipboard $restore
@@ -3718,9 +3854,7 @@ function Invoke-Action {
           if ($script:LastPasteInfo -and -not $script:LastPasteInfo.clipboardRestored -and $restore) { $result["clipboardRestoreNote"] = 'Previous clipboard was not restored because the target read was not confirmed or restoration failed; requested text remains available for a late paste.' }
         }
       } finally { Complete-Input $state $result }
-      # Closed-loop verification: read back the value of the control we typed
-      # into, so the model gets evidence instead of a blind "ok". (Skipped for
-      # sendinput on password fields, which deliberately hide their value.)
+      # Clipboard: provide the requested main control's value when available.
       if ($method -ne "sendinput" -and $null -ne $focusedControl -and $null -ne $target) {
         $verify = Get-BestTextControl $uiaTarget
         if ($null -ne $verify) {
@@ -4025,13 +4159,19 @@ function Invoke-Action {
       $query = [string](Get-Prop $inputObject "query" "")
       $winEl = $null
       $activationRefused = $false
+      $activationError = $null
       if (Has-WindowTarget $inputObject) {
         $winEl = Get-ObservationWindow $inputObject $scope
         # Capture happens on screen pixels: an occluded window would OCR the
         # overlapping content, so honour activate:true before capturing. A
         # refused activation degrades the capture but is not fatal — warn.
-        if ([bool](Get-Prop $inputObject "activate" $false) -and -not (Set-WindowForeground $winEl)) {
-          $activationRefused = $true
+        if ([bool](Get-Prop $inputObject "activate" $false)) {
+          try { $activationRefused = -not (Set-WindowForeground $winEl) }
+          catch {
+            if ($_.Exception.Message -notlike 'INPUT_TARGET_ACCESS_UNCONFIRMED:*') { throw }
+            $activationRefused = $true
+            $activationError = $_.Exception.Message
+          }
         }
       } elseif ($scope -ne "desktop") {
         $winEl = Get-ObservationWindow $inputObject $scope
@@ -4133,7 +4273,8 @@ function Invoke-Action {
         }
       }
       if ($activationRefused) {
-        $result["warning"] = "activate:true was requested but the window could not be brought to the foreground (Windows foreground lock); the capture may show overlapping content."
+        $reason = if ($activationError) { $activationError } else { 'Windows refused to bring the target window to the foreground.' }
+        $result["warning"] = "$reason OCR captured without activating the target. Check for overlapping content before using any coordinates."
       }
       return $result
     }

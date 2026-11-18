@@ -521,13 +521,11 @@ window.__ModuleLoader__.load({
         try{
           const {status,data}=await requestJson('/dsh-computer-use-win/api/diagnostics',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:120000});
           if(status===200&&data?.ok){
-            dialog={tone:'saved',text:t('reportSaved'),fileName:data.fileName,filePath:data.filePath,
-              detail:t(data.issueOpened===true?'reportIssueOpened':'reportIssueFallback')};
+            dialog={tone:'saved',text:t('reportSaved'),fileName:data.fileName,filePath:data.filePath,detail:t('reportAttachFile')};
           }else if(status===409){
             dialog={tone:'busy',text:t('reportBusy')};
           }else if(status===500&&data?.ok===false){
-            dialog={tone:'failed',text:t('reportFailed'),link:data.issueOpened!==true,
-              detail:data.issueOpened===true?t('reportFailedIssueOpened'):undefined};
+            dialog={tone:'failed',text:t('reportFailed'),detail:t('reportDescribeIssue')};
           }
         }catch{}
         running.current=false;

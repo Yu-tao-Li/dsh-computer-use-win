@@ -1,9 +1,10 @@
 ﻿# Input lease behavior is exercised across real processes in input-mutex.mjs.
-function Enter-DesktopInput { return $null }
-function Exit-DesktopInput { param($Lease) }
 # Exercise the shipped OCR action with deterministic words and fake UIA hit tests.
 # No screen capture, physical input, or desktop changes.
 param([string]$BackendPath = "$PSScriptRoot/../scripts/windows-uia.ps1")
+function Enter-DesktopInput { return $null }
+function Exit-DesktopInput { param($Lease) }
+function Test-Failsafe { return $true }
 $ErrorActionPreference = 'Stop'
 $source = [IO.File]::ReadAllText($BackendPath, [Text.Encoding]::UTF8)
 $tokens = $null
@@ -41,7 +42,12 @@ namespace Fixture.Automation {
   }
 }
 '@
-function Has-WindowTarget { param($InputObject) return $false }
+function Has-WindowTarget { param($InputObject) return [bool]$InputObject.nativeWindowHandle }
+function Get-ObservationWindow { return @{nativeWindowHandle=42} }
+function Get-WindowResponsive { return $true }
+function Update-WindowCache {}
+function Update-WindowIdentity {}
+function Set-WindowForeground { throw $script:ActivationFailure }
 function Capture-Screenshot { param($WindowElement, $MaxWidth) $script:CaptureWidth = $MaxWidth; return $script:Shot }
 function Invoke-Ocr { param($PngPath, $Language) $script:OcrLanguage = $Language; return $script:Ocr }
 function Get-ControlTypeName { param($ControlType) return $ControlType }
@@ -172,3 +178,15 @@ $result = Invoke-Action -Action 'ocr' -InputObject ([pscustomobject]@{scope='des
 Assert-Equal $script:CaptureWidth 1280 'An explicit maxWidth still shrinks the capture'
 Assert-Equal $script:OcrLanguage 'ja' 'Requested language is passed to the recognizer'
 Write-Output 'PASS full-size capture by default, requested language and reported language/scale'
+
+$targeted = [pscustomobject]@{nativeWindowHandle=42;activate=$true}
+$script:ActivationFailure = 'INPUT_TARGET_ACCESS_UNCONFIRMED: Windows could not check the executable.'
+$result = Invoke-Action -Action 'ocr' -InputObject $targeted
+Assert-Equal $result.ok $true 'OCR can still read without activation'
+if ($result.warning -notmatch 'INPUT_TARGET_ACCESS_UNCONFIRMED.+captured without activating') { throw 'Missing activation warning' }
+$script:ActivationFailure = 'HOST_INPUT_DENIED: protected host'
+$threw = $false
+try { $null = Invoke-Action -Action 'ocr' -InputObject $targeted }
+catch { if ($_.Exception.Message -notmatch 'HOST_INPUT_DENIED') { throw }; $threw = $true }
+Assert-Equal $threw $true 'Protected-host restrictions are not swallowed'
+Write-Output 'PASS read-only OCR after a permission check fails; host restriction stays enforced'

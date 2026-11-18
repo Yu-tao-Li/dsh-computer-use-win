@@ -583,10 +583,9 @@ window.__ModuleLoader__.load({
     "reportRunning": "导出中…",
     "reportSaved": "已保存诊断文件",
     "reportIssuePage": "GitHub 新建问题页",
-    "reportIssueOpened": "已打开 {issueLink}。把文件拖到描述框，写下问题后提交。",
-    "reportIssueFallback": "打开 {issueLink}，把文件拖到描述框，写下问题后提交。",
+    "reportAttachFile": "请在 {issueLink}描述问题，并附上此文件。",
     "reportFailed": "诊断文件未能保存。",
-    "reportFailedIssueOpened": "已打开 GitHub 新建问题页，你仍可直接描述问题。",
+    "reportDescribeIssue": "你仍可在 {issueLink}描述问题。",
     "reportUnconfirmed": "暂时无法确认诊断信息是否已保存。可先查看下载文件夹。",
     "reportBusy": "诊断信息正在导出，请稍等。",
     "reportOpenIssue": "打开 GitHub 新建问题页面",
@@ -864,10 +863,9 @@ window.__ModuleLoader__.load({
     "reportRunning": "Exporting…",
     "reportSaved": "Diagnostics file saved",
     "reportIssuePage": "GitHub’s new-issue page",
-    "reportIssueOpened": "{issueLink} is open. Drag the file into the description, write what happened, and submit.",
-    "reportIssueFallback": "Open {issueLink}, then drag the file into the description and submit your report.",
+    "reportAttachFile": "Describe what happened on the {issueLink} and attach this file.",
     "reportFailed": "The diagnostics file could not be saved.",
-    "reportFailedIssueOpened": "GitHub’s new-issue page is open. You can still describe what happened.",
+    "reportDescribeIssue": "You can still describe what happened on the {issueLink}.",
     "reportUnconfirmed": "The export could not be confirmed. Check your Downloads folder.",
     "reportBusy": "A diagnostics export is already running.",
     "reportOpenIssue": "Open a new issue on GitHub",
@@ -1387,13 +1385,11 @@ window.__ModuleLoader__.load({
         try{
           const {status,data}=await requestJson('/dsh-computer-use-win/api/diagnostics',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:120000});
           if(status===200&&data?.ok){
-            dialog={tone:'saved',text:t('reportSaved'),fileName:data.fileName,filePath:data.filePath,
-              detail:t(data.issueOpened===true?'reportIssueOpened':'reportIssueFallback')};
+            dialog={tone:'saved',text:t('reportSaved'),fileName:data.fileName,filePath:data.filePath,detail:t('reportAttachFile')};
           }else if(status===409){
             dialog={tone:'busy',text:t('reportBusy')};
           }else if(status===500&&data?.ok===false){
-            dialog={tone:'failed',text:t('reportFailed'),link:data.issueOpened!==true,
-              detail:data.issueOpened===true?t('reportFailedIssueOpened'):undefined};
+            dialog={tone:'failed',text:t('reportFailed'),detail:t('reportDescribeIssue')};
           }
         }catch{}
         running.current=false;
