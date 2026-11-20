@@ -7,21 +7,21 @@
       "tools": 26,
       "utf16CodeUnits": 27350,
       "utf8Bytes": 27350,
-      "instructionsUtf16CodeUnits": 2653
+      "instructionsUtf16CodeUnits": 2881
     },
     {
       "mode": "lite",
       "tools": 12,
       "utf16CodeUnits": 13305,
       "utf8Bytes": 13305,
-      "instructionsUtf16CodeUnits": 2653
+      "instructionsUtf16CodeUnits": 2881
     },
     {
       "mode": "lazy",
       "tools": 1,
       "utf16CodeUnits": 703,
       "utf8Bytes": 703,
-      "instructionsUtf16CodeUnits": 3125
+      "instructionsUtf16CodeUnits": 3353
     }
   ]
 }

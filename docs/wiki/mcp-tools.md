@@ -439,6 +439,8 @@ Chromium pages (Chrome, Edge, Brave) can be read and operated over the Chrome De
 | `t1a2b:address` | The tab's address. `set_value` with a web address navigates; text without a scheme that looks like a host gets `https://`. A search needs the site's own search URL. |
 | `new-tab`, `b1c2d:new-tab` | `set_value` with a web address opens a background tab: `new-tab` in the agent browser, `b1c2d:new-tab` in that connected browser. |
 
+Chromium starts on demand. In `list_windows` and `health`, `browserLane.agent.state` distinguishes `notStarted`, `starting`, `ready` and `failed`. No browser entries are expected before the first request. Use `set_value` with only `{"elementId":"new-tab","value":"https://example.com/"}`, then pass `opened.id` as `browserTab` to read the page. A startup failure includes an error code and the process exit reason when available. To read the same visible Windows window after such a failure, take its `nativeWindowHandle` from `list_windows` and call `snapshot` with `browserTab` omitted or set to `"desktop"`. The explicit desktop marker requires a Windows target. Get a fresh desktop observation before using element IDs or coordinates. Desktop foreground keypresses may then use `thenKeys`.
+
 ### Tools
 
 | Tool | With `browserTab` or a page element id |

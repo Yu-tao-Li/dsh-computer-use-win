@@ -1136,6 +1136,14 @@ export class BrowserLane {
       record.product = version.product;
       if (candidate.source === 'agent') { record.headless = /Headless/.test(version.userAgent); record.userAgent = version.userAgent.replace(/Headless/g, ''); }
       try { record.pid = (await cdp.send('SystemInfo.getProcessInfo')).processInfo.find(info => info.type === 'browser')?.id; } catch { }
+      // Make a throwaway browser discoverable only after its initial context
+      // is isolated. New tabs must never inherit the browser's default profile.
+      if (candidate.isolated) {
+        const { browserContextId } = await cdp.send('Target.createBrowserContext', { disposeOnDetach: true });
+        if (!browserContextId) fail('BROWSER_LANE_UNAVAILABLE', 'DevTools did not create an isolated browsing context');
+        record.contextId = browserContextId;
+      }
+      if (timedOut) fail('BROWSER_TIMEOUT', 'DevTools connected after the startup deadline');
       record.status = 'connected';
       return record;
     })();
@@ -1143,7 +1151,7 @@ export class BrowserLane {
       ? Promise.race([handshake, new Promise((_, reject) => { timer = setTimeout(() => { timedOut = true; reject(new Error(`BROWSER_TIMEOUT: timed out connecting to ${candidate.url}`)); }, timeoutMs); timer.unref?.(); })])
       : handshake;
     record.ready = timed.finally(() => { if (timer) clearTimeout(timer); }).catch(error => {
-      record.cdp?.close();
+      if (!candidate.isolated) record.cdp?.close();
       this.browsers.delete(candidate.url);
       record.status = 'failed'; record.error = error.message;
       if (candidate.discover) this.backoff.set(candidate.url, Date.now() + BACKOFF_MS);
@@ -1170,7 +1178,7 @@ export class BrowserLane {
   // Calls that arrive while the agent browser starts share that one launch;
   // each still answers its own cancellation.
   async ensureAgent(request) {
-    const running = [...this.browsers.values()].find(browser => browser.source === 'agent' && browser.status === 'connected' && !browser.cdp.closed);
+    const running = !this.agentLaunch && [...this.browsers.values()].find(browser => browser.source === 'agent' && browser.status === 'connected' && !browser.cdp.closed);
     if (running) return running;
     this.agentLaunch ??= (async () => {
       await this.resolveApp();
@@ -1178,10 +1186,30 @@ export class BrowserLane {
       if (!this.keepSignIns || !executable) return this.launchAgent();
       mkdirSync(this.agentDir, { recursive: true });
       return profileLock(this.keptDir(executable), () => this.launchAgent());
-    })().finally(() => { this.agentLaunch = null; });
+    })().then(browser => {
+      this.agentStartError = undefined;
+      return browser;
+    }, error => {
+      const detail = String(error.message);
+      const code = /^(BROWSER_[A-Z_]+):/.exec(detail)?.[1] ?? 'BROWSER_LANE_UNAVAILABLE';
+      this.agentStartError = {
+        code, stage: 'startup', ...error.browserStartup,
+        detail: clip(detail.replace(/^BROWSER_[A-Z_]+:\s*/, ''), 320),
+      };
+      const message = detail.startsWith(code + ':') ? detail : `${code}: ${detail}`;
+      throw new Error(message + ' For a visible Windows window, use list_windows and pass its nativeWindowHandle to snapshot with browserTab "desktop".', { cause: error });
+    }).finally(() => { this.agentLaunch = null; });
     const browser = await this.agentLaunch;
     if (request?.cancelled) fail('COMPUTER_USE_CANCELLED', 'cancelled while starting the agent browser');
     return browser;
+  }
+
+  agentStartup() {
+    if (this.disabled) return { state: 'disabled' };
+    if (this.agentLaunch) return { state: 'starting' };
+    if ([...this.browsers.values()].some(browser => browser.source === 'agent' && browser.status === 'connected' && !browser.cdp.closed)) return { state: 'ready' };
+    if (this.agentStartError) return { state: 'failed', error: this.agentStartError };
+    return { state: 'notStarted' };
   }
 
   async launchAgent() {
@@ -1302,30 +1330,35 @@ export class BrowserLane {
       detached: false,
     });
     child.unref();
-    let exited = null;
+    const processEnd = Promise.withResolvers();
     const url = `pipe://${process.pid}/${child.pid}`;
     const pipeCdp = new Cdp(new BrowserPipe(child));
-    child.once('exit', code => {
-      exited = code;
+    child.once('exit', (code, signal) => {
+      processEnd.resolve({ ...(code !== null ? { exitCode: code } : {}), ...(signal ? { signal } : {}) });
       // A throwaway profile goes with its browser.
       setTimeout(() => {
         try { rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { }
       }, 500).unref();
     });
-    child.once('error', error => { exited = error.message; });
+    child.once('error', error => { processEnd.resolve({ processError: error.code ?? 'spawn error' }); });
     let browser;
     try {
-      browser = await this.connect({ url, cdp: pipeCdp, name: `${executable.name} (agent)`, source: 'agent', child }, 10000);
+      browser = await this.connect({ url, cdp: pipeCdp, name: `${executable.name} (agent)`, source: 'agent', child, isolated: true }, 10000);
+      browser.headless = headless;
     } catch (error) {
+      // DevTools may close before Node delivers the child exit. Briefly
+      // collect the real exit reason before cleaning up our child.
+      const end = await Promise.race([processEnd.promise, sleep(150)]);
       try { pipeCdp.close(); } catch { }
-      try { if (exited === null) child.kill(); } catch { }
-      throw error;
+      if (!end) try { child.kill(); } catch { }
+      this.browsers.delete(url);
+      const reason = end?.processError ? `failed to start (${end.processError})`
+        : end?.exitCode !== undefined ? `exited during startup (code ${end.exitCode})`
+        : end?.signal ? `ended during startup (${end.signal})` : `could not connect its DevTools pipe: ${error.message}`;
+      const failure = new Error(`BROWSER_LANE_UNAVAILABLE: ${executable.name} ${reason}`, { cause: error });
+      failure.browserStartup = { stage: 'devtools', ...end };
+      throw failure;
     }
-    // Agent tabs on a throwaway profile live in an isolated context: no
-    // cookies, sign-ins or history of the profile reach them, whichever
-    // browser runs the lane.
-    browser.headless = headless;
-    browser.contextId = (await browser.cdp.send('Target.createBrowserContext', { disposeOnDetach: true })).browserContextId;
     return this.prepareAgent(browser);
   }
 
@@ -1617,9 +1650,9 @@ export class BrowserLane {
     }
     const waiting = [...this.browsers.values()].filter(browser => browser.status === 'connecting').map(browser => browser.name);
     result.browserLane = {
-      browsers: listed, ...(waiting.length ? { waitingForPermission: waiting } : {}),
+      browsers: listed, agent: this.agentStartup(), ...(waiting.length ? { waitingForPermission: waiting } : {}),
       ...(this.attachUser ? { attachUser: { enabled: true, available: !!candidate, instruction: 'Listing makes no connection. Ask the user to allow remote debugging before set_value elementId "<browser id>:connect" value "connect". Only explicit requests retry; do not bypass a refusal.' } } : {}),
-      use: 'Pass browserTab (a tab id) to snapshot/accessibility_tree/find/type_text/keypress/scroll/screenshot/wait_for to work on that page in the background; its element ids (t1a2b:57) work in click/set_value/focus/invoke/scroll/element_info. set_value elementId "new-tab" value "<url>" opens a background tab ' +
+      use: 'agent.state "notStarted" is normal before the first tab. set_value with only elementId "new-tab" and value "<url>" starts the DSH browser on demand. Use opened.id as browserTab for page reads. For desktop fallback, copy nativeWindowHandle from windows and omit browserTab or use "desktop"; observe fresh before using desktop coordinates. The new tab opens ' +
         (this.keepSignIns ? 'in the DSH browser, whose profile is kept: sites the user signed in to there are still signed in' : 'in a separate agent browser without sign-ins') + (listed.some(browser => browser.source !== 'agent') ? '; "<browser id>:new-tab" opens it in that connected browser.' : '.')
     };
     const bidi = await this.bidiBackend();
@@ -1627,6 +1660,7 @@ export class BrowserLane {
       const extra = await bidi.annotateWindows({ windows: result.windows });
       result.browserLane.browsers.push(...(extra.browserLane?.browsers ?? []));
       result.browserLane.use = extra.browserLane?.use ?? result.browserLane.use;
+      delete result.browserLane.agent;
     }
     return result;
   }
@@ -2625,7 +2659,7 @@ export class BrowserLane {
     await this.resolveApp();
     const executable = this.agentExecutable();
     const attachCandidate = await this.userCandidate();
-    return { enabled: !this.disabled, visible: this.env.WCU_BROWSER_HEADLESS !== '1', app: this.app, ...(this.resolvedApp !== undefined ? { resolvedApp: this.resolvedApp } : {}), keepSignIns: this.keepSignIns,
+    return { enabled: !this.disabled, visible: this.env.WCU_BROWSER_HEADLESS !== '1', app: this.app, ...(this.resolvedApp !== undefined ? { resolvedApp: this.resolvedApp } : {}), keepSignIns: this.keepSignIns, agent: this.agentStartup(),
       agentBrowser: executable?.path ?? null, agentProfile: this.agentDir, ...(this.keepSignIns && executable ? { keptProfile: this.keptDir(executable) } : {}),
       endpoints: [...this.candidates(),...(attachCandidate?[attachCandidate]:[])].map(candidate => ({ name: candidate.name, source: candidate.source })),
       ...(this.attachUser?{attachUser:{enabled:true,available:!!attachCandidate,...(attachCandidate?{connect:attachCandidate.key+':connect',status:this.attachAttempts.get(attachCandidate.key)?.status??'available'}:{})}}:{}),

@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { TakeoverControl, STOPPED, IN_WSL, linuxPath, windowsEnv, windowsScript, DEFAULT_POWERSHELL } from './takeover.mjs';
 import { TOOL_NAMES,LITE_TOOL_NAMES,normalizeEnabledTools,browserRoutingInstructions } from './settings.mjs';
 import { BrowserLane } from './browser.mjs';
-import { isBrowserCall,isQuietCall,BACKGROUND_FIRST,INTERRUPTIBLE_ACTIONS,INPUT_ACTIONS,toolAnnotations } from './catalog.mjs';
+import { isBrowserCall,isQuietCall,NEW_TAB,BACKGROUND_FIRST,INTERRUPTIBLE_ACTIONS,INPUT_ACTIONS,toolAnnotations } from './catalog.mjs';
 import { assertOperation, collectApprovalRequirements, consumeGrant } from './policy.mjs';
 const usedApprovalGrants = new Map();
 const SESSION_INPUT_MARKER = '0x' + (((randomBytes(4).readUInt32BE(0) & 0x7fffffff) || 0x44534857) >>> 0).toString(16);
@@ -122,7 +122,7 @@ const treeDetailProperties = {
 const browserTabProperty = {
   browserTab: {
     type: "string",
-    description: "Browser-lane tab id from list_windows (browserLane.browsers[].tabs[].id, for example t1a2b). Works on that page over the Chrome DevTools Protocol, in the background: no pointer movement, keyboard focus, clipboard or window activation. Do not combine with windowTitle, processId, nativeWindowHandle or x/y."
+    description: "Use a tab id from list_windows or new-tab's opened.id for page actions. Drop desktop window fields. For desktop fallback omit browserTab, or use 'desktop' with an explicit Windows target and fresh desktop element IDs or coordinates."
   }
 };
 
@@ -1083,6 +1083,29 @@ function validateActionArguments(actionName, args) {
   }
 }
 
+const nativeTargetKeys = ['windowTitle', 'processId', 'nativeWindowHandle'];
+function validateTargetArgs(args) {
+  const browser = isBrowserCall(args);
+  const nativeKeys = nativeTargetKeys.filter(key => args[key] !== undefined);
+  const opener = NEW_TAB.exec(args.elementId ?? '');
+  if (typeof args.elementId === 'string' && args.elementId.endsWith(':new-tab') && !opener)
+    throw new Error('INVALID_ARGUMENTS: use set_value with elementId "new-tab" and value "<url>" to start the DSH browser. A prefixed new-tab requires an actual connected browser id from list_windows.');
+  if (args.browserTab === 'desktop') {
+    if (browser) throw new Error('INVALID_ARGUMENTS: desktop fallback cannot use page element ids. Use a fresh desktop snapshot with the Windows target first.');
+    if (!args.windowTitle?.trim() && !args.processId && !args.nativeWindowHandle)
+      throw new Error('INVALID_ARGUMENTS: browserTab "desktop" requires a Windows target from list_windows (nativeWindowHandle, processId or windowTitle).');
+    const { browserTab, ...target } = args;
+    return target;
+  }
+  if (opener && (nativeKeys.length || args.browserTab !== undefined))
+    throw new Error('INVALID_ARGUMENTS: opening a browser tab uses only set_value elementId and value. Use elementId "new-tab" for the DSH browser. Omit browserTab, windowTitle, processId and nativeWindowHandle.');
+  if (browser && nativeKeys.length)
+    throw new Error(`INVALID_ARGUMENTS: mixed browser and Windows targets (${nativeKeys.join(', ')}). For a page use its browserTab or page element id alone. For desktop fallback keep the Windows target, omit browserTab and use fresh desktop element ids or coordinates.`);
+  if (args.browserTab !== undefined && !args.browserTab.trim())
+    throw new Error('INVALID_ARGUMENTS: browserTab is empty. Use an actual tab id for a page, or omit browserTab for a Windows window.');
+  return args;
+}
+
 async function callTool(name, args, request) {
   if (batchOwner && batchOwner !== request) throw new Error('COMPUTER_USE_BUSY: A batch is in progress; wait for its result.');
   if (!allowedTools.has(name) && TOOL_NAMES.includes(name.slice(prefix.length))) throw new Error('TOOL_DISABLED_IN_SETTINGS: This tool is disabled by the user in Settings > Computer Use (设置 > 电脑操控 in the Chinese interface).');
@@ -1100,6 +1123,7 @@ async function callTool(name, args, request) {
   }
   assertOperation(name, args, { env: process.env, grants: request?.approvalGrants });
   if (!batchPrevalidated.has(args)) args = validateArguments(definition.inputSchema, args);
+  args = validateTargetArgs(args);
   if (name === 'windows_computer_use_batch') return runBatch(args, request);
   const actionName = name.replace("windows_computer_use_", "");
   const browser = isBrowserCall(args);
@@ -1272,7 +1296,10 @@ async function runBatch(args, request) {
   const plan = args.steps.map((step,index) => {
     const name = prefix + step.action;
     if (!allowedTools.has(name)) throw new Error(`TOOL_DISABLED_IN_SETTINGS: batch step ${index + 1} (${step.action}).`);
-    for (const key of ['browserTab','windowTitle','processId','nativeWindowHandle']) if (step.arguments[key] !== undefined && step.arguments[key] !== target[key]) throw new Error('INVALID_ARGUMENTS: all batch steps must keep the same target.');
+    for (const key of ['browserTab',...nativeTargetKeys]) {
+      const stepTarget = key === 'browserTab' && step.arguments[key] === 'desktop' && !target.browserTab ? undefined : step.arguments[key];
+      if (stepTarget !== undefined && stepTarget !== target[key]) throw new Error('INVALID_ARGUMENTS: all batch steps must keep the same target.');
+    }
     if (/^(?:new-tab|b[0-9a-z]+:(?:new-tab|connect))$/.test(step.arguments.elementId ?? '')) throw new Error('INVALID_ARGUMENTS: open or connect a browser before batching.');
     if (target.browserTab && step.arguments.elementId && !step.arguments.elementId.startsWith(target.browserTab + ':')) throw new Error('INVALID_ARGUMENTS: batch element belongs to another tab.');
     if (!target.browserTab && isBrowserCall(step.arguments)) throw new Error('INVALID_ARGUMENTS: a desktop batch cannot contain page elements.');
@@ -1282,7 +1309,7 @@ async function runBatch(args, request) {
     const combined = step.action === 'wait' ? { ...step.arguments } : { ...inherited, ...step.arguments };
     if (target.browserTab && !Object.hasOwn(definition.inputSchema.properties,'browserTab')) delete combined.browserTab;
     if (target.browserTab && step.action !== 'wait' && !isBrowserCall(combined)) throw new Error('INVALID_ARGUMENTS: this browser batch action needs a page element ID; page coordinates cannot become desktop input.');
-    const validated = validateArguments(definition.inputSchema, combined);
+    const validated = validateTargetArgs(validateArguments(definition.inputSchema, combined));
     validateActionArguments(step.action, validated);
     if (target.browserTab || step.action === 'wait') batchPrevalidated.add(validated);
     return { name, action: step.action, args: validated };

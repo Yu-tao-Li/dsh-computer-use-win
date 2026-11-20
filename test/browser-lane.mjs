@@ -87,10 +87,14 @@ try {
   for (const tool of ['snapshot', 'accessibility_tree', 'find', 'type_text', 'keypress', 'scroll', 'screenshot', 'wait_for', 'activate_window', 'close_window'])
     assert.ok(listed.find(item => item.name === prefix + tool).inputSchema.properties.browserTab, `${tool} accepts browserTab`);
   const before = foreground();
+  const initial = (await call('list_windows', {})).meta.browserLane;
+  assert.equal(initial.agent.state, 'notStarted');
+  assert.deepEqual(initial.browsers, []);
 
   // Tabs opened at once while the agent browser starts share that one browser.
   const [first, second] = await Promise.all([call('set_value', { elementId: 'new-tab', value: site + '/' }), call('set_value', { elementId: 'new-tab', value: site + '/page2' })]);
   assert.equal(first.meta.opened.browser, second.meta.opened.browser, 'Simultaneous first tabs share one agent browser');
+  assert.match((await call('snapshot',{browserTab:first.meta.opened.id,includeScreenshot:false})).page,/浏览器通道测试页/);
   await call('close_window', { browserTab: second.meta.opened.id });
   let r = first;
   const tab = r.meta.opened.id;
@@ -98,6 +102,7 @@ try {
   assert.match(r.page, new RegExp(`set_value ${tab}:address navigates`));
   const home = r.page;
   const windows = await call('list_windows', {});
+  assert.equal(windows.meta.browserLane.agent.state, 'ready');
   const agent = windows.meta.browserLane.browsers.find(browser => browser.source === 'agent');
   assert.ok(agent?.tabs.some(item => item.id === tab), 'list_windows lists the agent tab');
   assert.ok(!agent.tabs.some(item => /^(about|chrome|edge):/.test(item.url)), 'Only the agent context is listed');

@@ -17,6 +17,7 @@ await writeFile(path.join(root,'scripts/windows-uia.ps1'),`param([switch]$Persis
   $r=$line | ConvertFrom-Json
   $result=@{id=$r.id;ok=$true;action=$r.action;args=$r.args}
   if($r.action -eq 'wait'){Start-Sleep -Milliseconds $r.args.milliseconds}
+  if($r.action -eq 'list_windows'){$result.windows=@(@{nativeWindowHandle=42;processId=4;name='Existing Edge fixture'})}
   if($r.action -eq 'keypress'){$result.deliveredTo=@{title='Fixture';via=$(if($r.args.keys[0] -eq 'f2'){'front window'}else{'window target'})}}
   if($r.action -eq 'type_text'){
     $result.deliveredTo=@{title='Fixture';via='window target'}
@@ -38,7 +39,11 @@ await writeFile(path.join(root,'scripts/windows-uia.ps1'),`param([switch]$Persis
   [Console]::WriteLine(($result | ConvertTo-Json -Depth 20 -Compress))
 }
 `);
-const client=new McpTestClient(process.execPath,[path.join(root,'mcp/server.mjs')],{env:{...process.env,NODE_ENV:'test',WCU_TEST_NO_TAKEOVER:'1',WINDOWS_CU_POWERSHELL:process.env.WINDOWS_CU_POWERSHELL||'powershell.exe'}});
+const client=new McpTestClient(process.execPath,[path.join(root,'mcp/server.mjs')],{env:{
+  ...process.env,NODE_ENV:'test',WCU_TEST_NO_TAKEOVER:'1',WINDOWS_CU_POWERSHELL:process.env.WINDOWS_CU_POWERSHELL||'powershell.exe',
+  WCU_BROWSER_APP:'edge',WCU_BROWSER_EXE:process.execPath,WCU_BROWSER_PROFILE:path.join(root,'agent-browser'),
+  WCU_BROWSER_LANE:'on',WCU_BROWSER_SIGNIN:'0',WCU_BROWSER_ATTACH_USER:'0',WCU_BROWSER_CDP_URL:'',WCU_BROWSER_BIDI_URL:'',
+}});
 const call=(name,args={})=>client.call('windows_computer_use_'+name,args);
 const data=r=>JSON.parse(r.content.find(c=>c.type==='text').text);
 try{
@@ -47,6 +52,45 @@ try{
     const r=await call(name,args);assert.equal(r.isError,true);assert.match(r.content[0].text,/INVALID_ARGUMENTS/);
   }
   assert.equal(await access(path.join(root,'started.txt')).then(()=>true,()=>false),false,'Invalid arguments must not launch a worker');
+  const initial=data(await call('list_windows'));
+  assert.equal(initial.browserLane.agent.state,'notStarted');
+  assert.deepEqual(initial.browserLane.browsers,[]);
+  const nativeWindowHandle=initial.windows[0].nativeWindowHandle;
+  for(const [action,args,hint] of [
+    ['set_value',{elementId:'new-tab',value:'https://example.test',nativeWindowHandle},/Omit browserTab, windowTitle, processId and nativeWindowHandle/],
+    ['set_value',{elementId:'<browser>:new-tab',value:'https://example.test'},/actual connected browser id/],
+    ['snapshot',{browserTab:'desktop'},/requires a Windows target/],
+    ['snapshot',{browserTab:'t1',nativeWindowHandle},/mixed browser and Windows targets/],
+    ['click',{browserTab:'desktop',nativeWindowHandle,elementId:'t1:7'},/fresh desktop snapshot/],
+  ]){
+    const bad=await call(action,args);
+    assert.equal(bad.isError,true);
+    assert.match(bad.content[0].text,hint);
+  }
+  assert.equal(data(await call('list_windows')).browserLane.agent.state,'notStarted');
+  const failed=await call('set_value',{elementId:'new-tab',value:'https://example.test'});
+  assert.equal(failed.isError,true);
+  assert.match(failed.content[0].text,/BROWSER_LANE_UNAVAILABLE: .+exited during startup \(code \d+\)/);
+  const status=data(await call('health')).browserLane.agent;
+  assert.equal(status.state,'failed');
+  assert.equal(status.error.stage,'devtools');
+  assert.ok(Number.isInteger(status.error.exitCode));
+  const afterFailure=data(await call('list_windows'));
+  assert.equal(afterFailure.browserLane.agent.state,'failed');
+  assert.equal(afterFailure.windows[0].nativeWindowHandle,nativeWindowHandle);
+  const desktop={browserTab:'desktop',nativeWindowHandle};
+  const fallback=data(await call('snapshot',{...desktop,includeScreenshot:false}));
+  assert.equal(fallback.source,'uia');
+  assert.equal(fallback.args.nativeWindowHandle,nativeWindowHandle);
+  assert.equal(fallback.args.browserTab,undefined);
+  for(const [name,extra] of [['accessibility_tree',{}],['find',{query:'edge',ocrFallback:false}],['wait_for',{condition:'window'}],['activate_window',{}]]){
+    const result=data(await call(name,{...desktop,...extra}));
+    assert.equal(result.args.browserTab,undefined);
+    assert.equal(result.args.nativeWindowHandle,nativeWindowHandle);
+  }
+  const desktopChord=data(await call('keypress',{...desktop,keys:['alt','h'],thenKeys:[['o']],dispatch:'foreground'}));
+  assert.deepEqual(desktopChord.args.thenKeys,[['o']]);
+  assert.equal(desktopChord.args.nativeWindowHandle,nativeWindowHandle);
   assert.equal((await call('wait',{milliseconds:1})).isError,undefined);
   const queued=await Promise.all([call('wait',{milliseconds:700}),call('wait',{milliseconds:700}),call('wait',{milliseconds:700})]);
   assert.ok(queued.every(r=>!r.isError),'Unsent queued calls must not time out or kill the current action');
