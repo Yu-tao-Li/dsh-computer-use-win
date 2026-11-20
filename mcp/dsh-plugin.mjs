@@ -12,7 +12,7 @@ import { installActivity } from './activity.mjs';
 import { systemLocale } from './overlay-strings.mjs';
 import { randomBytes } from 'node:crypto';
 import { installHostPolicy } from './policy.mjs';
-import { settingsMode,findOwnEntry,bridgeSupport } from './host-compat.mjs';
+import { settingsMode,findOwnEntry,bridgeSupport,bridgeDiagnostics } from './host-compat.mjs';
 import { installCallLog, createDiagnosticsHandler, exportDiagnostics, DIAGNOSTICS_ROUTE, readInstallSpec } from './diagnostics.mjs';
 
 export const name = 'windows-computer-use';
@@ -146,6 +146,7 @@ export function bridgeConfig(config = {}, runtime = {}) {
 }
 export async function apply(ctx, config) {
   const bridge = await import('@deepseek-ai/dsh-mcp-client');
+  const support = bridgeSupport();
   const root = mkdtempSync(path.join(os.tmpdir(), `${CONTROL_PREFIX}${process.pid}-`));
   // Without the pipe the directory falls back to the PID rule; never block loading.
   const releaseControlDir=await holdControlDir(root).catch(error=>{ctx.logger.warn('dsh-computer-use-win: control directory pipe unavailable: %s',error?.message??error);return ()=>{};});
@@ -165,7 +166,8 @@ export async function apply(ctx, config) {
     let current; try { current = profiles?.current; } catch {}
     let version = 'unknown'; try { version = JSON.parse(readFileSync(path.join(pluginRoot, 'package.json'), 'utf8')).version; } catch {}
     return exportDiagnostics({ version, settings: desired, calls: callLog.list(), host: current ? 'DSH Desktop' : 'DSH',
-      mcpClient: bridgeSupport().version, dshLocale: getLocale(), installSpec: readInstallSpec(pluginRoot, current?.dir),
+      mcpClient: support.version, bridge: bridgeDiagnostics(bridge, connection, ctx.tools, enabledToolsForSettings(desired).length, support.peerMismatches),
+      dshLocale: getLocale(), installSpec: readInstallSpec(pluginRoot, current?.dir),
       secrets: [runtime.approvalSecret], serverPath: fileURLToPath(new URL('./server.mjs', import.meta.url)) });
   };
   ctx.inject(['webServer'], owner => {
@@ -190,8 +192,8 @@ export async function apply(ctx, config) {
   ctx.effect(() => () => { for (const delay of [1500, 6000]) setTimeout(() => removeControlDir(root), delay).unref(); });
   setTimeout(() => { void sweepControlDirs({ keep: root }).catch(()=>{}); }, 3000).unref();
   const logError = limitedErrorLog(ctx.logger);
-  const support=bridgeSupport();
   if(!support.tested){runtime.notices={hostBridgeUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: bridge %s is unverified for this release; actions requiring approval fail closed if approval is unavailable.',support.version);}
+  if(support.peerMismatches.length)ctx.logger.warn('dsh-computer-use-win: bridge %s resolved DSH peer versions outside its declared requirements: %s. Use the bridge supplied with this DSH Host.',support.version,support.peerMismatches.map(({name,expected,actual})=>name+' '+actual+' (expected '+expected+')').join(', '));
   if(support.legacyApprovalUiUnverified){runtime.notices={...runtime.notices,legacyApprovalUiUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: legacy bridge %s does not support interactive web approval prompts; actions requiring approval will be blocked.',support.version);}
   // Reset settings go to the DSH log and, through the server, into the health
   // and tools results the agent reads. Which duplicate's tools DSH keeps is

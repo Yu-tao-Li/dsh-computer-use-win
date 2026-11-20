@@ -4,7 +4,7 @@ import {spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 const [version,directory]=process.argv.slice(2);
-if(!['0.1.0-rc.6','0.1.0-rc.7','0.2.1-rc.2','0.2.2-rc.1'].includes(version)||!directory||!path.isAbsolute(directory))throw new Error('Pass a supported exact host version and an absolute empty fixture directory');
+if(!['0.1.0-rc.6','0.1.0-rc.7','0.2.1-rc.2','0.2.2-rc.1','0.2.2-rc.3','0.2.2-rc.5'].includes(version)||!directory||!path.isAbsolute(directory))throw new Error('Pass a supported exact host version and an absolute empty fixture directory');
 const existing=await readdir(directory).catch(error=>{if(error.code!=='ENOENT')throw error;return [];});
 if(existing.length)throw new Error('Refusing to overwrite an existing host fixture');
 const response=await fetch(`https://registry.npmjs.org/@deepseek-ai%2Fdsh/${version}`);

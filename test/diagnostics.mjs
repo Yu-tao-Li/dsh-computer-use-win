@@ -89,6 +89,7 @@ try {
   const out = path.join(root, 'Downloads');
   const env = { ...process.env, WCU_APPROVAL_SECRET: 'approval-secret-abcdef', __COMPAT_LAYER: 'RunAsInvoker' };
   const result = await exportDiagnostics({
+    bridge: { state: 'reconnecting', configuredToolCount: 26, registeredToolCount: 0, lastError: JSON.stringify({ Authorization: ['fixture-private-bridge'] }), peerMismatches: [{ name: 'dsh-tools', expected: '0.2.2-rc.5', actual: '0.2.2-rc.3' }] },
     version: '0.6.1', settings: { ...facts.settings, indicatorText: 'DSH 正在控制电脑', unknownField: 'private' }, calls: log.list().slice(-2), host: 'DSH Desktop', mcpClient: facts.mcpClient, dshLocale: 'zh-CN',
     installSpec: `file:${os.homedir()}\\x.tgz`, env, outDir: out, at: new Date(2026, 10, 18, 2, 3, 4),
     selfTest: { ok: true, backend: { powershell: '5.1', error: 'Read failed: D:\\Private project\\record.txt' } }, facts: { system: { windows: facts.windows, powershell: '5.1', screens: facts.screens, desktopVersions: ['2.0.18'] }, browsers: facts.browsers, logs: [`dsh.log: windows-computer-use ready at ${os.homedir()}\\a approval-secret-abcdef`, 'wincu: Cookie: first=fixture-private-a; second=fixture-private-b', ...sensitiveLogs] },
@@ -106,6 +107,7 @@ try {
   assert.ok(saved.includes('Windows: Windows 11 Pro 25H2'));
   assert.ok(saved.includes('DSH Desktop 2.0.18'));
   assert.ok(saved.includes('0.6.1 (local)'));
+  assert.match(saved, /Host MCP registration[\s\S]+"state": "reconnecting"[\s\S]+"registeredToolCount": 0[\s\S]+"dsh-tools"[\s\S]+Self-test/);
   assert.ok(!saved.includes('unknownField') && !saved.includes('x.tgz'));
 
   // Explorer selects the TXT. The browser launcher reports ShellExecute's

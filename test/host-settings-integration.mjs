@@ -49,6 +49,20 @@ const until=async test=>{const deadline=Date.now()+30000;while(!await test()){if
 try {
   await fiber;
   await until(()=>tools.schemas().length===26);
+  const computerUseNames = scope => tools.schemas(scope).map(tool=>tool.name).filter(name=>name.startsWith('mcp__wincu__')).sort();
+  const registered = computerUseNames();
+  assert.equal(registered.length,26);
+  assert.deepEqual(computerUseNames({}),registered,'An unrestricted Agent inherits the global computer-use tools');
+  if(typeof tools.restrict==='function'){
+    const {createScope}=await load('@deepseek-ai/dsh-scope');
+    const agent={};
+    const restricted=createScope(ctx,agent);
+    try{
+      restricted.ctx.tools.restrict({deny:registered});
+      assert.deepEqual(computerUseNames(agent),[],'Agent restrictions can hide the global computer-use tools');
+      assert.deepEqual(computerUseNames(),registered,'The global registry is intact when an Agent cannot see its tools');
+    }finally{await restricted.dispose();}
+  }
   await until(()=>settings.describe().some(x=>x.ns===entry.options.id&&x.autoGenerate===false));
   const row=settings.describe().find(x=>x.ns===entry.options.id);
   assert.ok(row,'Modern DSH must expose the plugin Config form');

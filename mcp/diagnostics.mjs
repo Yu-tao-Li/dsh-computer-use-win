@@ -293,6 +293,7 @@ export function diagnosticsText(facts, { calls = [], logs = [], at = new Date() 
     'Review the logs and errors before attaching this file. Tool input text is kept as its length; screenshots are excluded.',
     ...section('环境 / Environment', environmentSummary(facts)),
     ...section('设置 / Settings', JSON.stringify(facts.settings ?? {}, null, 2)),
+    ...(facts.bridge ? section('宿主 MCP 注册 / Host MCP registration', JSON.stringify(facts.bridge, null, 2)) : []),
     ...section('自检 / Self-test', JSON.stringify(facts.selfTest ?? { ok: false, error: 'not run' }, null, 2)),
     ...section(`最近的电脑操控调用 / Recent computer-use calls (${calls.length})`, callLines),
     ...section(`DSH 日志里和本插件相关的行 / Plugin lines in the DSH log (${logs.length})`, logs.length ? logs.join('\n') : '没有找到。/ None found.'),
@@ -322,7 +323,7 @@ function diagnosticSettings(settings) {
 
 // Collects, writes and returns { file, fileName }. Settings keep their shape;
 // the banner text the user wrote is kept as its length.
-export async function exportDiagnostics({ version, settings = {}, calls = [], host, mcpClient, dshLocale, installSpec, serverPath, defaultBrowser, env = process.env, secrets = [], at = new Date(), outDir, selfTest, facts: given } = {}) {
+export async function exportDiagnostics({ version, settings = {}, calls = [], host, mcpClient, bridge, dshLocale, installSpec, serverPath, defaultBrowser, env = process.env, secrets = [], at = new Date(), outDir, selfTest, facts: given } = {}) {
   const redact = makeRedactor({ secrets: [...secrets, env.WCU_APPROVAL_SECRET] });
   const [system,health] = await Promise.all([
     given?.system ?? systemFacts(),
@@ -330,7 +331,7 @@ export async function exportDiagnostics({ version, settings = {}, calls = [], ho
   ]);
   const installSource = !installSpec ? undefined : /^(?:file|link):/.test(installSpec) ? 'local' : /^(?:git|https?:|github:)/.test(installSpec) ? 'git' : 'registry';
   const facts = {
-    version, host, mcpClient, dshLocale, installSource, settings: diagnosticSettings(settings),
+    version, host, mcpClient, bridge, dshLocale, installSource, settings: diagnosticSettings(settings),
     desktopVersions: host === 'DSH Desktop' ? system.desktopVersions : undefined,
     node: process.versions.node, electron: process.versions.electron, arch: process.arch, osRelease: `${os.type()} ${os.release()}`,
     windows: system.windows, powershell: system.powershell, pwsh: system.pwsh, screens: system.screens, systemDpi: system.systemDpi,

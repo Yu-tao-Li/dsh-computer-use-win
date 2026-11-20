@@ -18,6 +18,14 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
 
 标题右侧的“反馈问题”调用本机 DSH 的 `POST /dsh-computer-use-win/api/diagnostics`，每次只导出一份。插件把 TXT 保存到 Windows 的下载文件夹，在资源管理器中选中文件，并请求默认浏览器打开 GitHub 新建问题页。对话框显示文件名、完整路径和反馈链接。TXT 包含运行环境、相关设置、自检、最近 30 次工具调用和最多 200 行插件日志。工具输入文字只保留长度，无法可靠脱敏的日志条目会被省略，截图可由用户另行附上。
 
+### Agent 看不到电脑操控工具
+
+先在诊断 TXT 中找“宿主 MCP 注册”。`configuredToolCount` 是设置允许的工具数，`registeredToolCount` 是宿主全局注册表里的工具数。桥接版本提供状态接口时，还会显示连接状态、桥接注册数和连接错误。懒启动最初只注册管理工具。这些信息来自正在运行的 DSH，独立自检只检查插件后端。
+
+宿主注册了工具、当前 Agent 仍看不到时，查看该 Agent 的工具列表。该会话如果有 Cordis 检查工具，先通过 `cordis_inspect_list` 确认 `Tool` provider，再用 `cordis_inspect_query` 查询 `{"platform":"host","provider":"Tool","method":"listTools","input":{}}`。DSH 按 Agent 作用域决定全局工具是否可见，自定义 preset 的筛选也可能影响结果。0.2.2-rc.3 自带 preset 使用 `@deepseek-ai/dsh-agent-preset` 的 `config.plugins` 条目列表，例如 `@deepseek-ai/dsh-web-app/presets/minimal.patch.yml`。插件的 `mcp-dsh-computer-use-win` 是宿主 Loader 条目的 ID，标准安装已挂载该条目。
+
+如果报告里的 `peerMismatches` 列出了不同版本，用该 DSH 安装随附的桥接包复测。相同版本的 DSH 与 `dsh-mcp-client` 0.2.2-rc.3、0.2.2-rc.5 均验证了工具注册。
+
 ### 浏览器操控（Browser Use）
 
 默认打开“优先使用网页控件”和“显示 DSH 浏览器窗口”。DSH 专用浏览器单独启动，用哪个浏览器由“浏览器类型”决定：默认跟随 Windows 的默认浏览器，默认浏览器不是 Edge 或 Chrome 时用已安装的 Chrome 或 Edge。默认使用临时的空白配置，不加载扩展，不带你的登录、Cookie 和浏览记录（打开“保留网站登录”后改用保留的配置，见下段）；退出 DSH 后关闭；无头模式空闲 10 分钟、可见窗口空闲 2 小时后自动关闭，页面活动也延长计时。窗口请求在后台创建，普通网页操作不移动系统鼠标；Chrome 的 JavaScript 模态弹窗实测可能短暂来到前台，不能保证可见浏览器始终不影响焦点；你可以自己切换标签页观看。提示参照 Codex 的浏览器操控，不遮挡网页内容：专用浏览器的窗口框是 DSH 蓝，和你自己的浏览器一眼能分开；DSH 正在操作的标签页，图标换成蓝色箭头，这一轮结束后换回网页自己的图标；网页上一个带光晕的小箭头停在 DSH 点的位置，鼠标点击会穿过它，截图里也没有它。关掉“显示 DSH 浏览器窗口”后，浏览器在后台运行，没有窗口。JavaScript 模态弹窗会暂停页面脚本，标签页图标在弹窗关闭后同步。
@@ -69,6 +77,14 @@ The plugin list shows a short introduction that opens the complete settings page
 DSH checks npm’s `latest` automatically at startup and repeats an old or failed check when settings open. A newer npm release shows Update left of GitHub and a navigation dot. Clicking it rechecks the npm and market targets before the market installs and verifies the package. The page shows progress and any activation step. On DSH Desktop, restart by quitting from the tray and reopening. A market release-age hold can offer Update anyway; a version mismatch between npm and the market offers a retry. Without a market or for a local install, Update opens the upgrade instructions.
 
 Report a problem calls the local DSH route `POST /dsh-computer-use-win/api/diagnostics`, with one export at a time. The plugin writes a TXT to Windows Downloads, selects it in File Explorer and asks the default browser to open GitHub’s new-issue page. The dialog shows the file name, full path and issue link. The TXT contains environment details, relevant settings, a self-test, the last 30 tool calls and up to 200 plugin log lines. Tool input text is kept as its length. Log entries that cannot be reliably redacted are omitted. You can attach screenshots separately.
+
+### Computer Use tools are missing from an Agent
+
+Find “Host MCP registration” in the diagnostics TXT. `configuredToolCount` is the number of tools the settings allow. `registeredToolCount` counts Computer Use tools in the Host's global registry. The report also shows connection state, bridge tool count and connection errors when the bridge exposes them. Lazy startup begins with one management tool. The separate self-test checks the plugin backend.
+
+If the global registry has tools but the current Agent cannot see them, check the Agent's own tool list. If Cordis inspection is available in that session, confirm the `Tool` provider with `cordis_inspect_list`, then pass `{"platform":"host","provider":"Tool","method":"listTools","input":{}}` to `cordis_inspect_query`. DSH applies the Agent's scope when exposing global tools, so a custom preset can affect visibility. The shipped 0.2.2-rc.3 presets use the `@deepseek-ai/dsh-agent-preset` declaration's `config.plugins` entry list. See `@deepseek-ai/dsh-web-app/presets/minimal.patch.yml` for an example. A standard install mounts the plugin's Host Loader entry, `mcp-dsh-computer-use-win`.
+
+If `peerMismatches` lists different DSH package versions, retest with the bridge shipped with that DSH installation. Tool registration was verified with matched DSH and `dsh-mcp-client` versions 0.2.2-rc.3 and 0.2.2-rc.5.
 
 Prefer web page controls and Show the DSH browser window are on by default. The DSH browser starts separately, in the browser chosen under Browser type (by default the Windows default browser, and an installed Chrome or Edge when that is neither), with no extensions and, by default, a temporary empty profile: none of your sign-ins, cookies or history (with Keep website sign-ins on it keeps one profile instead; see below). It closes when DSH exits, after 10 idle minutes when headless, or after two idle hours with a visible window. Its window is requested in the background and page actions never move the desktop pointer. Chrome JavaScript modal dialogs may briefly activate the window, so visible operation is not an unconditional focus guarantee. As in Codex's Browser Use, nothing covers the page: the window frame is DSH blue, so it is never taken for your own browser; the tab DSH works in shows a blue arrow as its icon until the turn ends, then its own icon again; and a small glowing arrow rests where DSH clicks. Clicks pass through the arrow, and screenshots leave it out. With Show the DSH browser window off, the browser runs in the background with no window. Browser Use, reads (screenshots, control trees, OCR, waits) and control actions done in the background show no screen edges, banner or pointer tag and arm no global Esc, so Esc keeps working in your other apps; stop such a turn with the stop button in DSH. Once a turn uses the real mouse or keyboard, the indicator and Esc apply from that call on, and a series stopped with Esc refuses its later Browser Use calls too.
 
