@@ -10,7 +10,7 @@ import { assertBrowserUrl, assertUpload, canonicalizeBrowserUrl, isBlockedRuntim
 // pointer, no keyboard focus, no clipboard and no window activation.
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import tls from 'node:tls';
 import os from 'node:os';
@@ -53,23 +53,65 @@ export function browserEnv(env = process.env) {
   return clean;
 }
 
-// Serialize starting/stopping a kept profile across MCP processes. Chromium's
-// singleton prevents two browsers, but does not serialize our port/owner files.
+function removeEmptyProfileLock(directory) {
+  // Windows can report EPERM for a nonempty directory.
+  try { rmdirSync(directory); }
+  catch (error) { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST', 'EPERM', 'ENOTDIR'].includes(error.code)) throw error; }
+}
+
+function reapProfileLock(lock) {
+  try {
+    const entry = lstatSync(lock);
+    if (entry.isFile()) {
+      // Compatibility with the PID-file lock written by older packages.
+      // Unlink never removes a replacement directory.
+      const owner = Number(readFileSync(lock, 'utf8'));
+      if (Number.isSafeInteger(owner) && owner > 0 && !processAlive(owner)) rmSync(lock, { force: true });
+      return;
+    }
+    if (!entry.isDirectory()) return;
+    const entries = readdirSync(lock);
+    if (entries.length === 1) {
+      const owner = /^owner-(\d+)-[a-f0-9]{16}$/.exec(entries[0]);
+      if (!owner || processAlive(Number(owner[1]))) return;
+      rmSync(path.join(lock, entries[0]), { force: true });
+    }
+    if (entries.length <= 1) removeEmptyProfileLock(lock);
+  } catch (error) {
+    if (!['ENOENT', 'ENOTDIR', 'EISDIR', 'ERR_FS_EISDIR', 'EPERM'].includes(error.code)) throw error;
+  }
+}
+
+// Atomically publish a nonempty directory. A delayed stale-lock cleanup can
+// remove only the old owner's unique marker and an empty directory.
 async function profileLock(profile, action) {
   const lock = `${profile}.dsh-lock`, started = Date.now();
-  for (;;) {
-    try { writeFileSync(lock, String(process.pid), { flag: 'wx' }); break; }
-    catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      try {
-        const owner = Number(readFileSync(lock, 'utf8'));
-        if (owner > 0 && !processAlive(owner)) { rmSync(lock, { force: true }); continue; }
-      } catch (error) { if (error.code === 'ENOENT') continue; }
-      if (Date.now() - started > 30000) fail('BROWSER_PROFILE_BUSY', 'Another DSH server is starting or closing this browser; try again.');
-      await sleep(100);
+  const marker = `owner-${process.pid}-${randomBytes(8).toString('hex')}`;
+  const directory = path.dirname(lock), pendingPrefix = path.basename(lock) + '.pending-';
+  const pending = mkdtempSync(path.join(directory, pendingPrefix + process.pid + '-'));
+  let acquired = false;
+  try {
+    writeFileSync(path.join(pending, marker), '', { flag: 'wx' });
+    for (;;) {
+      try { renameSync(pending, lock); acquired = true; break; }
+      catch (error) {
+        if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES', 'ENOTDIR', 'EISDIR'].includes(error.code)) throw error;
+        reapProfileLock(lock);
+        if (Date.now() - started > 30000) fail('BROWSER_PROFILE_BUSY', 'Another DSH server is starting or closing this browser; try again.');
+        await sleep(100);
+      }
     }
+    for (const entry of readdirSync(directory)) {
+      if (!entry.startsWith(pendingPrefix)) continue;
+      const owner = /^(\d+)-[A-Za-z0-9]{6}$/.exec(entry.slice(pendingPrefix.length));
+      if (owner && !processAlive(Number(owner[1]))) reapProfileLock(path.join(directory, entry));
+    }
+    return await action();
+  } finally {
+    const ownedDirectory = acquired ? lock : pending;
+    rmSync(path.join(ownedDirectory, marker), { force: true });
+    removeEmptyProfileLock(ownedDirectory);
   }
-  try { return await action(); } finally { rmSync(lock, { force: true }); }
 }
 
 function otherClients(browser, activeAfter = -Infinity) {
