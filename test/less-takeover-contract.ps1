@@ -11,6 +11,9 @@ foreach($name in @('Get-Prop','Invoke-Safe','Convert-Rect','Get-WindowProcessId'
 Add-Type -TypeDefinition @'
 using System; using System.Collections.Generic;
 public static class WindowsComputerUseNative {
+ public sealed class ProcessIdentity { public bool Gone; public string ImagePath=@"C:\fixture\app.exe";public uint Integrity=8192; }
+ public static ProcessIdentity ReadInputProcess(uint pid,bool checkImage){return new ProcessIdentity();}
+ public static uint ReadCurrentIntegrity(){return 8192;}
  public struct POINT {public int x,y;}
  public static long Front, AtPoint; public static int CursorX, CursorY, Gives, Sets, ResponsiveCalls; public static bool Menu, RefuseGive, Responsive;
  public static Dictionary<long,uint> Pids=new Dictionary<long,uint>(); public static List<long> Popups=new List<long>();

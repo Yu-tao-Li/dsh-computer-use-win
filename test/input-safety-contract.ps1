@@ -16,6 +16,11 @@ foreach($name in @('Get-Prop','Invoke-Safe','Test-TargetMatch','Select-TargetWin
 Add-Type -TypeDefinition @'
 using System; using System.Collections.Generic; using System.Text;
 public static class WindowsComputerUseNative {
+ public sealed class ProcessIdentity { public bool Gone; public string ImagePath; public uint? Integrity; }
+ public static ProcessIdentity Target=new ProcessIdentity{ImagePath=@"C:\fixture\app.exe",Integrity=8192};
+ public static uint? CurrentIntegrity=8192;
+ public static ProcessIdentity ReadInputProcess(uint pid,bool checkImage){return Target;}
+ public static uint? ReadCurrentIntegrity(){return CurrentIntegrity;}
  public static bool SendKeyChord(string[] keys){Fixture.Forms.SendKeys.SendWait(keys.Length==2&&keys[0]=="ctrl"?"^"+keys[1]:keys[keys.Length-1]);return true;}
  public static long Front=200,Hit=200;
  public static long Focus=190;
@@ -83,11 +88,33 @@ Expect-Error {Assert-NativeInputTarget 0} 'INPUT_TARGET_UNAVAILABLE'
 $env:WCU_HOST_PID='999999';Assert-NativeInputTarget 200
 Expect-Error {Assert-InputProcess $PID} 'HOST_INPUT_DENIED'
 $env:WCU_HOST_PID=''
-function Get-Process { param($Id,$ErrorAction) if ($Id -eq 3) { throw 'Process exited' }; [pscustomobject]@{Path=$null} }
 $env:WCU_HOST_EXECUTABLE='C:\fixture\dsh.exe'
-Expect-Error {Assert-InputProcess 2} 'INPUT_TARGET_ACCESS_UNCONFIRMED:.+administrator.+No input was sent'
-Expect-Error {Assert-InputProcess 3} 'INPUT_TARGET_UNAVAILABLE:.+process.+No input was sent'
+$identity=[WindowsComputerUseNative]::Target
+Assert-InputProcess 2
+$identity.Integrity=12288
+Expect-Error {Assert-InputProcess 2} 'ELEVATED_TARGET_DENIED:.+higher Windows integrity.+No input was sent'
+[WindowsComputerUseNative]::CurrentIntegrity=12288
+Assert-InputProcess 2
+[WindowsComputerUseNative]::CurrentIntegrity=8192
+$identity.ImagePath='c:\fixture\DSH.exe'
+Expect-Error {Assert-InputProcess 2} 'HOST_INPUT_DENIED:.+host executable'
+$identity.ImagePath='C:\fixture\app.exe'
+$identity.Integrity=$null
+Expect-Error {Assert-InputProcess 2} 'INPUT_TARGET_ACCESS_UNCONFIRMED:.+integrity.+No input was sent'
+$identity.Integrity=8192
+[WindowsComputerUseNative]::CurrentIntegrity=$null
+Expect-Error {Assert-InputProcess 2} 'INPUT_TARGET_ACCESS_UNCONFIRMED'
+[WindowsComputerUseNative]::CurrentIntegrity=8192
+$identity.ImagePath=$null
+Expect-Error {Assert-InputProcess 2} 'INPUT_TARGET_ACCESS_UNCONFIRMED'
+$identity.Gone=$true
+Expect-Error {Assert-InputProcess 3} 'INPUT_TARGET_UNAVAILABLE:.+process has exited.+No input was sent'
+$identity.Gone=$false
+$identity.ImagePath='C:\fixture\app.exe'
 $env:WCU_HOST_EXECUTABLE=''
+$identity.Integrity=12288
+Expect-Error {Assert-InputProcess 2} 'ELEVATED_TARGET_DENIED'
+$identity.Integrity=8192
 Assert-Equal (Test-InputWindow 200 200 $state) $true
 Assert-Equal (Test-InputWindow 201 200 $state) $false
 [WindowsComputerUseNative]::Owners[202]=200

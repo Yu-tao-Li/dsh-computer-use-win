@@ -21,6 +21,8 @@ These gates identify operations from tool arguments. They do not determine wheth
 
 Do not automate DSH's own approval interface, authentication, Windows UAC, secret-reveal dialogs or controls that bypass the user's decision.
 
+Desktop input checks the target process identity and Windows integrity level. A higher-integrity target returns `ELEVATED_TARGET_DENIED`. An identity or integrity check that Windows does not allow returns `INPUT_TARGET_ACCESS_UNCONFIRMED`. DSH's own host executable and helper windows are also blocked. OCR can still attempt a read-only capture when Windows refuses activation for integrity or an unconfirmed identity, and warns that the window was not activated and could be covered.
+
 ## Stop and clipboard behavior
 
 Esc and the configured shortcut stop the current desktop series. The keyboard listener has its own thread; drawing does not block its cancellation event. Preview and changes to the obsolete `resumeToken` cannot clear a stop. DSH's next user turn may resume. Standalone MCP reports the stop on the next call and refuses input for at least 30 seconds. Only injected keys carrying the plugin's own input marker are ignored; unmarked remote-control Esc can stop the operation. Actual remote-control products and elevated/secure desktops still require separate validation. No additional on-screen Stop button is provided, as requested by the user. DSH retains its existing stop control.

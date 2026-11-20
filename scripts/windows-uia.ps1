@@ -122,6 +122,79 @@ public static class WindowsComputerUseNative {
     return true;
   }
 
+  private const uint ProcessQueryLimitedInformation = 0x1000, TokenQuery = 0x0008;
+  private const uint StillActive = 259;
+  private const int TokenIntegrityLevel = 25, ErrorInvalidParameter = 87, ErrorInsufficientBuffer = 122;
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
+  [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll")] private static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+  private static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, System.Text.StringBuilder path, ref uint length);
+  [DllImport("advapi32.dll")] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+  [DllImport("advapi32.dll", SetLastError = true)]
+  private static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr data, uint length, out uint required);
+
+  public sealed class InputProcessIdentity {
+    public bool Gone;
+    public string ImagePath;
+    public uint? Integrity;
+  }
+
+  private static string GetImagePath(IntPtr process) {
+    uint size = 512;
+    var path = new System.Text.StringBuilder((int)size);
+    if (QueryFullProcessImageNameW(process, 0, path, ref size)) return path.ToString();
+    if (Marshal.GetLastWin32Error() != ErrorInsufficientBuffer) return null;
+    size = 32768;
+    path = new System.Text.StringBuilder((int)size);
+    return QueryFullProcessImageNameW(process, 0, path, ref size) ? path.ToString() : null;
+  }
+
+  private static uint? GetProcessIntegrity(IntPtr process) {
+    IntPtr token;
+    if (!OpenProcessToken(process, TokenQuery, out token)) return null;
+    try {
+      uint size;
+      GetTokenInformation(token, TokenIntegrityLevel, IntPtr.Zero, 0, out size);
+      if (Marshal.GetLastWin32Error() != ErrorInsufficientBuffer || size < IntPtr.Size || size > 4096) return null;
+      IntPtr data = Marshal.AllocHGlobal((int)size);
+      try {
+        if (!GetTokenInformation(token, TokenIntegrityLevel, data, size, out size)) return null;
+        // TOKEN_MANDATORY_LABEL starts with the SID pointer in SID_AND_ATTRIBUTES.
+        IntPtr sid = Marshal.ReadIntPtr(data);
+        if (sid == IntPtr.Zero) return null;
+        string label = new System.Security.Principal.SecurityIdentifier(sid).Value;
+        const string integrityAuthority = "S-1-16-";
+        uint rid;
+        if (!label.StartsWith(integrityAuthority, StringComparison.Ordinal) ||
+            !UInt32.TryParse(label.Substring(integrityAuthority.Length), out rid)) return null;
+        return rid;
+      } finally { Marshal.FreeHGlobal(data); }
+    } finally { CloseHandle(token); }
+  }
+
+  public static uint? ReadCurrentIntegrity() { return GetProcessIntegrity(GetCurrentProcess()); }
+
+  public static InputProcessIdentity ReadInputProcess(uint pid, bool checkImage) {
+    // Use a single query-only handle for the image, token and liveness of the
+    // same process. No permission to write to or modify the target is requested.
+    IntPtr process = OpenProcess(ProcessQueryLimitedInformation, false, pid);
+    if (process == IntPtr.Zero)
+      return new InputProcessIdentity { Gone = Marshal.GetLastWin32Error() == ErrorInvalidParameter };
+    try {
+      var identity = new InputProcessIdentity {
+        ImagePath = checkImage ? GetImagePath(process) : null,
+        Integrity = GetProcessIntegrity(process)
+      };
+      uint exitCode;
+      if (!GetExitCodeProcess(process, out exitCode)) return new InputProcessIdentity();
+      if (exitCode != StillActive) return new InputProcessIdentity { Gone = true };
+      return identity;
+    } finally { CloseHandle(process); }
+  }
+
   private static INPUT KeyInput(int key, bool up) {
     var input = new INPUT(); input.type=1; input.U.ki.wVk=(ushort)key;
     input.U.ki.dwFlags=(up?2u:0u) | ((key>=0x21&&key<=0x2E)?1u:0u);
@@ -958,16 +1031,19 @@ function Assert-InputProcess {
       ($script:TakeoverProcessId -gt 0 -and $ProcessId -eq $script:TakeoverProcessId)) {
     throw 'HOST_INPUT_DENIED: desktop input cannot target the DSH host or computer-use helper.'
   }
-  if ($env:WCU_HOST_EXECUTABLE) {
-    $process=Invoke-Safe { Get-Process -Id $ProcessId -ErrorAction Stop } $null
-    if ($null -eq $process) { throw 'INPUT_TARGET_UNAVAILABLE: the target process could not be opened or has exited. No input was sent.' }
-    $executable=Invoke-Safe { $process.Path } $null
-    if (-not $executable) {
-      throw 'INPUT_TARGET_ACCESS_UNCONFIRMED: Windows did not allow the target executable to be verified. The app may be running as administrator or the process may have exited. No input was sent.'
-    }
-    if ([string]::Equals([IO.Path]::GetFullPath($executable),[IO.Path]::GetFullPath($env:WCU_HOST_EXECUTABLE),[StringComparison]::OrdinalIgnoreCase)) {
-      throw 'HOST_INPUT_DENIED: desktop input cannot target a DSH host executable window.'
-    }
+  $checkImage = [bool]$env:WCU_HOST_EXECUTABLE
+  $target = [WindowsComputerUseNative]::ReadInputProcess([uint32]$ProcessId, $checkImage)
+  if ($target.Gone) { throw 'INPUT_TARGET_UNAVAILABLE: the target process has exited. No input was sent.' }
+  if ($checkImage -and $target.ImagePath -and
+      [string]::Equals([IO.Path]::GetFullPath($target.ImagePath),[IO.Path]::GetFullPath($env:WCU_HOST_EXECUTABLE),[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'HOST_INPUT_DENIED: desktop input cannot target a DSH host executable window.'
+  }
+  $currentIntegrity = [WindowsComputerUseNative]::ReadCurrentIntegrity()
+  if ($null -ne $target.Integrity -and $null -ne $currentIntegrity -and $target.Integrity -gt $currentIntegrity) {
+    throw 'ELEVATED_TARGET_DENIED: the target window has a higher Windows integrity level than the input worker. No input was sent.'
+  }
+  if ($null -eq $target.Integrity -or $null -eq $currentIntegrity -or ($checkImage -and -not $target.ImagePath)) {
+    throw 'INPUT_TARGET_ACCESS_UNCONFIRMED: Windows did not allow the target identity or integrity level to be verified. No input was sent.'
   }
 }
 
@@ -4168,7 +4244,7 @@ function Invoke-Action {
         if ([bool](Get-Prop $inputObject "activate" $false)) {
           try { $activationRefused = -not (Set-WindowForeground $winEl) }
           catch {
-            if ($_.Exception.Message -notlike 'INPUT_TARGET_ACCESS_UNCONFIRMED:*') { throw }
+            if ($_.Exception.Message -notmatch '^(INPUT_TARGET_ACCESS_UNCONFIRMED|ELEVATED_TARGET_DENIED):') { throw }
             $activationRefused = $true
             $activationError = $_.Exception.Message
           }

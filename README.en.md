@@ -312,7 +312,7 @@ When you report an issue, include the DSH Desktop, dsh core and plugin versions,
 
 #### 8.2 Why did a click or typed text have no effect?
 
-Check that the target window is not covered and still responds. A click at a screen position whose point shows another window, such as a notification, is not sent, and the result names the covering window (`POINT_COVERED`). The `foreground` and `pointer` fields of a result say whether the step borrowed the foreground and whether it gave it back. Chromium, Electron and some WinUI apps ignore input sent to background windows, so prefer UIA, or bring the window to the front before typing, and then look at the result. Windows protects apps running as administrator and the UAC prompt, so the plugin cannot operate them. The plugin also needs a normal, unlocked desktop session.
+Check that the target window is not covered and still responds. A click at a screen position whose point shows another window, such as a notification, is not sent, and the result names the covering window (`POINT_COVERED`). The `foreground` and `pointer` fields of a result say whether the step borrowed the foreground and whether it gave it back. Chromium, Electron and some WinUI apps ignore input sent to background windows, so prefer UIA, or bring the window to the front before typing, and then look at the result. A target with a higher Windows integrity level than the input worker is refused with `ELEVATED_TARGET_DENIED`. If Windows prevents verification of the target, the plugin reports `INPUT_TARGET_ACCESS_UNCONFIRMED`. Leave UAC prompts to the user. The plugin also needs a normal, unlocked desktop session.
 
 #### 8.3 What about PowerShell 7, other systems or a built-in vision model?
 
@@ -665,7 +665,7 @@ Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定
 
 #### 8.2 为什么点击或输入没有反应？
 
-先看目标窗口有没有被挡住、程序是不是卡住了。按坐标点击时，落点露出的是别的窗口（比如通知）就不会点下去，结果会说出挡住它的窗口（`POINT_COVERED`）；结果里的 `foreground` 和 `pointer` 说明这一步有没有借用前台、有没有还回去。Chromium、Electron 和部分 WinUI 程序会忽略后台输入，所以优先用 UIA 操作，或者先把目标窗口切到前台再输入，然后看看实际效果。以管理员身份运行的窗口和 UAC 确认界面受 Windows 权限保护，插件无法操作。插件还需要一个正常可用的桌面会话。
+先看目标窗口有没有被挡住、程序是不是卡住了。按坐标点击时，落点露出的是别的窗口（比如通知）就不会点下去，结果会说出挡住它的窗口（`POINT_COVERED`）；结果里的 `foreground` 和 `pointer` 说明这一步有没有借用前台、有没有还回去。Chromium、Electron 和部分 WinUI 程序会忽略后台输入，所以优先用 UIA 操作，或者先把目标窗口切到前台再输入，然后看看实际效果。当目标窗口的 Windows 完整性级别高于插件输入进程时，插件会拒绝操作并返回 `ELEVATED_TARGET_DENIED`。无法核验目标时会返回 `INPUT_TARGET_ACCESS_UNCONFIRMED`。UAC 确认仍由用户自行操作。插件还需要一个正常可用的桌面会话。
 
 #### 8.3 支持 PowerShell 7、其他系统，或者自带看图模型吗？
 
