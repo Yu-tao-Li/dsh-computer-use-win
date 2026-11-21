@@ -1,12 +1,16 @@
 # Changelog
 
-## 0.6.2
+## 0.6.2 — 2026-11-21
+
+本版新增“电脑操控的运行位置”：agent 可以在本机后台桌面或 Hyper-V 虚拟机里操作，不借用你的鼠标、键盘和前台（[#95](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/95)）。/ This release adds a run location for computer use: the agent can work on a local background desktop or in a Hyper-V VM without borrowing your mouse, keyboard or foreground ([#95](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/95)).
 
 - 设置页可选本机后台桌面或 Hyper-V 独立桌面。后台桌面沿用本机账号、文件和软件，普通设置变更和 MCP 重连会保留已打开的应用。/ Select a local background desktop or a Hyper-V desktop in Settings. The local desktop uses your Windows account, files, and apps. Open apps survive ordinary settings changes and MCP reconnects. ([#95](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/95))
 - 反馈问题时，无法写入下载文件夹会弹出 Windows 另存为。成功后显示 TXT 文件名、完整路径和 GitHub 反馈入口。诊断补充了 DSH 工具注册状态。/ When Downloads cannot be written, Report a problem opens Windows Save As. After saving, it shows the TXT name, full path, and GitHub issue link. Diagnostics now include DSH tool registration. ([#93](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/93))
 - 修复 Chromium 首次打开页面时找不到端点和多会话争用浏览器配置的问题。浏览器启动失败时，返回实际状态并保留桌面回退入口。/ Fix missing endpoints on first Chromium navigation and profile contention between sessions. A browser startup failure reports its status and preserves desktop fallback. ([#94](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/94), [#92](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/92))
 - Firefox 将可见文档标为离屏时，桌面读取仍保留视口内的控件。/ Desktop reads retain in-viewport controls when Firefox marks the entire visible document offscreen.
 - 发送桌面输入前校验目标进程的 Windows 完整性级别。粘贴尚未发出就取消时，恢复可保留的剪贴板内容。/ Check the target process's Windows integrity level before sending desktop input. Cancelling before paste dispatch restores supported clipboard contents. ([#88](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/88))
+- 接管助手确认急停已布防后才发送真实输入，助手卡住会被结束并按需重启。MCP 消息按单帧检查大小，连在一起的多条消息能正确拆分。浏览器只放行批准过的本地文件和设置里允许的目录，`blob:` 和扩展页不能作为导航目标。/ Real input is sent only after the takeover helper confirms the stop is armed, and a stuck helper is ended and restarted when needed. MCP messages are size-checked one frame at a time, and several messages arriving together are split correctly. The browser loads only approved local files and the folders allowed in settings, and `blob:` and extension pages cannot be navigated to.
+- 发布工作流先对标签提交跑完整 CI，通过后才发布到 npm。兼容测试加入 DSH 0.2.2-rc.3 和 rc.5。/ The release workflow runs the full CI on the tagged commit before it publishes to npm. Compatibility tests add DSH 0.2.2-rc.3 and rc.5.
 
 ## 0.6.1 — 2026-11-18
 
