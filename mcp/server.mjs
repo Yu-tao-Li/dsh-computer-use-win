@@ -889,8 +889,13 @@ function failBackendWaiters(error, proc) {
   }
 }
 
+// The backend never runs Node, and programs that launch_app starts on the local
+// background desktop inherit its environment. DSH sets ELECTRON_RUN_AS_NODE for
+// this server; passed on, it makes an Electron app such as VS Code run as Node
+// with no window.
+const BACKEND_PRIVATE_ENV = new Set(['WCU_APPROVAL_SECRET', 'WCU_APPROVAL_LEDGER', 'ELECTRON_RUN_AS_NODE']);
 function backendEnv(env) {
-  const clean={...env};delete clean.WCU_APPROVAL_SECRET;delete clean.WCU_APPROVAL_LEDGER;
+  const clean = Object.fromEntries(Object.entries(env).filter(([name]) => !BACKEND_PRIVATE_ENV.has(name.toUpperCase())));
   return windowsEnv(clean, Object.keys(clean).filter(name => name.startsWith('WCU_')));
 }
 

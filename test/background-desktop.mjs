@@ -26,7 +26,8 @@ static class Fixture {
     var button = new Button { Text="Background action", Left=20, Top=64, Width=180 };
     button.Click += (sender, args) => {
       File.WriteAllText("result.txt", File.ReadAllText("project.txt") + "|" + field.Text + "|" +
-        Environment.GetEnvironmentVariable("WCU_FIXTURE_WORKSPACE"));
+        Environment.GetEnvironmentVariable("WCU_FIXTURE_WORKSPACE") + "|" +
+        (Environment.GetEnvironmentVariable("ELECTRON_RUN_AS_NODE") ?? "app"));
     };
     window.Controls.Add(field);
     window.Controls.Add(button);
@@ -45,7 +46,9 @@ execFileSync(ps, ['-NoProfile', '-NonInteractive', '-Command', build], {
 const owner = startBackgroundDesktop();
 const connect = () => new McpTestClient(ps, [...backgroundDesktopArgs(owner.name),
   '-Executable', process.execPath, '-EntryPath', path.join(repo, 'mcp/server.mjs')], {
-  env: {...process.env, WCU_FIXTURE_WORKSPACE: 'inherited', WCU_BROWSER_LANE: 'off', WCU_IMAGE_MODE: 'inline'},
+  // DSH starts the server with ELECTRON_RUN_AS_NODE; apps launched here must
+  // not inherit it, or Electron apps would start as Node with no window.
+  env: {...process.env, WCU_FIXTURE_WORKSPACE: 'inherited', WCU_BROWSER_LANE: 'off', WCU_IMAGE_MODE: 'inline', ELECTRON_RUN_AS_NODE: '1'},
 });
 let client;
 async function closeWorker() {
@@ -89,7 +92,7 @@ try {
   await call('type_text',{...target,text:'background edit',method:'background'});
   const {meta:button}=await call('find',{...target,query:'Background action',ocrFallback:false});
   await call('invoke',{...target,elementId:button.results[0].id,fallbackClick:false});
-  assert.equal(await readFile(path.join(root,'result.txt'),'utf8'),expected+'|background edit|inherited');
+  assert.equal(await readFile(path.join(root,'result.txt'),'utf8'),expected+'|background edit|inherited|app');
   const {meta:shot,parts}=await call('screenshot',target);
   assert.equal(shot.screenshot.method,'printwindow');
   assert.ok(parts.find(part=>part.type==='image' && part.mimeType==='image/png'));
@@ -107,10 +110,10 @@ try {
   await writeFile(path.join(root,'result.txt'),'waiting for reconnected worker');
   const {meta:reconnectedButton}=await call('find',{...target,query:'Background action',ocrFallback:false});
   await call('invoke',{...target,elementId:reconnectedButton.results[0].id,fallbackClick:false});
-  assert.equal(await readFile(path.join(root,'result.txt'),'utf8'),expected+'|background edit|inherited');
+  assert.equal(await readFile(path.join(root,'result.txt'),'utf8'),expected+'|background edit|inherited|app');
 } finally {
   try { await closeWorker(); }
   finally { await owner.dispose(); }
 }
 assert.throws(()=>process.kill(fixturePid,0),/ESRCH/,'Closing the desktop releases its application processes');
-console.log(JSON.stringify({passed:true,launchOnPrivateDesktop:true,workspaceAndEnvironment:true,windowScreenshot:true,noPhysicalInput:true,reconnectPreservesDraft:true,processCleanup:true}));
+console.log(JSON.stringify({passed:true,launchOnPrivateDesktop:true,workspaceAndEnvironment:true,electronAppEnvironment:true,windowScreenshot:true,noPhysicalInput:true,reconnectPreservesDraft:true,processCleanup:true}));
