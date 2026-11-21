@@ -13,6 +13,14 @@ fixture.stderr.on('data',b=>stderr+=b);
 fixture.stdout.on('data',b=>{buffer+=b;let end;while((end=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);try{Object.assign(state,JSON.parse(line));}catch{}}});
 const client=new McpTestClient(process.execPath,[path.join(import.meta.dirname,'../mcp/server.mjs')],{env:{...process.env,WCU_INDICATOR:'0',WINDOWS_CU_POWERSHELL:process.env.WINDOWS_CU_POWERSHELL||'powershell.exe'}});
 const results=[];
+// The fixture polls this file every 100 ms. A write that meets its read gets a
+// sharing violation (EBUSY/EPERM) on Windows, so try again briefly.
+async function command(body){
+  for(let attempt=1;;attempt++){
+    try{await writeFile(path.join(artifacts,'native-command.json'),JSON.stringify(body));return;}
+    catch(error){if(!['EBUSY','EPERM'].includes(error.code)||attempt>=20)throw error;await delay(25);}
+  }
+}
 async function call(action,args){const start=performance.now();const r=await client.call('windows_computer_use_'+action,args);assert.ok(!r.isError,JSON.stringify(r));const data=JSON.parse(r.content[0].text);results.push({action,args,result:data,wallMs:Math.round(performance.now()-start)});return data;}
 try{
   const started=performance.now();await client.init();
@@ -42,7 +50,7 @@ try{
   // fixture's own thread, with EM_REPLACESEL. The fixture focuses its edit
   // itself; on a desktop with no recent user input (CI runners) Windows lets
   // that call activate the fixture, and then there is nothing left to check.
-  await writeFile(path.join(artifacts,'native-command.json'),JSON.stringify({id:11,action:'focus-edit'}));
+  await command({id:11,action:'focus-edit'});
   for(let i=0;i<40&&state.focused!==true;i++)await delay(50);assert.equal(state.focused,true);
   const frontBeforeTyping=await front();
   const keyed=await call('type_text',{...target,text:' typed'});assert.equal(keyed.method,'background:EM_REPLACESEL',JSON.stringify(keyed));assert.equal(keyed.verified,true);
@@ -59,11 +67,11 @@ try{
   // An element with its own scroll bar scrolls by WM_VSCROLL.
   const linesBox=(await call('find',{...target,query:'Fixture lines'})).results[0];
   const scrolled=await call('scroll',{...target,elementId:linesBox.id,deltaY:240});assert.equal(scrolled.method,'background:WM_VSCROLL',JSON.stringify(scrolled));
-  await writeFile(path.join(artifacts,'native-command.json'),JSON.stringify({id:12,action:'first-line'}));
+  await command({id:12,action:'first-line'});
   for(let i=0;i<40&&state.firstLine===undefined;i++)await delay(50);assert.ok(state.firstLine>0,JSON.stringify(state));
   const noExpand=await client.call('windows_computer_use_invoke',{...target,elementId:button.id,action:'expand'});assert.equal(noExpand.isError,true);assert.match(noExpand.content[0].text,/ELEMENT_ACTION_UNSUPPORTED/);
   if(frontBeforeTyping!==state.hwnd)assert.notEqual(await front(),state.hwnd,'Background typing and scrolling must not bring the fixture forward: '+JSON.stringify(state));
-  await writeFile(path.join(artifacts,'native-command.json'),JSON.stringify({id:1,action:'hang'}));
+  await command({id:1,action:'hang'});
   for(let i=0;i<30&&!state.hanging;i++)await delay(50);assert.equal(state.hanging,true);
   const start=performance.now();
   const refused=await call('activate_window',target);assert.equal(refused.activated,false);assert.equal(refused.verification,'unconfirmed');assert.equal(refused.targetResponsive,false);assert.ok(refused.warning);assert.ok(refused.window.name);assert.ok(refused.window.boundingBox);assert.equal(refused.window.source,'win32');
@@ -83,7 +91,7 @@ try{
   console.log('PASS real WinForms cached value/patterns, background BM_CLICK/EM_REPLACESEL, type_text, posted text and keys to the focused edit, element scroll and followed observation without the foreground, WM_NULL hung-window circuit break, activation metadata/warning and recovery; no physical input');
 }finally{
   await writeFile(path.join(artifacts,'results.json'),JSON.stringify({state,results,stderr},null,2)+'\n');
-  await writeFile(path.join(artifacts,'native-command.json'),JSON.stringify({id:100,action:'quit'}));client.child.stdin.end();
+  await command({id:100,action:'quit'});client.child.stdin.end();
   for(let i=0;i<70&&(fixture.exitCode===null||client.child.exitCode===null);i++)await delay(100);
   if(fixture.exitCode===null)fixture.kill();if(client.child.exitCode===null)client.child.kill();
 }

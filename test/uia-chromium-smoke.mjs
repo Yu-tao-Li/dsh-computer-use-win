@@ -60,7 +60,9 @@ try{
     });
     const launch=await brokenLane.call('windows_computer_use_set_value',{elementId:'new-tab',value:'https://example.test'});
     assert.equal(launch.isError,true);assert.match(launch.content[0].text,/BROWSER_LANE_UNAVAILABLE/);
-    const fallbackWindows=await call(brokenLane,'list_windows',{includeInvisible:true,maxWindows:200});
+    // The fixture is shown (inactive). Hidden windows stay out of the list: on
+    // a busy desktop they alone can fill the 200 entries before the fixture.
+    const fallbackWindows=await call(brokenLane,'list_windows',{maxWindows:200});
     assert.equal(fallbackWindows.browserLane.agent.state,'failed');
     const fallbackWindow=fallbackWindows.windows.find(window=>window.nativeWindowHandle===ready.hwnd);
     assert.ok(fallbackWindow,'The existing fixture is still discoverable');

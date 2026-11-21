@@ -22,6 +22,18 @@ public static class ClipboardReader {
 }
 '@
 function Assert-Equal($Actual,$Expected) { if($Actual -ne $Expected){throw "Expected '$Expected', actual '$Actual'"} }
+# Every clipboard change wakes clipboard listeners (IMEs, screenshot tools,
+# clipboard history) that open the clipboard to read it. A read in that moment
+# can come back empty although the text is there, so let the read settle.
+function Get-ClipboardText($Expected) {
+  $deadline = [DateTime]::UtcNow.AddSeconds(1)
+  do {
+    $text = [System.Windows.Forms.Clipboard]::GetText()
+    if ($text -eq $Expected) { return $text }
+    Start-Sleep -Milliseconds 25
+  } while ([DateTime]::UtcNow -lt $deadline)
+  return $text
+}
 $original = [System.Windows.Forms.Clipboard]::GetDataObject()
 $saved = New-Object System.Windows.Forms.DataObject
 if ($null -ne $original) { foreach($format in $original.GetFormats($false)) { $saved.SetData($format,$false,$original.GetData($format,$false)) } }
@@ -42,25 +54,25 @@ try {
   if($confirmed) {
     Assert-Equal $lease.Restored $true
     Assert-Equal ([System.Windows.Forms.Clipboard]::GetData('FixtureData')) 'preserve custom format'
-    Assert-Equal ([System.Windows.Forms.Clipboard]::GetText()) 'OLD CLIPBOARD MUST NOT BE PASTED'
+    Assert-Equal (Get-ClipboardText 'OLD CLIPBOARD MUST NOT BE PASTED') 'OLD CLIPBOARD MUST NOT BE PASTED'
   } else {
     # A clipboard monitor may render before our reader. Its read is never
     # accepted as proof of paste; preserve the new text in that case.
     Assert-Equal $lease.Restored $false
-    Assert-Equal ([System.Windows.Forms.Clipboard]::GetText()) 'new text'
+    Assert-Equal (Get-ClipboardText 'new text') 'new text'
   }
   $lease.Dispose()
   $lease=New-Object WcuClipboardLease('timeout text', $true, $readerProcess)
   $lease.MarkPasteSent([IntPtr]::Zero)
   Assert-Equal ($lease.Complete(2600)) $false
-  Assert-Equal ([System.Windows.Forms.Clipboard]::GetText()) 'timeout text'
+  Assert-Equal (Get-ClipboardText 'timeout text') 'timeout text'
   Assert-Equal $lease.Restored $false
   $lease.Dispose()
   $lease=New-Object WcuClipboardLease('pending text', $true, $readerProcess)
   [System.Windows.Forms.Clipboard]::SetText('user copied something newer')
   $lease.Dispose()
   [void]$lease.Complete(2000)
-  Assert-Equal ([System.Windows.Forms.Clipboard]::GetText()) 'user copied something newer'
+  Assert-Equal (Get-ClipboardText 'user copied something newer') 'user copied something newer'
   Write-Output "PASS real delayed clipboard: 150ms delayed reader + 150ms held lock, confirmed restore=$confirmed, unread timeout and newer user copy"
 } finally {
   if($null -ne $lease){$lease.Dispose();[void]$lease.Complete(2600)}
