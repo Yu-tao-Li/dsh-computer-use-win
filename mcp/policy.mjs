@@ -105,6 +105,11 @@ function classifyHost(rawHost) {
 }
 
 let cachedHostPortFile;
+const browserPrivateEnv = new Set(['WCU_APPROVAL_SECRET','WCU_APPROVAL_LEDGER','WCU_INPUT_MARKER','WCU_CANCEL_EVENT','WCU_READY_EVENT','__COMPAT_LAYER']);
+
+export function browserChildEnv(env = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([key])=>!browserPrivateEnv.has(key.toUpperCase())));
+}
 
 function readHostPorts(env = process.env) {
   const ports = list(env.WCU_HOST_PORTS);
@@ -114,7 +119,7 @@ function readHostPorts(env = process.env) {
     let stat;
     try { stat = statSync(portFile, {bigint: true}); }
     catch { throw Error('WCU_POLICY_UNAVAILABLE: host address policy could not be read.'); }
-    if (cachedHostPortFile && cachedHostPortFile.file === portFile && cachedHostPortFile.mtimeNs === stat.mtimeNs && cachedHostPortFile.size === stat.size) {
+    if (cachedHostPortFile && cachedHostPortFile.file === portFile && cachedHostPortFile.ino === stat.ino && cachedHostPortFile.mtimeNs === stat.mtimeNs && cachedHostPortFile.size === stat.size) {
       if (cachedHostPortFile.ports.length) ports.push(...cachedHostPortFile.ports);
       return {ports, pending: false};
     }
@@ -123,7 +128,7 @@ function readHostPorts(env = process.env) {
     catch { throw Error('WCU_POLICY_UNAVAILABLE: host address policy could not be read.'); }
     const filePorts = Array.isArray(state?.ports) ? state.ports.map(String) : [];
     pending = Boolean(state?.pending);
-    cachedHostPortFile = pending ? undefined : {file: portFile, mtimeNs: stat.mtimeNs, size: stat.size, ports: filePorts};
+    cachedHostPortFile = pending ? undefined : {file: portFile, ino: stat.ino, mtimeNs: stat.mtimeNs, size: stat.size, ports: filePorts};
     if (filePorts.length) ports.push(...filePorts);
   }
   return {ports, pending};
@@ -149,7 +154,13 @@ export function canonicalizeBrowserUrl(value) {
   return {url, scheme, host, local, metadata, effectivePort};
 }
 
-export function isBlockedRuntimeRequestUrl(value, env = process.env, {isNavigation = false, allowLocalFile = false} = {}) {
+export function isBlockedRuntimeRequestUrl(value, env = process.env, options) {
+  if (options === undefined && ['env','hostPortFile','isNavigation','allowLocalFile','approvedFileUrl','checkFileRoots'].some(key=>Object.hasOwn(env,key))) {
+    options=env;
+    env=options.env ?? process.env;
+  }
+  const {isNavigation=false,allowLocalFile=false,approvedFileUrl,checkFileRoots=false,hostPortFile}=options??{};
+  if (hostPortFile) env={...env,WCU_HOST_PORT_FILE:hostPortFile};
   let info;
   try {
     info = canonicalizeBrowserUrl(value);
@@ -164,15 +175,14 @@ export function isBlockedRuntimeRequestUrl(value, env = process.env, {isNavigati
   }
   if (scheme === 'file:') {
     if (host && host !== 'localhost') return {blocked: true, reason: 'WCU_POLICY_DENIED: network file URLs are blocked.'};
-    if (process.platform === 'win32') {
-      try { if (unc(fileURLToPath(url))) return {blocked: true, reason: 'WCU_POLICY_DENIED: network file URLs are blocked.'}; }
-      catch { return {blocked: true, reason: 'WCU_POLICY_DENIED: invalid file URL.'}; }
-    }
-    if (!allowLocalFile) return {blocked: true, reason: 'WCU_POLICY_DENIED: unapproved file URL navigation is blocked.'};
-    return {blocked: false};
+    let file;
+    try { file=localFilePath(url); }
+    catch { return {blocked:true,reason:'WCU_POLICY_DENIED: invalid or network file URL.'}; }
+    if (allowLocalFile || (approvedFileUrl && canonicalFileUrl(url)===canonicalFileUrl(approvedFileUrl)) ||
+        (checkFileRoots && inRoots(file,list(env.WCU_ALLOWED_FILE_ROOTS)))) return {blocked:false};
+    return {blocked: true, reason: 'WCU_POLICY_DENIED: unapproved file URL navigation is blocked.'};
   }
-  if (scheme === 'data:' || scheme === 'blob:') return {blocked: false};
-  if (scheme === 'chrome-extension:' || scheme === 'extension:') return {blocked: false};
+  if (scheme === 'data:' || (!isNavigation && ['blob:','chrome-extension:','extension:'].includes(scheme))) return {blocked: false};
   if (BLOCKED_SCRIPT_OR_INTERNAL_SCHEMES.has(scheme) || (isNavigation && !ALLOWED_NAV_SCHEMES.has(scheme)) || !['http:', 'https:', 'ws:', 'wss:'].includes(scheme)) {
     return {blocked: true, reason: `WCU_POLICY_DENIED: ${scheme} URLs are blocked.`};
   }
@@ -185,11 +195,20 @@ export function isBlockedRuntimeRequestUrl(value, env = process.env, {isNavigati
   return {blocked: false};
 }
 
-const canonicalFileUrl = value => {
+function localFilePath(url) {
+  const decoded=decodeURIComponent(url.pathname);
+  if ((url.hostname && url.hostname!=='localhost') || decoded.startsWith('//') || /[\\\x00]/.test(decoded)) {
+    throw new Error('WCU_POLICY_DENIED: invalid or network file URL.');
+  }
+  const file=fileURLToPath(url);
+  return process.platform === 'win32' ? file : file.replace(/^\/([A-Za-z]:\/)/,'$1');
+}
+
+export const canonicalFileUrl = value => {
   const parsed = new URL(String(value));
   parsed.hash = '';
   parsed.search = '';
-  if (process.platform === 'win32') parsed.pathname = parsed.pathname.replace(/^\/[A-Za-z]:/, m => m.toLowerCase());
+  parsed.pathname = parsed.pathname.replace(/^\/[A-Za-z]:/, m => m.toLowerCase());
   return parsed.href;
 };
 
@@ -221,8 +240,11 @@ const isLnkTarget = value => /\.lnk$/i.test(String(value ?? '').trim().replace(/
 // the user first would show a prompt whose answer cannot matter.
 const COMMAND_HOSTS = new Set(['cmd', 'powershell', 'pwsh', 'wt', 'wsl', 'bash', 'sh', 'conhost', 'wscript', 'cscript', 'mshta', 'rundll32', 'regsvr32', 'msiexec', 'forfiles', 'schtasks', 'pcalua', 'ftp', 'python', 'pythonw', 'node', 'deno', 'bun', 'perl', 'ruby', 'php']);
 const commandHostName = (target, env) => {
-  const expanded = String(target ?? '').trim().replace(/^"|"$/g, '').replace(/%([^%]+)%/g, (whole, name) => env?.[name] ?? process.env[name] ?? whole);
-  const name = path.win32.basename(expanded).replace(/[. ]+$/, '').replace(/\.(?:exe|com)$/i, '').toLowerCase();
+  let expanded = String(target ?? '').trim().replace(/^"|"$/g, '').replace(/%([^%]+)%/g, (whole, name) => env?.[name] ?? process.env[name] ?? whole);
+  if (absolute(expanded) && !unc(expanded)) {
+    try { expanded=(realpathSync.native??realpathSync)(expanded); } catch {}
+  }
+  const name = path.win32.basename(expanded).split(':',1)[0].replace(/[. ]+$/, '').replace(/\.(?:exe|com)$/i, '').toLowerCase();
   return COMMAND_HOSTS.has(name) ? name : null;
 };
 const launchKey = args => `${String(args.target ?? '').trim().toLowerCase()}\0${String(args.arguments ?? '').trim()}`;
@@ -374,7 +396,7 @@ export function assertBrowserUrl(value, {env = process.env, approved = false, ap
   if (decision.kind === 'deny') throw Error(decision.reason);
   if (decision.kind === 'ask') {
     const url = new URL(String(value));
-    const file = process.platform === 'win32' ? fileURLToPath(url) : decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:\/)/, '$1');
+    const file = localFilePath(url);
     const canonical = canonicalFileUrl(url.href);
     const granted = approved || grants?.fileUrls?.has(canonical) || (approvedFileUrl && canonical === canonicalFileUrl(approvedFileUrl));
     if (!granted && !inRoots(file, list(env.WCU_ALLOWED_FILE_ROOTS))) throw Error(decision.reason);
@@ -437,6 +459,7 @@ export function assertOperation(name, args, {env = process.env, approved = false
       }
       return;
     }
+    if (tabKey) return;
     throw Error(decision.reason);
   }
 }
@@ -502,13 +525,16 @@ export function sessionSkipsApproval(ctx, exec) {
 export function installHostPolicy(ctx, runtime) {
   const gated = new WeakMap();
   const env = () => ({
-    WCU_HOST_PORTS: (runtime.hostPorts ?? []).join('|'),
-    WCU_HOST_PORT_FILE: runtime.hostPortFile,
+    ...(runtime.usesGuestLoopback?.() ? {} : {
+      WCU_HOST_PORTS: (runtime.hostPorts ?? []).join('|'),
+      WCU_HOST_PORT_FILE: runtime.hostPortFile,
+    }),
     WCU_USER_TABS_FILE: runtime.userTabsFile,
     WCU_LOCALE: runtime.getLocale?.() ?? runtime.locale ?? systemLocale()
   });
   const disposePreExecute = ctx.on('tools/pre-execute', async (exec, next) => {
     if (!isWincuTool(exec.name)) return next();
+    if (runtime.desktopRoutePending?.()) return verdict('deny', 'WCU_DESKTOP_SWITCHING: wait for the chosen desktop to connect before running Computer Use again.');
     const args = parseArguments(exec.arguments);
     if (Object.hasOwn(args, '_wcuApproval')) return verdict('deny', 'WCU_POLICY_DENIED: approval credentials cannot be supplied by a tool caller.');
     const currentEnv = env();

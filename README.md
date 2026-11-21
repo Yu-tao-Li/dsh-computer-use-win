@@ -198,6 +198,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 | 更新 | 有新版本时，标题右侧 GitHub 左边出现“更新”，点了才安装；平时不显示，见 1.2 |
 | 反馈问题 | 保存诊断 TXT 到下载文件夹并打开 GitHub 新建问题页面，见 8.4 |
 | 工具加载 | **全部**（26 个，默认）；**精简**（12 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
+| 电脑操控的运行位置 | **当前桌面**（默认）；**本机后台桌面**：在当前 Windows 会话里另开一个后台桌面，沿用本机账号、文件和已安装的软件，不动你的鼠标键盘，适合读控件、填表和截取窗口；按坐标点击、拖拽、系统快捷键和整屏截图要切回当前桌面；**独立桌面（Hyper-V）**：在一台装了 Node.js 22 或更新版本的 Windows 虚拟机里操作。见[设置与停止](docs/computer-use-settings.md) |
 | 优先使用网页控件 | 默认打开。网页能直接读写时在后台完成，不动鼠标、不抢前台；桌面程序和读不到的网页内容再交给电脑操控 |
 | 显示 DSH 浏览器窗口 | 默认打开，能看到 DSH 浏览器在做什么；关掉后它在后台运行，没有窗口 |
 | 浏览器类型 | 默认跟随 Windows 的默认浏览器，也可以选 Edge、Chrome 或 Firefox 系（实验）；默认浏览器不是 Edge 或 Chrome 时，用已安装的 Chrome 或 Edge。选 Firefox 系时先用 Windows 默认的那一个，见 [Firefox 系浏览器](docs/browser-bidi.md) |
@@ -312,7 +313,7 @@ Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定
 
 #### 8.2 为什么点击或输入没有反应？
 
-先看目标窗口有没有被挡住、程序是不是卡住了。按坐标点击时，落点露出的是别的窗口（比如通知）就不会点下去，结果会说出挡住它的窗口（`POINT_COVERED`）；结果里的 `foreground` 和 `pointer` 说明这一步有没有借用前台、有没有还回去。Chromium、Electron 和部分 WinUI 程序会忽略后台输入，所以优先用 UIA 操作，或者先把目标窗口切到前台再输入，然后看看实际效果。以管理员身份运行的窗口和 UAC 确认界面受 Windows 权限保护，插件无法操作。插件还需要一个正常可用的桌面会话。
+先看目标窗口有没有被挡住、程序是不是卡住了。按坐标点击时，落点露出的是别的窗口（比如通知）就不会点下去，结果会说出挡住它的窗口（`POINT_COVERED`）；结果里的 `foreground` 和 `pointer` 说明这一步有没有借用前台、有没有还回去。Chromium、Electron 和部分 WinUI 程序会忽略后台输入，所以优先用 UIA 操作，或者先把目标窗口切到前台再输入，然后看看实际效果。当目标窗口的 Windows 完整性级别高于插件输入进程时，插件会拒绝操作并返回 `ELEVATED_TARGET_DENIED`。无法核验目标时会返回 `INPUT_TARGET_ACCESS_UNCONFIRMED`。UAC 确认仍由用户自行操作。插件还需要一个正常可用的桌面会话。
 
 #### 8.3 支持 PowerShell 7、其他系统，或者自带看图模型吗？
 
@@ -322,7 +323,7 @@ Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定
 
 #### 8.4 遇到问题怎么反馈？
 
-在 **设置 → 电脑操控** 标题右侧点“反馈问题”。插件会把 `wincu-diagnostics-日期-时间.txt` 存到下载文件夹，在资源管理器里选中它，并用系统默认浏览器打开 GitHub 新建问题页面。页面同时提示文件保存成功。
+在 **设置 → 电脑操控** 标题右侧点“反馈问题”。插件会把 `wincu-diagnostics-日期-时间.txt` 存到下载文件夹，在资源管理器里选中它，并用系统默认浏览器打开 GitHub 新建问题页面。页面同时提示文件名和保存位置。下载文件夹写不进去时，会弹出“另存诊断文件”，让你另选位置。
 
 在 GitHub 写下怎样复现、预期结果和实际结果。查看 TXT 后，把它拖到问题描述框再提交。
 
@@ -551,6 +552,7 @@ Change these in **Settings → Computer Use**. Most take effect after you click 
 | Update | Appears left of the GitHub link at the top right when a newer version exists, and installs it only when clicked; hidden otherwise; see 1.2 |
 | Report a problem | Saves a TXT to Downloads and opens GitHub’s new-issue page; see 8.4 |
 | Tool loading | **All** (26 tools, the default); **Lite** (12 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
+| Run computer use on | **Current desktop** (the default); **Local background desktop**: a second desktop in your current Windows session that keeps your account, files and installed apps and leaves your mouse and keyboard alone, for reading controls, filling in forms and capturing windows; clicks at screen positions, drags, system shortcuts and full-screen screenshots need the current desktop; **Separate desktop (Hyper-V)**: works inside a Windows VM with Node.js 22 or later. See [settings and stopping](docs/computer-use-settings.md) |
 | Prefer web page controls | On by default. Pages it can read and operate directly are handled in the background, without moving the pointer or taking the foreground; desktop apps and page content it cannot read go to Computer Use |
 | Show the DSH browser window | On by default, so you can watch the DSH browser; turn it off to run the browser in the background with no window |
 | Browser type | Follows the Windows default browser, or choose Edge, Chrome or the Firefox family (experimental); when the default is neither Edge nor Chrome, an installed Chrome or Edge is used. The Firefox family starts with the Windows default one; see [Firefox-family browsers](docs/browser-bidi.md) |
@@ -665,7 +667,7 @@ When you report an issue, include the DSH Desktop, dsh core and plugin versions,
 
 #### 8.2 Why did a click or typed text have no effect?
 
-Check that the target window is not covered and still responds. A click at a screen position whose point shows another window, such as a notification, is not sent, and the result names the covering window (`POINT_COVERED`). The `foreground` and `pointer` fields of a result say whether the step borrowed the foreground and whether it gave it back. Chromium, Electron and some WinUI apps ignore input sent to background windows, so prefer UIA, or bring the window to the front before typing, and then look at the result. Windows protects apps running as administrator and the UAC prompt, so the plugin cannot operate them. The plugin also needs a normal, unlocked desktop session.
+Check that the target window is not covered and still responds. A click at a screen position whose point shows another window, such as a notification, is not sent, and the result names the covering window (`POINT_COVERED`). The `foreground` and `pointer` fields of a result say whether the step borrowed the foreground and whether it gave it back. Chromium, Electron and some WinUI apps ignore input sent to background windows, so prefer UIA, or bring the window to the front before typing, and then look at the result. A target with a higher Windows integrity level than the input worker is refused with `ELEVATED_TARGET_DENIED`. If Windows prevents verification of the target, the plugin reports `INPUT_TARGET_ACCESS_UNCONFIRMED`. Leave UAC prompts to the user. The plugin also needs a normal, unlocked desktop session.
 
 #### 8.3 What about PowerShell 7, other systems or a built-in vision model?
 
@@ -675,7 +677,7 @@ The plugin provides desktop tools only. It does not include a model, an API key,
 
 #### 8.4 How do I report a problem?
 
-Click Report a problem at the top right of **Settings → Computer Use**. DSH saves `wincu-diagnostics-date-time.txt` to Downloads, selects it in File Explorer, and opens GitHub’s new-issue page in your default browser. A dialog confirms where the file was saved.
+Click Report a problem at the top right of **Settings → Computer Use**. DSH saves `wincu-diagnostics-date-time.txt` to Downloads, selects it in File Explorer, and opens GitHub’s new-issue page in your default browser. A dialog shows the file name and where it was saved. If Downloads cannot be written, a Save As dialog lets you choose another folder.
 
 Describe what happened, what you expected, and how to reproduce it. Review the TXT, then drag it into the issue description and submit.
 

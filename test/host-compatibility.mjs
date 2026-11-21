@@ -1,8 +1,17 @@
-import assert from 'node:assert/strict';import {settingsMode,profileFiber,findOwnEntry,bridgeSupport} from '../mcp/host-compat.mjs';
+import assert from 'node:assert/strict';import {settingsMode,profileFiber,findOwnEntry,bridgeSupport,bridgeDiagnostics} from '../mcp/host-compat.mjs';
 const fiber={},legacy={fiber},modern={fiber:{ctx:{fiber}}},other={fiber:{}};
 assert.equal(settingsMode({register(){}}),'namespace');assert.equal(settingsMode({configure(){}}),'entry');
 assert.equal(profileFiber(legacy),fiber);assert.equal(profileFiber(modern),fiber);
 assert.equal(findOwnEntry([other,legacy],fiber),legacy);assert.equal(findOwnEntry([other,modern],fiber),modern);
 fiber.entry=other;assert.equal(findOwnEntry([legacy,other],fiber),other);
 const support=bridgeSupport();assert.equal(typeof support.version,'string');assert.equal(typeof support.tested,'boolean');
+assert.ok(Array.isArray(support.peerMismatches));
+const connection={};
+const schemas={schemas:()=>[{name:'mcp__wincu__windows_computer_use_health'},{name:'mcp__other__health'}]};
+const connected={connectionStatusOf:handle=>{assert.equal(handle,connection);return {current:()=>({state:'connected',toolCount:1})}}};
+assert.deepEqual(bridgeDiagnostics(connected,connection,schemas,26,[]),{state:'connected',configuredToolCount:26,registeredToolCount:1,bridgeToolCount:1});
+const retry={connectionStatusOf:()=>({current:()=>({state:'reconnecting',lastError:'Tool registration failed'})})};
+const peers=[{name:'dsh-tools',expected:'0.2.2-rc.5',actual:'0.2.2-rc.3'}];
+assert.deepEqual(bridgeDiagnostics(retry,connection,{schemas:()=>[]},26,peers),{state:'reconnecting',configuredToolCount:26,registeredToolCount:0,bridgeToolCount:undefined,lastError:'Tool registration failed',peerMismatches:peers});
+assert.deepEqual(bridgeDiagnostics({},connection,undefined,26,[]),{state:'unavailable',configuredToolCount:26,registeredToolCount:undefined,bridgeToolCount:undefined});
 console.log(JSON.stringify({passed:true,legacyAndModernEntryOwnership:true,settingsInterfacesCentralized:true}));

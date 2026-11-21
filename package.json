@@ -1,6 +1,6 @@
 {
   "name": "dsh-computer-use-win",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Windows computer use for DeepSeek Harness: an MCP stdio server + PowerShell UIA backend, bridged into DSH via @deepseek-ai/dsh-mcp-client. Read/act on real Windows desktop apps (UI Automation tree, screenshots, typed input, OCR, window management).",
   "type": "module",
   "bin": {
@@ -9,16 +9,19 @@
   "main": "mcp/dsh-plugin.mjs",
   "files": [
     "mcp/activity.mjs",
+    "mcp/background-desktop.mjs",
     "mcp/browser-bidi-dom.mjs",
     "mcp/browser-bidi.mjs",
     "mcp/browser-frames.mjs",
     "mcp/browser-pipe.mjs",
+    "mcp/browser-profile-lock.mjs",
     "mcp/browser.mjs",
     "mcp/catalog.mjs",
     "mcp/diagnostics.mjs",
     "mcp/client.js",
     "mcp/dsh-plugin.mjs",
     "mcp/host-compat.mjs",
+    "mcp/hyperv-relay.mjs",
     "mcp/overlay-strings.mjs",
     "mcp/page-values.mjs",
     "mcp/policy.mjs",
@@ -29,6 +32,8 @@
     "mcp/settings.mjs",
     "mcp/takeover.mjs",
     "scripts/windows-uia.ps1",
+    "scripts/background-desktop.ps1",
+    "scripts/hyperv-desktop.ps1",
     "scripts/windows-takeover.ps1",
     "scripts/windows-takeover.cs",
     "scripts/windows-clipboard.cs",
@@ -114,7 +119,7 @@
     "semver": "7.8.5"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-mcp-client": ">=0.1.0 <0.3.0 || 0.1.0-rc.2 || 0.1.0-rc.6 || 0.1.0-rc.7 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.2-rc.1",
+    "@deepseek-ai/dsh-mcp-client": ">=0.1.0 <0.3.0 || 0.1.0-rc.2 || 0.1.0-rc.6 || 0.1.0-rc.7 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.2-rc.1 || 0.2.2-rc.3 || 0.2.2-rc.5",
     "@deepseek-ai/schemastery": ">=3.18.1 <4"
   },
   "peerDependenciesMeta": {

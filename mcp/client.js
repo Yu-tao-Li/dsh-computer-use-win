@@ -5,7 +5,7 @@ window.__ModuleLoader__.load({
   factory: (require) => {
     const React = require('react'), h = React.createElement;
     const NS = 'windowsComputerUse.settings';
-    const PLUGIN_VERSION = '0.6.1';
+    const PLUGIN_VERSION = '0.6.2';
     const allToolNames = [
   "health",
   "snapshot",
@@ -149,6 +149,8 @@ window.__ModuleLoader__.load({
   "tools"
 ];
     const defaults = {
+  "desktopTarget": "current",
+  "hypervVm": "",
   "browserFirst": true,
   "browserVisible": true,
   "browserApp": "default",
@@ -202,6 +204,13 @@ window.__ModuleLoader__.load({
   "stopShortcut": ""
 };
     const settingRules = {
+  "desktopTarget": {
+    "type": "enum"
+  },
+  "hypervVm": {
+    "type": "text",
+    "maxLength": 120
+  },
   "browserFirst": {
     "type": "boolean"
   },
@@ -583,13 +592,30 @@ window.__ModuleLoader__.load({
     "reportRunning": "导出中…",
     "reportSaved": "已保存诊断文件",
     "reportIssuePage": "GitHub 新建问题页",
-    "reportAttachFile": "请在 {issueLink}描述问题，并附上此文件。",
+    "reportIssueOpened": "已打开 {issueLink}。请描述问题并附上此文件。",
+    "reportAttachFile": "请打开 {issueLink}，描述问题并附上此文件。",
     "reportFailed": "诊断文件未能保存。",
+    "reportCancelled": "已取消保存诊断文件。",
     "reportDescribeIssue": "你仍可在 {issueLink}描述问题。",
     "reportUnconfirmed": "暂时无法确认诊断信息是否已保存。可先查看下载文件夹。",
     "reportBusy": "诊断信息正在导出，请稍等。",
     "reportOpenIssue": "打开 GitHub 新建问题页面",
-    "reportOk": "确定"
+    "reportOk": "确定",
+    "desktopTarget": "电脑操控的运行位置",
+    "desktopCurrent": "当前桌面",
+    "desktopBackground": "本机后台桌面",
+    "desktopBackgroundHint": "沿用本机账号、文件和软件，支持后台控件和窗口截图。切换前请保存后台应用中的文件。",
+    "backgroundBrowserHint": "本机后台桌面的浏览器无窗口，也不会加载已保留的登录状态。需要手动登录时请切到当前桌面。",
+    "desktopHyperv": "独立桌面（Hyper-V）",
+    "hypervVm": "Hyper-V 虚拟机名称",
+    "hypervVmRequired": "请填写虚拟机名称。",
+    "hypervHint": "登录虚拟机并安装 Node.js 22+，再保存设置、配置连接。",
+    "hypervConfigure": "配置连接",
+    "hypervConfiguring": "正在配置…",
+    "hypervReady": "连接已配置。可在 Hyper-V 管理器中查看独立桌面。",
+    "hypervFailed": "独立桌面的连接未配置成功。",
+    "hypervBusy": "另一次连接配置正在进行。",
+    "reportCancelledConnection": "连接配置已取消。"
   },
   "en": {
     "nav": "Computer Use",
@@ -863,13 +889,30 @@ window.__ModuleLoader__.load({
     "reportRunning": "Exporting…",
     "reportSaved": "Diagnostics file saved",
     "reportIssuePage": "GitHub’s new-issue page",
-    "reportAttachFile": "Describe what happened on the {issueLink} and attach this file.",
+    "reportIssueOpened": "Opened {issueLink}. Describe what happened and attach this file.",
+    "reportAttachFile": "Open {issueLink}, describe what happened, and attach this file.",
     "reportFailed": "The diagnostics file could not be saved.",
-    "reportDescribeIssue": "You can still describe what happened on the {issueLink}.",
+    "reportCancelled": "Saving the diagnostics file was cancelled.",
+    "reportDescribeIssue": "You can still describe what happened on {issueLink}.",
     "reportUnconfirmed": "The export could not be confirmed. Check your Downloads folder.",
     "reportBusy": "A diagnostics export is already running.",
     "reportOpenIssue": "Open a new issue on GitHub",
-    "reportOk": "OK"
+    "reportOk": "OK",
+    "desktopTarget": "Run computer use on",
+    "desktopCurrent": "Current desktop",
+    "desktopBackground": "Local background desktop",
+    "desktopBackgroundHint": "Use local apps and files with background controls and window capture. Save your work in background apps before switching.",
+    "backgroundBrowserHint": "The local background desktop runs a browser without a window or saved sign-ins. Switch to the current desktop to sign in manually.",
+    "desktopHyperv": "Separate desktop (Hyper-V)",
+    "hypervVm": "Hyper-V virtual machine name",
+    "hypervVmRequired": "Enter the virtual machine name.",
+    "hypervHint": "Sign in to the VM with Node.js 22 or later installed, then save and configure the connection.",
+    "hypervConfigure": "Configure connection",
+    "hypervConfiguring": "Configuring…",
+    "hypervReady": "Connection configured. You can view the separate desktop in Hyper-V Manager.",
+    "hypervFailed": "The separate desktop connection could not be configured.",
+    "hypervBusy": "Another connection is being configured.",
+    "reportCancelledConnection": "Connection setup was cancelled."
   }
 };
     const defaultIndicatorTexts = [
@@ -1383,9 +1426,12 @@ window.__ModuleLoader__.load({
         setState({phase:'running',dialog:null});
         let dialog={tone:'failed',text:t('reportUnconfirmed'),link:true};
         try{
-          const {status,data}=await requestJson('/dsh-computer-use-win/api/diagnostics',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:120000});
+          const {status,data}=await requestJson('/dsh-computer-use-win/api/diagnostics',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:165000});
           if(status===200&&data?.ok){
-            dialog={tone:'saved',text:t('reportSaved'),fileName:data.fileName,filePath:data.filePath,detail:t('reportAttachFile')};
+            dialog={tone:'saved',text:t('reportSaved'),fileName:data.fileName,filePath:data.filePath,
+              detail:t(data.issueOpened===true?'reportIssueOpened':'reportAttachFile')};
+          }else if(status===200&&data?.cancelled){
+            dialog={tone:'failed',text:t('reportCancelled'),detail:t('reportDescribeIssue')};
           }else if(status===409){
             dialog={tone:'busy',text:t('reportBusy')};
           }else if(status===500&&data?.ok===false){
@@ -1430,6 +1476,7 @@ window.__ModuleLoader__.load({
       const [saving,setSaving] = React.useState(false), [message,setMessage] = React.useState(''),[tone,setTone]=React.useState('');
       const [recording,setRecording] = React.useState(false), [recordMessage,setRecordMessage] = React.useState('');
       const [noteView,setNoteView] = React.useState(null), [noteSaving,setNoteSaving] = React.useState(false);
+      const [hypervConfiguring,setHypervConfiguring] = React.useState(false), [hypervMessage,setHypervMessage] = React.useState('');
       const savedKey = JSON.stringify(Object.fromEntries(Object.keys(defaults).map(key=>[key,saved[key]])));
       const visibleBeforeFirefox=React.useRef(null),attachBeforeFirefox=React.useRef(null),prevSaved=React.useRef(saved);
       const liveOverlayKeys=['progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressOverlayLocked','progressOverlayEnabled'];
@@ -1443,6 +1490,8 @@ window.__ModuleLoader__.load({
       // The Firefox that DSH starts has no window yet, so choosing Firefox turns
       // the switches off, and choosing another browser turns them back.
       const change = (field,value) => {const next={...draft,[field]:value};
+        if(field==='desktopTarget'&&value!=='current')next.browserAttachUser=false;
+        if(field==='desktopTarget'||field==='hypervVm')setHypervMessage('');
         // Choosing Custom starts with every tool checked: the user unchecks what
         // to leave out and saves. A Custom selection already saved stays as saved.
         if(field==='toolPreset'&&value==='custom'&&draft.toolPreset!=='custom')next.enabledTools=saved.toolPreset==='custom'?saved.enabledTools:[...allToolNames];
@@ -1513,9 +1562,19 @@ window.__ModuleLoader__.load({
         if(!validIndicator(normalized)){setMessage(t('invalid'));setTone('error');return;}
         if(!validOverlay(normalized,lockKey)){setMessage(t('invalidOverlay'));setTone('error');return;}
         if(lockKey&&lockKey===normalized.stopShortcut){setMessage(t('shortcutConflict'));setTone('error');return;}
+        if(normalized.desktopTarget==='hyperv'&&(!normalized.hypervVm.trim()||normalized.hypervVm.trim().startsWith('-'))){setMessage(t('hypervVmRequired'));setTone('error');return;}
         const patch=Object.fromEntries(Object.keys(defaults).filter(key=>!equal(normalized[key],saved[key])).map(key=>[key,normalized[key]]));
         if(Object.keys(patch).length===0){setDirty(false);setMessage(t('saved'));setTone('success');return;}
         if(await run(patch,'saved'))setDirty(false);
+      };
+      const configureHyperv = async () => {
+        setHypervConfiguring(true);setHypervMessage('');
+        try {
+          const {status,data}=await requestJson('/dsh-computer-use-win/api/hyperv',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:165000});
+          setHypervMessage(data?.ok?t('hypervReady'):data?.cancelled?t('reportCancelledConnection'):
+            t('hypervFailed')+(data?.error?' '+data.error:status===409?' '+t('hypervBusy'):''));
+        } catch {setHypervMessage(t('hypervFailed'));}
+        finally {setHypervConfiguring(false);}
       };
       // The support note is a display choice. Save it at once, outside the draft,
       // so it never saves or discards other pending changes.
@@ -1529,6 +1588,7 @@ window.__ModuleLoader__.load({
         finally{setNoteSaving(false);}
       };
       const disabled = saving||!writable||recording,indicatorDisabled=disabled||!draft.indicatorEnabled;
+      const backgroundDesktop = draft.desktopTarget==='background';
       const activeTools=draft.toolPreset==='lazy'?['tools']:draft.toolPreset==='full'?allToolNames:draft.toolPreset==='lite'?liteToolNames:draft.enabledTools;
       const customDisabled=disabled||draft.toolPreset!=='custom';
       const dirtyStatus=[t('dirty'),['browserVisible','browserApp','browserSignIn','browserAttachUser'].some(key=>draft[key]!==saved[key])?t('browserChange'):'',['toolPreset','enabledTools','mode'].some(key=>!equal(draft[key],saved[key]))?t('toolsChange'):''].filter(Boolean).join(' ');
@@ -1545,8 +1605,8 @@ window.__ModuleLoader__.load({
       // Chinese characters), so a narrow column never leaves it alone on a line.
       const title=(text,hint,props)=>{const cut=/[\u2e80-\u9fff\uff00-\uffef]$/.test(text)?text.length-2:text.lastIndexOf(' ')+1;return h(props?.htmlFor?'label':'span',{className:'wcu-item-title',...props},text.slice(0,cut),h('span',{className:'wcu-nowrap'},text.slice(cut),hint&&info(hint)));};
       const picture=art=>h('div',{className:'wcu-art','aria-hidden':true},art);
-      const toggle=(field,label,locked)=>h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch','aria-label':t(label),checked:draft[field],disabled:disabled||locked,onChange:e=>['progressOverlayEnabled','progressOverlayLocked'].includes(field)?applyOverlaySwitch(field,e.target.checked):change(field,e.target.checked)});
-      const switchItem=(field,label,hint,art,locked)=>item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-'+field,'aria-hidden':true},art),title(t(label),hint,{htmlFor:idPrefix+'-'+field}),toggle(field,label,locked));
+      const toggle=(field,label,locked,checked=draft[field])=>h('input',{id:idPrefix+'-'+field,type:'checkbox',role:'switch','aria-label':t(label),checked,disabled:disabled||locked,onChange:e=>['progressOverlayEnabled','progressOverlayLocked'].includes(field)?applyOverlaySwitch(field,e.target.checked):change(field,e.target.checked)});
+      const switchItem=(field,label,hint,art,locked,checked)=>item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-'+field,'aria-hidden':true},art),title(t(label),hint,{htmlFor:idPrefix+'-'+field}),toggle(field,label,locked,checked));
       const field=(label,control)=>h('div',{className:'wcu-field'},label,control);
       const numProps=key=>({value:draft[key],onChange:e=>change(key,e.target.value===''?'':Number(e.target.value)),onBlur:()=>{if(draft[key]===''||Number.isNaN(draft[key]))change(key,saved[key]);}});
       const allowedTools=['full','lazy'].includes(draft.toolPreset)?allToolNames:activeTools;
@@ -1574,24 +1634,34 @@ window.__ModuleLoader__.load({
               ...toolGroups.map(([group,entries])=>{const names=entries.map(entry=>entry[0]),count=names.filter(name=>draft.enabledTools.includes(name)).length;return h('fieldset',{className:'wcu-tool-group',disabled:customDisabled,key:group},
                 h('legend',null,h('label',{className:'wcu-tool-group-label'},h('input',{type:'checkbox',id:idPrefix+'-tool-group-'+group,checked:count===names.length,'aria-checked':count&&count<names.length?'mixed':count===names.length,ref:input=>{if(input)input.indeterminate=count>0&&count<names.length;},onChange:e=>selectTools(names,e.target.checked)}),t('toolGroup_'+group),h('span',{className:'wcu-tool-count'},count+' / '+names.length))),
                 h('div',{className:'wcu-tool-grid'},...entries.map(([name])=>h('label',{className:'wcu-tool-item',key:name,title:'windows_computer_use_'+name},h('input',{type:'checkbox',id:idPrefix+'-tool-'+name,'data-wincu-tool':name,checked:draft.enabledTools.includes(name),disabled:customDisabled,onChange:e=>selectTools([name],e.target.checked)}),h('span',null,h('strong',null,t('tool_'+name)),h('small',null,t('toolHint_'+name)))))));})))),
+        h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-desktop-title'},
+          head(idPrefix+'-desktop-title','desktopTarget',null),
+          h('select',{className:'wcu-control',id:idPrefix+'-desktopTarget','aria-labelledby':idPrefix+'-desktop-title',value:draft.desktopTarget,disabled,onChange:e=>change('desktopTarget',e.target.value)},
+            h('option',{value:'current'},t('desktopCurrent')),h('option',{value:'background'},t('desktopBackground')),h('option',{value:'hyperv'},t('desktopHyperv'))),
+          draft.desktopTarget==='background'&&h('p',{className:'wcu-notice'},t('desktopBackgroundHint')),
+          draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice'},
+            h('p',null,t('hypervHint')),
+            h('label',{className:'wcu-field'},t('hypervVm'),h('input',{className:'wcu-control',id:idPrefix+'-hypervVm',type:'text',maxLength:120,value:draft.hypervVm,disabled,onChange:e=>change('hypervVm',e.target.value)})),
+            button(hypervConfiguring?'hypervConfiguring':'hypervConfigure',{className:'wcu-small',disabled:disabled||hypervConfiguring||saved.desktopTarget!=='hyperv'||!saved.hypervVm||draft.hypervVm.trim()!==saved.hypervVm,onClick:configureHyperv}),
+            hypervMessage&&h('p',{role:'status','data-wincu-hyperv-result':true},hypervMessage))),
         h('section',{className:'wcu-section','data-wincu-browser-policy':true,'aria-labelledby':idPrefix+'-browser-title'},
           head(idPrefix+'-browser-title','browserTitle','browserInfo'),
           h('div',{className:'wcu-grid'},
             switchItem('browserFirst','browserFirst','browserFirstHint',arts.browserFirst(draft.browserFirst)),
-            switchItem('browserVisible','browserVisible','browserVisibleHint',arts.browserVisible(draft.browserVisible),draft.browserApp==='firefox'),
+            switchItem('browserVisible','browserVisible',backgroundDesktop?'backgroundBrowserHint':'browserVisibleHint',arts.browserVisible(!backgroundDesktop&&draft.browserVisible),backgroundDesktop||draft.browserApp==='firefox',!backgroundDesktop&&draft.browserVisible),
             item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-browserApp','aria-hidden':true},arts.app(draft.browserApp==='default'?t('browserAppShort'):draft.browserApp==='firefox'?'Firefox':t('browserApp_'+draft.browserApp))),
               title(t('browserApp'),'browserAppHint',{htmlFor:idPrefix+'-browserApp'}),
               h('select',{className:'wcu-control',id:idPrefix+'-browserApp',value:draft.browserApp,disabled,onChange:e=>change('browserApp',e.target.value)},
                 ...['default','edge','chrome','firefox'].map(app=>h('option',{key:app,value:app},t('browserApp_'+app))))),
-            switchItem('browserSignIn','browserSignIn','browserSignInHint',arts.signIn(draft.browserSignIn)),
-            switchItem('browserAttachUser','browserAttachUser','browserAttachUserHint',arts.app(t('myBrowser')),draft.browserApp==='firefox')),
+            switchItem('browserSignIn','browserSignIn',backgroundDesktop?'backgroundBrowserHint':'browserSignInHint',arts.signIn(!backgroundDesktop&&draft.browserSignIn),backgroundDesktop,!backgroundDesktop&&draft.browserSignIn),
+            switchItem('browserAttachUser','browserAttachUser','browserAttachUserHint',arts.app(t('myBrowser')),draft.browserApp==='firefox'||draft.desktopTarget!=='current')),
           draft.browserAttachUser&&draft.browserApp!=='firefox'&&h('div',{className:'wcu-notice','data-wincu-attach-notice':true},
             h('strong',null,t('attachSetup')),h('ol',null,h('li',null,t('attachStep1'),...['chrome://inspect/#remote-debugging','edge://inspect/#remote-debugging'].map(url=>h('span',{className:'wcu-address',key:url},h('code',null,url),h(CopyButton,{text:url,t})))),h('li',null,t('attachStep2'))),
             h('strong',null,t('attachRisks')),h('ul',null,h('li',null,t('attachRisk1')),h('li',null,t('attachRisk2')))),
           // Kept sign-ins need nothing set up, but how to sign in, where the
           // sign-ins stay and the risks remain in view while the switch is on.
           draft.browserApp==='firefox'&&h('p',{className:'wcu-notice','data-wincu-firefox-notice':true},t('firefoxNotice'),' ',h('a',{href:'https://github.com/Yu-tao-Li/dsh-computer-use-win/blob/main/docs/browser-bidi.md',target:'_blank',rel:'noopener noreferrer'},t('learnMore'))),
-          draft.browserSignIn&&draft.browserApp!=='firefox'&&h('div',{className:'wcu-notice','data-wincu-signin-notice':true},
+          !backgroundDesktop&&draft.browserSignIn&&draft.browserApp!=='firefox'&&h('div',{className:'wcu-notice','data-wincu-signin-notice':true},
             h('strong',null,t('signInSetup')),
             h('ol',null,h('li',null,t('signInStep1')),h('li',null,t('signInStep2')),
               !draft.browserVisible&&h('li',{'data-wincu-signin-hidden':true},t('signInStepHidden')),

@@ -15,6 +15,19 @@ for(let i=0;i<framed.length;i+=3)parser.push(framed.subarray(i,i+3));
 assert.deepEqual(messages.at(-1),unicode);assert.equal(parser.mode,'headers');
 parser.push(Buffer.from('Content-Length: -1\r\n\r\n'));assert.equal(errors.length,2);
 parser.push(Buffer.from(JSON.stringify({id:3})+'\n'));assert.deepEqual(messages.at(-1),{id:3});
+const received=[], framingErrors=[];
+const limit=body.length;
+const bounded=new RpcFramer({maxBytes:limit,onMessage:x=>received.push(x),onError:e=>framingErrors.push(e)});
+bounded.push(Buffer.concat([framed,framed,Buffer.from(JSON.stringify(unicode)+'\n')]));
+assert.deepEqual(received,[unicode,unicode,unicode],'The limit applies per body, including an exact-size body');
+assert.equal(framingErrors.length,0);
+bounded.push(Buffer.from('x'.repeat(9000)+'\n'));
+bounded.push(framed);
+assert.equal(framingErrors.length,1);
+assert.deepEqual(received.at(-1),unicode);
+const fragmented=Buffer.from(JSON.stringify({text:'中文🙂'.repeat(160000)})+'\n');
+const large=new RpcFramer({onMessage:x=>assert.equal(x.text.length,640000),onError:assert.fail});
+for(let offset=0;offset<fragmented.length;offset+=137)large.push(fragmented.subarray(offset,offset+137));
 assert.equal(negotiateProtocolVersion('2099-unimplemented'),'2025-06-18');
 assert.equal(negotiateProtocolVersion('2024-11-05'),'2024-11-05');
 assert.equal(validateRpcEnvelope({jsonrpc:'2.0',method:'ping',id:true}),false);
@@ -33,5 +46,6 @@ try{
  await client.request('ping');
  assert(output.includes('"code":-32700'));
  await assert.rejects(client.request('unknown/request'),/-32601/);
+ await assert.rejects(client.request('notifications/initialized'),/-32601/);
  console.log(JSON.stringify({passed:true,utf8Fragmentation:true,headerAndLineFraming:true,parseRecovery:true,unknownNotificationsSilent:true,notificationCannotLaunchTools:true,versionNegotiation:true}));
 }finally{client.close()}

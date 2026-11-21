@@ -5,13 +5,16 @@ import { mkdir, mkdtemp, writeFile, appendFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { makePrivateTemp } from './private-temp.mjs';
 
 if (process.platform !== 'win32') throw new Error('These backend regression tests require Windows.');
 const checkout = fileURLToPath(new URL('../', import.meta.url));
 const powershell = process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe';
 const root = await mkdtemp(path.join(process.env.WCU_TEST_OUTPUT || os.tmpdir(), 'wcu-isolated-tests-'));
+makePrivateTemp(root);
 if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `artifactRoot=${root}\n`);
 const suites = [
+  ['background-desktop',process.execPath,['test/background-desktop.mjs']],
   ['input-mutex',process.execPath,['test/input-mutex.mjs']],
   ['shared-stop',process.execPath,['test/shared-stop.mjs']],
   ['native-key-chord',powershell,['-NoProfile','-File','test/native-key-chord.ps1']],

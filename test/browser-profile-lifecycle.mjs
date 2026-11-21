@@ -31,6 +31,27 @@ try{for(const app of ['chrome','edge']){
  await check(app+' crash cleanup and fresh cookie recovery',async()=>{const d=path.join(out,app+'-crash-last'),last=await server(app,d);await open(last,'/set');const browser=(await call(last,'list_windows',{})).meta.browserLane.browsers.find(x=>x.source==='agent'),pid=browser.processId;last.child.kill();const alive=()=>{try{process.kill(pid,0);return true}catch{return false}};for(let i=0;i<120&&alive();i++)await delay(100);assert(!alive(),'orphan browser not closed within 12 s');const recovered=await server(app,d);assert((await open(recovered)).page.includes('session=acceptance'),'fresh session cookie lost');await end(recovered);});
  await check(app+' idle owner respects sharer then closes',async()=>{const d=path.join(out,app+'-idle'),lane=new BrowserLane({env:{...process.env,WCU_BROWSER_PROFILE:d,WCU_BROWSER_APP:app,WCU_BROWSER_SIGNIN:'1',WCU_BROWSER_HEADLESS:'1'}});let sharer;try{await lane.run('set_value',{elementId:'new-tab',value:origin+'/set'},{});sharer=await server(app,d);const tab=await open(sharer);lane.lastUsed=Date.now()-11*60*1000;for(const browser of lane.browsers.values())browser.lastActivity=lane.lastUsed;await lane.closeIdleAgent();assert((await call(sharer,'accessibility_tree',{browserTab:tab.meta.opened.id})).page.includes('session=acceptance'),'idle owner closed active sharer');await end(sharer);await lane.closeIdleAgent();await delay(500);assert([...lane.browsers.values()].every(b=>b.cdp.closed),'last idle client did not close browser');}finally{await lane.shutdown();if(sharer&&sharer.child.exitCode===null)sharer.close()}});
  await check(app+' stale launch lock recovery',async()=>{const d=path.join(out,app+'-stale-lock');fs.mkdirSync(d,{recursive:true});fs.writeFileSync(path.join(d,'kept-'+app+'.dsh-lock'),'999999999');const c=await server(app,d);await open(c);await end(c);});
+ await check(app+' concurrent recovery keeps the new profile lock',async()=>{
+   const directory=path.join(out,app+'-stale-lock-race');
+   const profile=path.join(directory,'kept-'+app);
+   const lock=profile+'.dsh-lock';
+   fs.mkdirSync(lock,{recursive:true});
+   fs.writeFileSync(path.join(lock,'owner-999999999-0000000000000000'),'');
+   fs.mkdirSync(lock+'.pending-999999999-ab12CD');
+   const contenders=await Promise.all([server(app,directory),server(app,directory),server(app,directory)]);
+   try {
+     const tabs=await Promise.all(contenders.map((client,index)=>open(client,'/race-'+index)));
+     const endpoints=contenders.map(({child})=>fs.readFileSync(path.join(profile,'dsh-client-'+child.pid),'utf8'));
+     assert(endpoints.every(endpoint=>endpoint===endpoints[0]&&endpoint.startsWith('ws+pipe:')),'Clients did not share one private browser endpoint');
+     for (const [index,client] of contenders.entries()) {
+       const page=await call(client,'accessibility_tree',{browserTab:tabs[index].meta.opened.id});
+       assert(page.page.includes(origin+'/race-'+index),'Client lost its requested tab');
+     }
+   } finally {
+     for (const client of contenders) await end(client);
+   }
+   assert(!fs.readdirSync(directory).some(name=>name.startsWith('kept-'+app+'.dsh-lock')),'A profile lock was left behind');
+ });
  await check(app+' all shared clients idle then fresh reopen',async()=>{const d=path.join(out,app+'-all-idle'),lane=new BrowserLane({env:{...process.env,WCU_BROWSER_PROFILE:d,WCU_BROWSER_APP:app,WCU_BROWSER_SIGNIN:'1',WCU_BROWSER_HEADLESS:'1'}});let c;try{await lane.run('set_value',{elementId:'new-tab',value:origin+'/set'},{});c=await server(app,d);await open(c);const before=new Date(Date.now()-11*60*1000);fs.utimesSync(path.join(d,'kept-'+app,'dsh-client-'+c.child.pid),before,before);lane.lastUsed=before.getTime();for(const browser of lane.browsers.values())browser.lastActivity=lane.lastUsed;await lane.closeIdleAgent();await delay(500);assert([...lane.browsers.values()].every(b=>b.cdp.closed),'all-idle browser stayed open');assert((await open(c)).page.includes('session=acceptance'),'idle reopen lost cookie');await end(c);}finally{await lane.shutdown();if(c&&c.child.exitCode===null)c.close()}});
 }}finally{for(const c of clients)if(c.child.exitCode===null&&c.child.signalCode===null)c.close();site.close();}
 if(results.some(x=>!x.passed))process.exitCode=1;

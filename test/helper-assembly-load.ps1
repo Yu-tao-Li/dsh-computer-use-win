@@ -25,6 +25,14 @@ function Invoke-Phase([string]$Name) {
 if ($Phase -eq 'main') {
   $Cache = Join-Path ([IO.Path]::GetTempPath()) ('wcu-helper-load-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
   New-Item -ItemType Directory -Path $Cache | Out-Null
+  $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User
+  $acl=[Security.AccessControl.DirectorySecurity]::new()
+  $acl.SetAccessRuleProtection($true,$false)
+  foreach($owner in @($sid,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
+    $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($owner,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
+  }
+  if ($isDesktop) { [IO.Directory]::SetAccessControl($Cache,$acl) }
+  else { [IO.FileSystemAclExtensions]::SetAccessControl([IO.DirectoryInfo]::new($Cache),$acl) }
   try {
     $failure = Invoke-Phase 'compile-failure'
     if (-not $failure.cleaned) { throw 'A failed compilation left its private partial DLL' }
@@ -83,7 +91,7 @@ foreach ($name in 'WcuCs', 'WcuOcrCs') {
   if ($null -eq $assignment) { throw "Missing helper source $name" }
   . ([scriptblock]::Create($assignment.Extent.Text))
 }
-foreach ($name in 'Write-BackendStage', 'Get-CsHash', 'Get-HelperCacheDir', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Load-Assemblies', 'Set-DpiAware', 'Get-OcrHelper') {
+foreach ($name in 'Write-BackendStage', 'Get-CsHash', 'Get-HelperCacheDir', 'Assert-PrivateHelperPath', 'Get-HelperDigest', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Load-Assemblies', 'Set-DpiAware', 'Get-OcrHelper') {
   $function = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
   if ($null -eq $function) { throw "Missing backend function $name" }
   . ([scriptblock]::Create($function.Extent.Text))

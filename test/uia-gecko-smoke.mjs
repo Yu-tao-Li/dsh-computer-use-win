@@ -36,14 +36,15 @@ const url = `http://127.0.0.1:${server.address().port}/issues`;
 
 const profile = path.join(artifacts, 'firefox-profile');
 await mkdir(profile, { recursive: true });
-// A fresh profile otherwise opens onboarding and a terms-of-use dialog, which
-// makes the rest of the window inert, so its accessibility tree stays empty.
+// Only test the fixture page, including on a non-English Firefox install. A
+// first-run or translation panel can cover the page and change its UIA tree.
 await writeFile(path.join(profile, 'user.js'), [
   ['browser.aboutwelcome.enabled', false], ['browser.preonboarding.enabled', false], ['termsofuse.bypassNotification', true],
   ['termsofuse.acceptedVersion', 999], ['termsofuse.acceptedDate', '1735689600000'], ['browser.shell.checkDefaultBrowser', false],
   ['browser.startup.homepage_override.mstone', 'ignore'], ['startup.homepage_welcome_url', ''], ['datareporting.policy.dataSubmissionEnabled', false],
   ['datareporting.policy.dataSubmissionPolicyBypassNotification', true], ['toolkit.telemetry.reportingpolicy.firstRun', false],
   ['app.update.disabledForTesting', true], ['browser.tabs.warnOnClose', false], ['browser.sessionstore.resume_from_crash', false],
+  ['browser.translations.enable', false], ['browser.translations.automaticallyPopup', false],
   ['accessibility.force_disabled', -1], ['accessibility.uia.enable', 1]
 ].map(([name, value]) => `user_pref(${JSON.stringify(name)}, ${JSON.stringify(value)});`).join('\n') + '\n');
 if (process.env.WCU_TEST_WINDOW_X) await writeFile(path.join(profile, 'xulstore.json'), JSON.stringify({ 'chrome://browser/content/browser.xhtml': { 'main-window': { screenX: String(process.env.WCU_TEST_WINDOW_X), screenY: '60', width: '1200', height: '820', sizemode: 'normal' } } }));

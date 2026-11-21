@@ -81,5 +81,15 @@ assert.equal((await hooks['tools/pre-execute'](execution,async()=>({kind:'ask',r
 assert.equal((await hooks['tools/pre-execute'](execution,async()=>({kind:'allow'}))).kind,'ask');
 execution.arguments={...args,arguments:'changed after approval'};
 await assert.rejects(hooks['tools/execute'](execution,async()=>{throw Error('Must not dispatch')}),/arguments changed/);
+let inGuest = false;
+const desktopHooks = {};
+installHostPolicy({on:(name,fn)=>desktopHooks[name]=fn},{
+  approvalSecret:key,hostPorts:['32108'],usesGuestLoopback:()=>inGuest,
+});
+const navigation={name:'mcp__wincu__windows_computer_use_set_value',arguments:{elementId:'new-tab',value:'http://127.0.0.1:32108/'}};
+const allow=async()=>({kind:'allow'});
+assert.equal((await desktopHooks['tools/pre-execute'](navigation,allow)).kind,'deny','The DSH host port remains protected on the current desktop');
+inGuest=true;
+assert.equal((await desktopHooks['tools/pre-execute'](navigation,allow)).kind,'allow','The same loopback port in a VM belongs to the guest');
 assert.equal(classifyOperation('set_value',{elementId:'t123:4',value:path.join(root,'missing-file')}).kind,'allow','A nonexistent path in a text field is not an upload');
 console.log(JSON.stringify({passed:true,tableCases:cases.length,realPathRoots:true,oneTimeExactGrant:true,persistentReplayProtection:true,lockedOrDamagedLedgerFailsClosed:true,dynamicHostPort:true,downstreamPolicyPreserved:true,changedArgumentsRefused:true}));

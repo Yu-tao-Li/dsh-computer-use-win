@@ -6,9 +6,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_SETTINGS, normalizeSettings } from './settings.mjs';
 import { helperStrings, indicatorText, overlayLocale, overlayStrings, systemLocale } from './overlay-strings.mjs';
+import { RpcFramer } from './protocol.mjs';
 
 export const STOPPED = 'COMPUTER_USE_STOPPED_BY_USER: Stopped by user (Esc or custom shortcut). Do not retry desktop input in this turn; the next user turn resumes automatically with no settings change needed.';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const MAX_BLOCKED_SERIES = 32;
 async function readControl(file) {
   for (let attempt = 0; ; attempt++) {
     try { return JSON.parse(readFileSync(file, 'utf8')); }
@@ -150,7 +152,9 @@ export class TakeoverControl {
     this.suppressedLingerKey=null;
     this.activityFile=activityFile;this.seriesHeld=false;this.seriesIndicator=false;this.seriesKey=null;this.stoppedSeriesKey=null;this.blockedSeries=new Map();
     this.eventName = `Local\\DSH-WCU-${randomUUID()}`; this.waiters = new Map(); this.nextId = 0;
+    this.armedChild = null;
     this.resumeToken = this.config.resumeToken; this.previewToken = this.config.previewToken; this.pauseMessage = STOPPED;
+    this.backgroundOnly = process.env.WCU_BACKGROUND_DESKTOP === '1';
     this.disabledForTest = process.env.NODE_ENV === 'test' && process.env.WCU_TEST_NO_TAKEOVER === '1';
     try {
       const saved = JSON.parse(readFileSync(this.stateFile, 'utf8'));
@@ -160,16 +164,18 @@ export class TakeoverControl {
       this.pauseMessage = saved.pauseMessage ?? STOPPED;
       this.resumeToken = saved.resumeToken ?? this.resumeToken;
       this.stoppedSeriesKey=saved.stoppedSeriesKey??null;
-      this.blockedSeries=new Map(Object.entries(saved.blockedSeries??(this.stoppedSeriesKey?{[this.stoppedSeriesKey]:this.pauseMessage}:{})));
+      this.blockedSeries=new Map(Object.entries(saved.blockedSeries??(this.stoppedSeriesKey?{[this.stoppedSeriesKey]:this.pauseMessage}:{})).slice(-MAX_BLOCKED_SERIES));
+      if (saved.active > 0) this.persist('previous-worker-ended');
     } catch (error) { if (this.stateFile && error.code !== 'ENOENT') throw error; }
     if (configFile||activityFile) {
       this.poll = setInterval(() => { this.sync().catch(error => this.presentationError(error)); }, 250);
       this.poll.unref();
     }
   }
+  get helperDisabled() { return this.backgroundOnly || this.disabledForTest; }
   persist(reason) {
     const body = {
-      paused: this.paused, active: this.active, seriesActive: this.seriesHeld, reason: reason ?? null,
+      pid: process.pid, paused: this.paused, active: this.active, seriesActive: this.seriesHeld, reason: reason ?? null,
       stoppedAt: this.stoppedAt ?? 0, stopReported: this.stopReported === true, stoppedSeriesKey: this.stoppedSeriesKey,
       blockedSeries: Object.fromEntries(this.blockedSeries), pauseMessage: this.paused ? this.pauseMessage : null,
     };
@@ -189,7 +195,11 @@ export class TakeoverControl {
     process.stderr.write('Computer Use display/state update failed: ' + error.message + '\n');
   }
   async resumeOperation(clearScope=true){
-    if(this.child)await this.command('resume');
+    const child = this.child;
+    if (child) {
+      try { await this.command('resume'); }
+      catch (error) { this.killHelper(error, child, { failIfActive: false }); }
+    }
     this.paused=false;this.helperFailed=false;if(clearScope)this.stoppedSeriesKey=null;
     this.persist('new-operation');
   }
@@ -239,17 +249,20 @@ export class TakeoverControl {
       const progress=JSON.stringify(progressPayload);
       // After the helper failed, the overlay does not start it again in this
       // series: the poll would launch PowerShell four times a second.
-      if(!this.disabledForTest&&this.sentProgress!==progress&&(this.child||(!this.helperFailed&&this.config.progressOverlayEnabled&&(held||lingering)))){
+      if(!this.helperDisabled&&this.sentProgress!==progress&&(this.child||(!this.helperFailed&&this.config.progressOverlayEnabled&&(held||lingering)))){
         try { await this.command('progress',progressPayload);this.sentProgress=progress; }
         catch (error) { this.presentationError(error); }
       }
       if(held&&!this.blockedSeries.has(key)&&this.paused&&this.active===0)await this.resumeOperation();
-      if(held!==this.seriesHeld||key!==this.seriesKey||indicator!==this.seriesIndicator){
+      const changed=held!==this.seriesHeld||key!==this.seriesKey||indicator!==this.seriesIndicator;
+      if(changed || (indicator && (!this.child || this.armedChild !== this.child))){
         this.seriesKey=key;
         this.seriesHeld=held;this.seriesIndicator=indicator;
-        if(!this.paused&&!this.blockedSeries.has(key)&&!this.disabledForTest){
-          if(indicator)await this.command('begin',this.config);
-          else if(this.shown===0&&this.child)await this.command('end');
+        if(!this.paused&&!this.blockedSeries.has(key)&&!this.helperDisabled){
+          try {
+            if(indicator)await this.command('begin',this.config);
+            else if(this.shown===0&&this.child)await this.command('end');
+          } catch (error) { this.fail(error); throw error; }
         }
         this.persist();
       }
@@ -262,11 +275,11 @@ export class TakeoverControl {
     }
     if (this.config.previewToken !== this.previewToken) {
       this.previewToken = this.config.previewToken;
-      if (!this.paused && this.active === 0 && !this.disabledForTest) await this.command('preview', this.config);
+      if (!this.paused && this.active === 0 && !this.helperDisabled) await this.command('preview', this.config);
     }
     if(this.config.progressPreviewToken!==this.progressPreviewToken){
       this.progressPreviewToken=this.config.progressPreviewToken;
-      if(!this.disabledForTest&&this.progressPreviewToken>0)try { await this.command('progress',{enabled:true,preview:true,settings:this.config,remoteIndicatorVisible:this.config.remoteIndicatorVisible,progress:previewProgress(this.locale)}); } catch(error) { this.presentationError(error); }
+      if(!this.helperDisabled&&this.progressPreviewToken>0)try { await this.command('progress',{enabled:true,preview:true,settings:this.config,remoteIndicatorVisible:this.config.remoteIndicatorVisible,progress:previewProgress(this.locale)}); } catch(error) { this.presentationError(error); }
     }
   }
   // The helper's Windows process id, which the backend watches during input.
@@ -292,7 +305,7 @@ export class TakeoverControl {
     if (this.paused&&refuses(this.pauseMessage)) throw new Error(this.pauseMessage);
     if (this.closed) throw new Error('COMPUTER_USE_STOPPING');
     this.active++; if (!quiet) this.shown++;
-    try { if (!quiet&&!this.disabledForTest&&(!this.seriesHeld||!this.seriesIndicator||!this.child)) {
+    try { if (!quiet&&!this.helperDisabled&&(!this.child||this.armedChild!==this.child)) {
       try { await this.command('begin', this.config); this.sentShortcut = this.config.stopShortcut; this.sentCursorIndicator = this.config.cursorIndicatorEnabled;this.sentRemoteVisible=this.config.remoteIndicatorVisible; }
       catch (error) { this.fail(error); throw new Error(this.paused ? this.pauseMessage : error.message); }
     }
@@ -306,59 +319,104 @@ export class TakeoverControl {
   }
   fail(error) {
     if (this.closed || this.paused) return;
+    this.armedChild = null;
     this.paused = true;
     if(error?.message === STOPPED){this.stoppedAt=Date.now();this.stopReported=false;}
     const key=this.syncKey??this.seriesKey;
     this.stoppedSeriesKey=key;
     this.pauseMessage = error?.message === STOPPED ? STOPPED : `COMPUTER_USE_PAUSED: ${error?.message ?? error}. Desktop input is paused for this series (reading the screen and browser-lane calls still work). Do not retry desktop input in this turn; the next user turn reconnects automatically.`;
-    if(key!==null)this.blockedSeries.set(key,this.pauseMessage);
+    if(key!==null){
+      this.blockedSeries.set(key,this.pauseMessage);
+      if(this.blockedSeries.size>MAX_BLOCKED_SERIES)this.blockedSeries.delete(this.blockedSeries.keys().next().value);
+    }
     this.persist(String(error?.message ?? error));
     // This also covers a control-file or presentation failure while input runs.
-    this.child?.stdin.write(JSON.stringify({command:'cancel_input'})+'\n'+JSON.stringify({command:'stop'})+'\n',()=>{});
+    this.child?.stdin.write(serializeJsonLine({command:'cancel_input'})+serializeJsonLine({command:'stop'}),()=>{});
     this.onStop(new Error(this.pauseMessage));
+  }
+  killHelper(error, child = this.child, { failIfActive = true } = {}) {
+    if (!child) return;
+    const current = this.child === child;
+    if (current) {
+      this.child = null;
+      this.armedChild = null;
+      this.helperPid = 0;
+      this.sentProgress = undefined;
+      this.sentPresentation = undefined;
+      this.helperFailed = true;
+    }
+    for (const [id,pending] of this.waiters) {
+      if (pending.child !== child) continue;
+      clearTimeout(pending.timer);
+      this.waiters.delete(id);
+      pending.reject(error);
+    }
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    if (current && !this.closed && failIfActive) {
+      if (this.shown > 0 || this.seriesIndicator) this.fail(error);
+      else this.presentationError(error);
+    }
   }
   async start() {
     if (this.starting) return this.starting;
     if (this.child) return;
     this.starting = new Promise((resolve, reject) => {
-      let buffer = '', diagnostic = '', ready = false;
+      let diagnostic = '', ready = false;
       this.helperPid = 0;
       const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-File', windowsScript(helperScript), '-CancelEvent', this.eventName];
       if (this.testMode) args.push('-TestMode');
       const helperEnv={...process.env};delete helperEnv.WCU_APPROVAL_SECRET;delete helperEnv.WCU_APPROVAL_LEDGER;
       const child = this.child = spawn(this.powershell, args, { cwd: path.dirname(helperScript), env:windowsEnv(helperEnv,Object.keys(helperEnv).filter(name=>name.startsWith('WCU_'))), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-      const deadline = setTimeout(() => { reject(new Error('Takeover stop listener startup timed out')); child.kill(); }, 15000);
-      child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+      const startupFailure = error => {
+        clearTimeout(deadline);
+        reject(error);
+        this.killHelper(error, child, { failIfActive: false });
+      };
+      const deadline = setTimeout(() => startupFailure(new Error('Takeover stop listener startup timed out')), 15000);
+      child.stderr.setEncoding('utf8');
       child.stderr.on('data', chunk => { diagnostic = (diagnostic + chunk).slice(-6000); });
-      child.stdout.on('data', chunk => {
-        buffer += chunk;
-        for (;;) {
-          const at = buffer.indexOf('\n'); if (at < 0) break;
-          const line = buffer.slice(0, at).trim(); buffer = buffer.slice(at + 1); if (!line) continue;
-          let message; try { message = JSON.parse(line); } catch { continue; }
+      const output = new RpcFramer({
+        allowHeaders: false, maxBytes: 4*1024*1024,
+        onError: error => {
+          if (/size limit/.test(error.message)) {
+            if (!ready) startupFailure(error);
+            else this.killHelper(error, child);
+          }
+        },
+        onMessage: message => {
+          if (this.child !== child || !message || typeof message !== 'object') return;
           if (message.kind === 'ready') {
-            if(message.hookActive!==true){clearTimeout(deadline);reject(Error('Takeover stop listener is not ready'));child.kill();continue;}
+            if (message.hookActive !== true) { startupFailure(Error('Takeover stop listener is not ready')); return; }
             ready = true; this.helperFailed=false;this.helperPid = Number.isSafeInteger(message.pid) && message.pid > 0 ? message.pid : 0; clearTimeout(deadline); resolve(); }
           else if (message.kind === 'stopped') this.fail(new Error(STOPPED));
           else if (message.kind === 'progress-layout') {
             if(this.layoutFile){const entry={id:randomUUID(),patch:message.patch,base:message.base};this.layoutWrite=this.layoutWrite.then(()=>atomicJsonAsync(this.layoutFile,entry)).catch(error=>{process.stderr.write('Overlay settings sync failed: '+error.message+'\n');});}
           }
           else {
-            const pending = this.waiters.get(message.id); if (!pending) continue;
+            const pending = this.waiters.get(message.id); if (!pending || pending.child !== child) return;
             clearTimeout(pending.timer); this.waiters.delete(message.id);
-            Promise.resolve(this.layoutWrite).then(() => message.ok ? pending.resolve(message) : pending.reject(new Error(message.error)));
+            if (message.ok && pending.command === 'begin' && !this.paused && !this.closed) this.armedChild = child;
+            if (!message.ok && pending.command === 'begin') {
+              const error = new Error(message.error || 'Takeover stop listener did not acknowledge arming');
+              pending.reject(error);
+              this.killHelper(error,child);
+              return;
+            }
+            Promise.resolve(this.layoutWrite).then(() => {
+              if (message.ok && this.child === child) pending.resolve(message);
+              else pending.reject(new Error(message.error || 'Takeover stop listener disconnected'));
+            });
           }
-        }
+        },
       });
+      child.stdout.on('data', chunk => { if (this.child === child) output.push(chunk); });
       let handledDeath=false;
       const died = error => {
         if(handledDeath)return;handledDeath=true;
         clearTimeout(deadline);
-        if (this.child === child) this.child = null;
         const failure = error ?? new Error(`Takeover stop listener exited${diagnostic ? ': ' + diagnostic : ''}`);
         if (!ready) reject(failure);
-        for (const [id, pending] of this.waiters) { clearTimeout(pending.timer); pending.reject(failure); this.waiters.delete(id); }
-        if (!this.closed) { this.helperFailed = true; if(this.shown>0||this.seriesIndicator)this.fail(failure);else this.presentationError(failure); }
+        this.killHelper(failure, child, { failIfActive: ready });
       };
       child.once('error', died); child.once('exit', () => died());
       child.stdin.on('error', () => {});
@@ -375,24 +433,35 @@ export class TakeoverControl {
   }
   async command(command, params = {}) {
     if(this.closed&&command!=='close')throw Error('COMPUTER_USE_STOPPING');
-    await this.start();
+    if (command !== 'close') await this.start();
+    const child = this.child;
+    if (!child || (this.closed && command !== 'close')) throw Error('Takeover stop listener is not available');
+    if (['begin','end','resume','close'].includes(command)) this.armedChild = null;
     params = this.withWords(command, params);
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.waiters.delete(id); reject(new Error(`Takeover ${command} timed out`)); }, 5000);
-      this.waiters.set(id, { resolve, reject, timer });
-      this.child.stdin.write(JSON.stringify({ ...params, id, command }) + '\n', error => {
-        if (error) { clearTimeout(timer); this.waiters.delete(id); reject(error); }
-      });
+      const failIfActive = command !== 'resume' && command !== 'close';
+      const timer = setTimeout(() => this.killHelper(new Error(`Takeover ${command} timed out`), child, { failIfActive }), 5000);
+      this.waiters.set(id, { resolve, reject, timer, child, command });
+      try {
+        child.stdin.write(serializeJsonLine({ ...params, id, command }), error => {
+          if (error) this.killHelper(error, child, { failIfActive });
+        });
+      } catch (error) { this.killHelper(error, child, { failIfActive }); }
     });
   }
   async close() {
     this.closed = true; clearInterval(this.poll);
-    if (this.child) {
-      const child = this.child;
-      await this.command('close').catch(() => {});
-      child.stdin.end();
-      const force = setTimeout(() => { if (child.exitCode === null) child.kill(); }, 1000); force.unref();
+    const child = this.child;
+    if (child) {
+      if (!this.starting) {
+        let timer;
+        const exited = new Promise(resolve => child.once('close',resolve));
+        const stopping = this.command('close').catch(() => {}).finally(() => child.stdin.end()).then(() => exited);
+        await Promise.race([stopping,new Promise(resolve => { timer=setTimeout(resolve,1000); })]);
+        clearTimeout(timer);
+      }
+      this.killHelper(new Error('Computer Use is shutting down'), child, { failIfActive: false });
     }
     await this.layoutWrite;
   }

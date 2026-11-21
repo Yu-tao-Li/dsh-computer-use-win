@@ -7,13 +7,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_SETTINGS, normalizeSettings, enabledToolsForSettings, toolSelectionKey, repairStaleSettings } from './settings.mjs';
 import {createSettingsFields} from './settings-schema.mjs';
-import { atomicJson, atomicJsonAsync } from './takeover.mjs';
+import { atomicJson, atomicJsonAsync, DEFAULT_POWERSHELL } from './takeover.mjs';
 import { installActivity } from './activity.mjs';
 import { systemLocale } from './overlay-strings.mjs';
 import { randomBytes } from 'node:crypto';
 import { installHostPolicy } from './policy.mjs';
-import { settingsMode,findOwnEntry,bridgeSupport } from './host-compat.mjs';
+import { settingsMode,findOwnEntry,bridgeSupport,bridgeDiagnostics } from './host-compat.mjs';
 import { installCallLog, createDiagnosticsHandler, exportDiagnostics, DIAGNOSTICS_ROUTE, readInstallSpec } from './diagnostics.mjs';
+import { createHypervSetupHandler, HYPERV_ROUTE } from './hyperv-relay.mjs';
+import { backgroundDesktopArgs, startBackgroundDesktop } from './background-desktop.mjs';
 
 export const name = 'windows-computer-use';
 export const inject = ['tools'];
@@ -82,6 +84,7 @@ const controlPipe=dir=>'\\\\.\\pipe\\'+path.basename(dir);
 export async function holdControlDir(dir){
   const server=createServer(socket=>socket.destroy());
   await new Promise((resolve,reject)=>server.once('error',reject).listen(controlPipe(dir),resolve));
+  server.on('error',()=>{});
   server.unref();
   try{writeFileSync(path.join(dir,'.pipe-owner'),'1');}catch(error){server.close();throw error;}
   return ()=>server.close();
@@ -131,14 +134,21 @@ export function readDshLocale(settings) {
 }
 export function bridgeConfig(config = {}, runtime = {}) {
   const settings = normalizeSettings(config);
+  const isolated = settings.desktopTarget === 'hyperv';
+  const background = settings.desktopTarget === 'background';
+  if (background && !runtime.backgroundName) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the background desktop is not ready.');
+  const browser = background ? { ...settings, browserVisible:false, browserSignIn:false } : settings;
+  const entry = fileURLToPath(new URL(isolated ? './hyperv-relay.mjs' : './server.mjs', import.meta.url));
   return {
-    serverName: 'wincu', transport: 'stdio', command: process.execPath,
-    args: [fileURLToPath(new URL('./server.mjs', import.meta.url))],
-    env: { ELECTRON_RUN_AS_NODE: '1', WCU_IMAGE_MODE: 'file', WCU_BROWSER_ATTACH_USER: settings.browserAttachUser?'1':'0', WCU_BROWSER_HEADLESS: settings.browserVisible?'0':'1', WCU_BROWSER_APP: settings.browserApp, WCU_BROWSER_SIGNIN: settings.browserSignIn?'1':'0', WCU_TOOL_MODE: settings.toolPreset==='lazy'?'lazy':settings.mode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(settings),
+    serverName: 'wincu', transport: 'stdio', command: background ? DEFAULT_POWERSHELL : process.execPath,
+    args: background ? [...backgroundDesktopArgs(runtime.backgroundName),
+      '-Executable', process.execPath, '-EntryPath', entry] : [entry],
+    env: { ELECTRON_RUN_AS_NODE: '1', WCU_IMAGE_MODE: 'file', WCU_BROWSER_ATTACH_USER: browser.browserAttachUser?'1':'0', WCU_BROWSER_HEADLESS: browser.browserVisible?'0':'1', WCU_BROWSER_APP: browser.browserApp, WCU_BROWSER_SIGNIN: browser.browserSignIn?'1':'0', WCU_TOOL_MODE: settings.toolPreset==='lazy'?'lazy':settings.mode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(browser),
       ...(runtime.approvalSecret ? {WCU_APPROVAL_SECRET: runtime.approvalSecret,WCU_APPROVAL_LEDGER:runtime.approvalLedger, WCU_HOST_PID: String(process.pid),WCU_HOST_EXECUTABLE:process.execPath, WCU_HOST_PORTS: (runtime.hostPorts ?? []).join('|'), WCU_HOST_PORT_FILE:runtime.hostPortFile, WCU_USER_TABS_FILE:runtime.userTabsFile} : {}),
       ...(runtime.configFile ? { WCU_CONFIG_FILE: runtime.configFile, WCU_STATE_FILE: runtime.stateFile } : {}),
       ...(runtime.activityFile ? {WCU_ACTIVITY_FILE:runtime.activityFile}: {}),
       ...(runtime.layoutFile ? {WCU_LAYOUT_FILE:runtime.layoutFile}: {}),
+      ...(isolated ? {WCU_HYPERV_VM:settings.hypervVm} : {}),
       ...(runtime.notices ? {WCU_ADAPTER_NOTICES:JSON.stringify(runtime.notices)}: {}) },
     toolCallTimeoutMs: config.toolCallTimeoutMs ?? 90000,
     failOnStartupError: config.failOnStartupError ?? false
@@ -146,6 +156,7 @@ export function bridgeConfig(config = {}, runtime = {}) {
 }
 export async function apply(ctx, config) {
   const bridge = await import('@deepseek-ai/dsh-mcp-client');
+  const support = bridgeSupport();
   const root = mkdtempSync(path.join(os.tmpdir(), `${CONTROL_PREFIX}${process.pid}-`));
   // Without the pipe the directory falls back to the PID rule; never block loading.
   const releaseControlDir=await holdControlDir(root).catch(error=>{ctx.logger.warn('dsh-computer-use-win: control directory pipe unavailable: %s',error?.message??error);return ()=>{};});
@@ -160,27 +171,44 @@ export async function apply(ctx, config) {
   // new-issue page (diagnostics.mjs).
   const callLog = installCallLog(ctx);
   const pluginRoot = fileURLToPath(new URL('..', import.meta.url));
+  let firstBridgeStartupMs;
   const collectDiagnostics = () => {
     const profiles = ctx.get?.('desktopProfiles');
     let current; try { current = profiles?.current; } catch {}
     let version = 'unknown'; try { version = JSON.parse(readFileSync(path.join(pluginRoot, 'package.json'), 'utf8')).version; } catch {}
     return exportDiagnostics({ version, settings: desired, calls: callLog.list(), host: current ? 'DSH Desktop' : 'DSH',
-      mcpClient: bridgeSupport().version, dshLocale: getLocale(), installSpec: readInstallSpec(pluginRoot, current?.dir),
+      mcpClient: support.version, bridge: { ...bridgeDiagnostics(bridge, connection, ctx.tools, enabledToolsForSettings(desired).length, support.peerMismatches),
+        liveAdapterCount: liveAdapters.size, firstBridgeStartupMs },
+      dshLocale: getLocale(), installSpec: readInstallSpec(pluginRoot, current?.dir),
       secrets: [runtime.approvalSecret], serverPath: fileURLToPath(new URL('./server.mjs', import.meta.url)) });
   };
   ctx.inject(['webServer'], owner => {
-    if (typeof owner.webServer.register === 'function') owner.effect(() => {
-      try { return owner.webServer.register({ kind: 'exact', path: DIAGNOSTICS_ROUTE, handler: createDiagnosticsHandler({ collect: collectDiagnostics, logger: owner.logger }) }); }
-      catch (error) { owner.logger.warn('dsh-computer-use-win: the problem-report route is unavailable: %s', error?.message ?? error); return () => {}; }
-    });
     webServerSeen=true;clearTimeout(settleNoWebServer);if(!owner.webServer.port)atomicJson(runtime.hostPortFile,{ports:[],pending:true});
     let timer;
     const update=async()=>{
       const port=owner.webServer.port;
-      if(port){clearInterval(timer);timer=undefined;}
-      if(port && !runtime.hostPorts.includes(String(port))){runtime.hostPorts=[String(port)];await atomicJsonAsync(runtime.hostPortFile,{ports:runtime.hostPorts});}
+      if (!port) return;
+      if (!runtime.hostPorts.includes(String(port))) {
+        const ports = [String(port)];
+        if (hostPortsDisposed) return;
+        await atomicJsonAsync(runtime.hostPortFile, { ports });
+        if (hostPortsDisposed) return;
+        runtime.hostPorts = ports;
+      }
+      clearInterval(timer);timer=undefined;
     };
-    void update().catch(error=>owner.logger.warn(error));owner.effect(()=>{timer=setInterval(()=>{void update().catch(error=>owner.logger.warn(error));},250);timer.unref();return ()=>clearInterval(timer);});
+    owner.effect(()=>{timer=setInterval(()=>{void update().catch(error=>owner.logger.warn(error));},250);timer.unref();return ()=>clearInterval(timer);});
+    void update().catch(error=>owner.logger.warn(error));
+    if (typeof owner.webServer.register === 'function') owner.effect(() => {
+      try { return owner.webServer.register({ kind: 'exact', path: DIAGNOSTICS_ROUTE, handler: createDiagnosticsHandler({ collect: collectDiagnostics, logger: owner.logger }) }); }
+      catch (error) { owner.logger.warn('dsh-computer-use-win: the problem-report route is unavailable: %s', error?.message ?? error); return () => {}; }
+    });
+    if (typeof owner.webServer.register === 'function') owner.effect(() => {
+      try { return owner.webServer.register({ kind: 'exact', path: HYPERV_ROUTE,
+        handler: createHypervSetupHandler({ settings: () => desired, reconnect: vm => applySettings(desired, desiredJson, vm) }),
+      }); }
+      catch (error) { owner.logger.warn('dsh-computer-use-win: the Hyper-V setup route is unavailable: %s', error?.message ?? error); return () => {}; }
+    });
   });
   installHostPolicy(ctx, runtime);
   // The MCP server polls these files until DSH has closed its connection, which
@@ -190,8 +218,8 @@ export async function apply(ctx, config) {
   ctx.effect(() => () => { for (const delay of [1500, 6000]) setTimeout(() => removeControlDir(root), delay).unref(); });
   setTimeout(() => { void sweepControlDirs({ keep: root }).catch(()=>{}); }, 3000).unref();
   const logError = limitedErrorLog(ctx.logger);
-  const support=bridgeSupport();
   if(!support.tested){runtime.notices={hostBridgeUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: bridge %s is unverified for this release; actions requiring approval fail closed if approval is unavailable.',support.version);}
+  if(support.peerMismatches.length)ctx.logger.warn('dsh-computer-use-win: bridge %s resolved DSH peer versions outside its declared requirements: %s. Use the bridge supplied with this DSH Host.',support.version,support.peerMismatches.map(({name,expected,actual})=>name+' '+actual+' (expected '+expected+')').join(', '));
   if(support.legacyApprovalUiUnverified){runtime.notices={...runtime.notices,legacyApprovalUiUnverified:support.version};ctx.logger.warn('dsh-computer-use-win: legacy bridge %s does not support interactive web approval prompts; actions requiring approval will be blocked.',support.version);}
   // Reset settings go to the DSH log and, through the server, into the health
   // and tools results the agent reads. Which duplicate's tools DSH keeps is
@@ -205,6 +233,10 @@ export async function apply(ctx, config) {
   if (liveAdapters.size > 1) ctx.logger.warn('dsh-computer-use-win: %d entries of this plugin run in one profile, and DSH keeps only one set of mcp__wincu tools. Remove the extra entry from dsh.profile.bundles in the profile package.json or from its cordis.patch.yml.', liveAdapters.size);
   let desired = normalizeSettings(config), desiredJson = JSON.stringify(desired), desiredKey = toolSelectionKey(desired), lastWrittenConfigJson = desiredJson;
   let runningSelection, connection, stopped = false;
+  const desktopRoute = settings => JSON.stringify([settings.desktopTarget, settings.desktopTarget === 'hyperv' ? settings.hypervVm : '']);
+  let runningDesktop;
+  runtime.desktopRoutePending = () => runningDesktop !== desktopRoute(desired);
+  runtime.usesGuestLoopback = () => desired.desktopTarget === 'hyperv';
   const writeConfigIfChanged = (settings, json = JSON.stringify(settings)) => {
     if (json === lastWrittenConfigJson) return;
     atomicJson(runtime.configFile, settings);
@@ -231,11 +263,38 @@ export async function apply(ctx, config) {
   };
   ctx.effect(() => () => { clearTimeout(localeRefresh); localeRefresh = undefined; });
   let updates = Promise.resolve();
+  let backgroundOwner;
+  const closeBackground = () => {
+    const owner = backgroundOwner;
+    backgroundOwner = undefined;
+    return owner?.dispose();
+  };
+  async function prepareBridge(settings) {
+    if (settings.desktopTarget !== 'background') return bridgeConfig(settings, runtime);
+    if (!backgroundOwner) {
+      const owner = startBackgroundDesktop(error => {
+        if (backgroundOwner !== owner) return;
+        backgroundOwner = undefined;
+        runningSelection = undefined;
+        logError(error);
+      });
+      backgroundOwner = owner;
+    }
+    const owner = backgroundOwner;
+    try { await owner.ready; }
+    catch (error) {
+      if (backgroundOwner === owner) await closeBackground();
+      throw error;
+    }
+    if (backgroundOwner !== owner) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the desktop owner exited during startup.');
+    return bridgeConfig({ ...settings, failOnStartupError:true }, { ...runtime, backgroundName:owner.name });
+  }
   let saveOverlayPatch, settingsSource = 'entry', namespaceScope, layoutId, layoutStatKey = '', layoutSaving = false, layoutRetry = { id: undefined, at: 0, delay: 0 };
   let selectionPending=0,selectionRetry={at:0,delay:0};
   atomicJson(runtime.configFile, desired);
-  ctx.effect(() => () => { stopped = true; });
-  const applySettings = (next, nextJson) => {
+  ctx.effect(() => () => { stopped = true; void closeBackground(); });
+  const isSelectedVm = vm => desired.desktopTarget === 'hyperv' && desired.hypervVm === vm;
+  const applySettings = (next, nextJson, reconnectVm) => {
     const nextSettings = next === desired ? desired : normalizeSettings(next);
     const json = next === desired ? desiredJson : (nextJson ?? JSON.stringify(nextSettings));
     // A preview shows the DSH language of this moment. It goes into the
@@ -251,23 +310,37 @@ export async function apply(ctx, config) {
     }
     selectionPending++;
     const pending = updates.then(async () => {try{
-      if (!connection || stopped) return;
-      await connection.await();
+      if (!connection || stopped || (reconnectVm && !isSelectedVm(reconnectVm))) return;
       const nextSelection = desiredKey;
-      if (stopped || runningSelection === nextSelection) return;
+      if (!reconnectVm && runningSelection === nextSelection) return;
       const deadline = Date.now() + 65000;
-      for (;;) {
+      while (runningDesktop !== undefined) {
         let active = false;
-        try { active = JSON.parse(readFileSync(runtime.stateFile,'utf8')).active > 0; }
-        catch (error) { if (error.code !== 'ENOENT') throw error; }
+        try {
+          const saved = JSON.parse(readFileSync(runtime.stateFile,'utf8'));
+          const guest = JSON.parse(runningDesktop)[0] === 'hyperv';
+          active = saved.active > 0 && (guest || !Number.isSafeInteger(saved.pid) || processAlive(saved.pid));
+        } catch (error) {
+          if (['EACCES','EBUSY','EPERM'].includes(error.code)) active = true;
+          else if (error.code !== 'ENOENT') throw error;
+        }
         if (!active || stopped) break;
         if (Date.now() > deadline) throw new Error('Tool selection change is waiting for the current desktop action to finish');
         await new Promise(resolve => setTimeout(resolve,100));
       }
-      if (stopped) return;
+      if (stopped || (reconnectVm && !isSelectedVm(reconnectVm))) return;
       const latest={...desired},latestSelection=desiredKey;
-      await connection.update(bridgeConfig({ ...config, ...latest }, runtime), true);
-      await connection.await(); runningSelection = latestSelection;selectionRetry={at:0,delay:0};
+      const required = runningDesktop !== desktopRoute(latest) || Boolean(reconnectVm);
+      const nextConfig = { ...config, ...latest };
+      if (required) nextConfig.failOnStartupError = true;
+      const nextBridge = await prepareBridge(nextConfig);
+      if (stopped) return;
+      runningSelection = runningDesktop = undefined;
+      await connection.update(nextBridge, true);
+      await connection.await();
+      if (latest.desktopTarget === 'background' && !backgroundOwner) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the desktop owner exited during reconnect.');
+      runningSelection = latestSelection; runningDesktop = desktopRoute(latest);selectionRetry={at:0,delay:0};
+      if (latest.desktopTarget !== 'background' && desired.desktopTarget !== 'background') await closeBackground();
     }catch(error){
       const delay=Math.min((selectionRetry.delay||250)*2,60000);selectionRetry={at:Date.now()+delay,delay};throw error;
     }finally{selectionPending--;}
@@ -281,13 +354,13 @@ export async function apply(ctx, config) {
     const timer = setInterval(()=>{
       if(saveOverlayPatch&&!layoutSaving)try{
         const st = statSync(runtime.layoutFile, { bigint: true, throwIfNoEntry: false });
-        const statKey = st ? `${st.mtimeNs}:${st.size}` : '';
+        const statKey = st ? `${st.ino}:${st.mtimeNs}:${st.size}` : '';
         // An unchanged file is skipped, except when its failed save is due for
         // a retry: the backoff ends without the file changing.
         const retryDue = layoutRetry.id !== undefined && Date.now() >= layoutRetry.at;
         if (st && (statKey !== layoutStatKey || retryDue)) {
-          layoutStatKey = statKey;
           const layout=JSON.parse(readFileSync(runtime.layoutFile,'utf8'));
+          layoutStatKey = statKey;
           // A failed save is retried with backoff (0.5 s, doubling up to 60 s) and
           // a newer layout at once. A patch that cannot apply is dropped.
           if(layout.id!==layoutId&&!(layout.id===layoutRetry.id&&Date.now()<layoutRetry.at)){
@@ -346,14 +419,27 @@ export async function apply(ctx, config) {
     });
     settingsSource = 'namespace';
     namespaceScope=scope;
-    settingsContext.effect(() => () => { settingsSource = 'entry';namespaceScope=undefined; });
+    settingsContext.effect(() => () => { settingsSource = 'entry';namespaceScope=undefined;saveOverlayPatch=undefined; });
     saveOverlayPatch=patch=>scope.update(patch);
     desired = normalizeSettings(scope.get()); desiredJson = JSON.stringify(desired); desiredKey = toolSelectionKey(desired); writeConfigIfChanged(desired, desiredJson);
-    settingsContext.effect(() => scope.watch(applySettings));
+    settingsContext.effect(() => scope.watch(next => {
+      try { return applySettings(next).catch(logError); }
+      catch (error) { logError(error); }
+    }));
     if (connection) return applySettings(desired, desiredJson);
   });
-  runningSelection = desiredKey;
-  connection = ctx.plugin(bridge, bridgeConfig({ ...config, ...desired }, runtime));
-  await connection;
-  if (desiredKey !== runningSelection) await applySettings(desired, desiredJson);
+  const initial = desired, initialSelection = desiredKey;
+  const startupAt = performance.now();
+  const startup = prepareBridge({ ...config, ...initial }).then(options => {
+    if (stopped) return;
+    connection = ctx.plugin(bridge, options);
+    return connection;
+  }).then(() => {
+    if (initial.desktopTarget === 'background' && !backgroundOwner && !stopped) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the desktop owner exited during startup.');
+    runningSelection = initialSelection;
+    runningDesktop = desktopRoute(initial);
+  }).finally(() => { firstBridgeStartupMs = Math.round(performance.now() - startupAt); });
+  updates = startup.catch(() => {});
+  await startup;
+  if (desiredKey !== runningSelection && !stopped) await applySettings(desired, desiredJson);
 }

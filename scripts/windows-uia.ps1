@@ -122,6 +122,85 @@ public static class WindowsComputerUseNative {
     return true;
   }
 
+  private const uint ProcessQueryLimitedInformation = 0x1000, TokenQuery = 0x0008;
+  private const uint StillActive = 259;
+  private const int TokenIntegrityLevel = 25, ErrorInvalidParameter = 87, ErrorInsufficientBuffer = 122;
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
+  [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll")] private static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+  private static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, System.Text.StringBuilder path, ref uint length);
+  [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+  [DllImport("advapi32.dll", SetLastError = true)]
+  private static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr data, uint length, out uint required);
+
+  public sealed class InputProcessIdentity {
+    public bool Gone;
+    public string ImagePath;
+    public uint? Integrity;
+    public bool TokenAccessDenied;
+  }
+
+  private static string GetImagePath(IntPtr process) {
+    uint size = 512;
+    var path = new System.Text.StringBuilder((int)size);
+    if (QueryFullProcessImageNameW(process, 0, path, ref size)) return path.ToString();
+    if (Marshal.GetLastWin32Error() != ErrorInsufficientBuffer) return null;
+    size = 32768;
+    path = new System.Text.StringBuilder((int)size);
+    return QueryFullProcessImageNameW(process, 0, path, ref size) ? path.ToString() : null;
+  }
+
+  private static uint? GetProcessIntegrity(IntPtr process, out bool tokenAccessDenied) {
+    tokenAccessDenied = false;
+    IntPtr token;
+    if (!OpenProcessToken(process, TokenQuery, out token)) {
+      tokenAccessDenied = Marshal.GetLastWin32Error() == 5;
+      return null;
+    }
+    try {
+      uint size;
+      GetTokenInformation(token, TokenIntegrityLevel, IntPtr.Zero, 0, out size);
+      if (Marshal.GetLastWin32Error() != ErrorInsufficientBuffer || size < IntPtr.Size || size > 4096) return null;
+      IntPtr data = Marshal.AllocHGlobal((int)size);
+      try {
+        if (!GetTokenInformation(token, TokenIntegrityLevel, data, size, out size)) return null;
+        // TOKEN_MANDATORY_LABEL starts with the SID pointer in SID_AND_ATTRIBUTES.
+        IntPtr sid = Marshal.ReadIntPtr(data);
+        if (sid == IntPtr.Zero) return null;
+        string label = new System.Security.Principal.SecurityIdentifier(sid).Value;
+        const string integrityAuthority = "S-1-16-";
+        uint rid;
+        if (!label.StartsWith(integrityAuthority, StringComparison.Ordinal) ||
+            !UInt32.TryParse(label.Substring(integrityAuthority.Length), out rid)) return null;
+        return rid;
+      } finally { Marshal.FreeHGlobal(data); }
+    } finally { CloseHandle(token); }
+  }
+
+  public static uint? ReadCurrentIntegrity() {
+    bool ignored;
+    return GetProcessIntegrity(GetCurrentProcess(), out ignored);
+  }
+
+  public static InputProcessIdentity ReadInputProcess(uint pid, bool checkImage) {
+    // Use a single query-only handle for the image, token and liveness of the
+    // same process. No permission to write to or modify the target is requested.
+    IntPtr process = OpenProcess(ProcessQueryLimitedInformation, false, pid);
+    if (process == IntPtr.Zero)
+      return new InputProcessIdentity { Gone = Marshal.GetLastWin32Error() == ErrorInvalidParameter };
+    try {
+      var identity = new InputProcessIdentity { ImagePath = checkImage ? GetImagePath(process) : null };
+      identity.Integrity = GetProcessIntegrity(process, out identity.TokenAccessDenied);
+      uint exitCode;
+      if (!GetExitCodeProcess(process, out exitCode)) return new InputProcessIdentity();
+      if (exitCode != StillActive) return new InputProcessIdentity { Gone = true };
+      return identity;
+    } finally { CloseHandle(process); }
+  }
+
   private static INPUT KeyInput(int key, bool up) {
     var input = new INPUT(); input.type=1; input.U.ki.wVk=(ushort)key;
     input.U.ki.dwFlags=(up?2u:0u) | ((key>=0x21&&key<=0x2E)?1u:0u);
@@ -186,11 +265,12 @@ public static class WindowsComputerUseNative {
   private static System.Diagnostics.Process stopListener;
   private static System.Threading.EventWaitHandle stopReady;
   public static void SetStopListener(int processId) {
+    if (stopListener != null && stopListener.Id == processId) return;
+    if (stopListener != null) stopListener.Dispose();
+    stopListener = null;
     if (processId <= 0) return;
-    if (stopListener == null || stopListener.Id != processId) {
-      if (stopListener != null) stopListener.Dispose();
-      stopListener = System.Diagnostics.Process.GetProcessById(processId);
-    }
+    try { stopListener = System.Diagnostics.Process.GetProcessById(processId); }
+    catch (ArgumentException) { throw new OperationCanceledException("COMPUTER_USE_STOP_LISTENER_UNAVAILABLE"); }
   }
   public static void ThrowIfCancelled() {
     string name = Environment.GetEnvironmentVariable("WCU_CANCEL_EVENT");
@@ -335,6 +415,8 @@ public static class WindowsComputerUseNative {
       ThrowIfCancelled();
       if (GetForegroundWindow() != front || FocusedWindow(front) != focus) return false;
       int chunk = Math.Min(64, n - sent);
+      if (sent + chunk < n && Char.IsHighSurrogate(chars[(sent + chunk) / 2 - 1]) &&
+          Char.IsLowSurrogate(chars[(sent + chunk) / 2])) chunk -= 2;
       var slice = new INPUT[chunk];
       Array.Copy(inputs, sent, slice, 0, chunk);
       uint ok = SendInput((uint)chunk, slice, size);
@@ -367,6 +449,35 @@ public static class WindowsComputerUseNative {
     var result = new System.Collections.Generic.List<IntPtr>();
     EnumWindows(delegate(IntPtr hwnd, IntPtr data) { result.Add(hwnd); return true; }, IntPtr.Zero);
     return result.ToArray();
+  }
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+  struct LaunchStartup {
+    public int Size;
+    public string Reserved, Desktop, Title;
+    public uint X,Y,Width,Height,Columns,Rows,Fill,Flags;
+    public ushort Show,ReservedSize;
+    public IntPtr ReservedData,Input,Output,Error;
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  struct LaunchProcess {
+    public IntPtr Process,Thread;
+    public uint ProcessId,ThreadId;
+  }
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  static extern bool CreateProcess(string application, System.Text.StringBuilder command,
+    IntPtr processAttrs, IntPtr threadAttrs, bool inheritHandles, uint flags,
+    IntPtr environment, string directory, ref LaunchStartup startup, out LaunchProcess process);
+  public static uint StartBackgroundProgram(string executable, string arguments, string directory) {
+    var startup = new LaunchStartup { Size=Marshal.SizeOf(typeof(LaunchStartup)) };
+    var command = new System.Text.StringBuilder("\"" + executable + "\" " + arguments);
+    LaunchProcess process;
+    // Inherit the desktop and environment, but never the MCP stdio handles.
+    if (!CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, false,
+        0x08000000, IntPtr.Zero, directory, ref startup, out process))
+      throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+    CloseHandle(process.Thread);
+    CloseHandle(process.Process);
+    return process.ProcessId;
   }
 
   // Chromium hosts (Electron, Chrome/Edge, CEF, WebView2) draw each page in a
@@ -401,7 +512,7 @@ public static class WindowsComputerUseNative {
   public static extern bool SetProcessDPIAware();
 
   [DllImport("user32.dll")]
-  public static extern IntPtr SetProcessDpiAwarenessContext(IntPtr value);
+  public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
 
   [StructLayout(LayoutKind.Sequential)]
   public struct RECT { public int left; public int top; public int right; public int bottom; }
@@ -568,8 +679,10 @@ function Get-CsHash {
   param([string]$Source)
   $normalized = $Source.Replace("`r`n", "`n").Replace("`r", "`n")
   $sha = [System.Security.Cryptography.SHA256]::Create()
-  $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalized))
-  return ([BitConverter]::ToString($bytes).Replace("-", "").Substring(0, 16)).ToLowerInvariant()
+  try {
+    $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalized))
+    return ([BitConverter]::ToString($bytes).Replace("-", "").Substring(0, 16)).ToLowerInvariant()
+  } finally { $sha.Dispose() }
 }
 
 # Load a helper compiled into %TEMP%, compiling it first when no cached copy
@@ -592,11 +705,68 @@ function Remove-TempFile {
 }
 
 function Get-HelperCacheDir {
-  $dir = [string]$env:TEMP
-  if (-not [string]::IsNullOrWhiteSpace($dir) -and $dir.Length -le 170) { return $dir }
-  $fallback = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'dsh-wcu-cache'
-  if (-not [System.IO.Directory]::Exists($fallback)) { [void][System.IO.Directory]::CreateDirectory($fallback) }
-  return $fallback
+  $local = [Environment]::GetFolderPath('LocalApplicationData')
+  $configured = [string]$env:TEMP
+  if ($configured -and [IO.Directory]::Exists($configured)) {
+    # Resolve a user's usual 8.3 TEMP spelling before deciding whether it is
+    # a caller override. Cache file I/O itself still uses .NET paths.
+    try { $configured = (Get-Item -LiteralPath $configured -ErrorAction Stop).FullName } catch {}
+  }
+  $default = Join-Path $local 'Temp'
+  $userTemp = [Environment]::ExpandEnvironmentVariables([string][Environment]::GetEnvironmentVariable('TEMP','User'))
+  if ($configured -and $configured.TrimEnd('\') -ne $default.TrimEnd('\') -and $configured -ne $userTemp) {
+    if (-not [IO.Path]::IsPathRooted($configured)) { throw 'The configured TEMP path must be absolute.' }
+    $dir = [IO.Path]::GetFullPath($configured)
+  } else {
+    $dir = Join-Path $local 'dsh-computer-use-win\native-cache'
+    if (-not [IO.Directory]::Exists($dir)) {
+      $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+      try {
+        $acl=[Security.AccessControl.DirectorySecurity]::new()
+        $acl.SetAccessRuleProtection($true,$false)
+        foreach($sid in @($identity.User,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
+          $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
+        }
+        if ($PSVersionTable.PSEdition -eq 'Core') { [void][IO.FileSystemAclExtensions]::CreateDirectory($dir,$acl) }
+        else { [void][IO.Directory]::CreateDirectory($dir,$acl) }
+      } finally { $identity.Dispose() }
+    }
+  }
+  [void][IO.Directory]::CreateDirectory($dir)
+  Assert-PrivateHelperPath $dir -Directory
+  return $dir
+}
+
+function Assert-PrivateHelperPath {
+  param([string]$Path, [switch]$Directory)
+  $attributes = [IO.File]::GetAttributes($Path)
+  if (($attributes -band [IO.FileAttributes]::ReparsePoint) -or
+      ([bool]($attributes -band [IO.FileAttributes]::Directory) -ne [bool]$Directory)) {
+    throw 'Native cache must contain ordinary files in a private directory.'
+  }
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  try { $trusted = @($identity.User.Value,$identity.Owner.Value,'S-1-5-18','S-1-5-32-544') }
+  finally { $identity.Dispose() }
+  $item = if ($Directory) { [IO.DirectoryInfo]::new($Path) } else { [IO.FileInfo]::new($Path) }
+  $sections = [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner
+  $acl = if ($PSVersionTable.PSEdition -eq 'Core') { [IO.FileSystemAclExtensions]::GetAccessControl($item,$sections) } else { $item.GetAccessControl($sections) }
+  if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) {
+    throw 'Native cache ownership does not match the Windows account.'
+  }
+  $writeRights = [Security.AccessControl.FileSystemRights]'WriteData, AppendData, DeleteSubdirectoriesAndFiles, Delete, ChangePermissions, TakeOwnership'
+  foreach ($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {
+    if ($rule.AccessControlType -eq 'Allow' -and -not ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -and
+        ($rule.FileSystemRights -band $writeRights) -and $rule.IdentityReference.Value -notin $trusted) {
+      throw 'Native cache grants write access to another account.'
+    }
+  }
+}
+
+function Get-HelperDigest {
+  param([byte[]]$Bytes)
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant() }
+  finally { $sha.Dispose() }
 }
 
 # A compile that failed or was cut off leaves <helper>.<pid>.<guid>.dll and
@@ -614,23 +784,40 @@ function Remove-StaleHelperParts {
 
 function Import-HelperAssembly {
   param([string]$Path, [scriptblock]$Compile)
-  if (-not [System.IO.File]::Exists($Path)) {
-    Remove-StaleHelperParts ([System.IO.Path]::GetDirectoryName($Path))
-    $partial = $Path -replace '\.dll$', (".$PID." + [Guid]::NewGuid().ToString('N') + '.dll')
-    try {
-      & $Compile $partial
-      try { [System.IO.File]::Move($partial, $Path) }
-      catch { if (-not [System.IO.File]::Exists($Path)) { throw } }
-      if ([System.IO.File]::Exists($partial)) {
-        [void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($partial))
+  $directory = [IO.Path]::GetDirectoryName($Path)
+  Assert-PrivateHelperPath $directory -Directory
+  $digestFile = $Path + '.sha256'
+  $mutex = [Threading.Mutex]::new($false, ('Local\DSH-WCU-Helper-' + (Get-CsHash $Path.ToUpperInvariant())))
+  $owned = $false
+  $partial = $Path -replace '\.dll$', (".$PID." + [Guid]::NewGuid().ToString('N') + '.dll')
+  try {
+    try { $owned = $mutex.WaitOne(20000) } catch [Threading.AbandonedMutexException] { $owned = $true }
+    if (-not $owned) { throw 'Timed out waiting for the native helper cache.' }
+    if ([IO.File]::Exists($Path)) { Assert-PrivateHelperPath $Path }
+    if ([IO.File]::Exists($digestFile)) { Assert-PrivateHelperPath $digestFile }
+    if ([IO.File]::Exists($Path) -and [IO.File]::Exists($digestFile)) {
+      $bytes = [IO.File]::ReadAllBytes($Path)
+      if ((Get-HelperDigest $bytes) -ceq [IO.File]::ReadAllText($digestFile)) {
+        [void][Reflection.Assembly]::Load($bytes)
         return
       }
-    } finally {
-      Remove-TempFile $partial
-      Remove-TempFile "$partial.cs"
     }
+    Remove-StaleHelperParts $directory
+    & $Compile $partial
+    $bytes = [IO.File]::ReadAllBytes($partial)
+    [IO.File]::WriteAllText("$partial.sha256",(Get-HelperDigest $bytes))
+    if ([IO.File]::Exists($Path)) { [IO.File]::Replace($partial,$Path,[NullString]::Value) }
+    else { [IO.File]::Move($partial,$Path) }
+    if ([IO.File]::Exists($digestFile)) { [IO.File]::Replace("$partial.sha256",$digestFile,[NullString]::Value) }
+    else { [IO.File]::Move("$partial.sha256",$digestFile) }
+    [void][Reflection.Assembly]::Load($bytes)
+  } finally {
+    Remove-TempFile $partial
+    Remove-TempFile "$partial.cs"
+    Remove-TempFile "$partial.sha256"
+    if ($owned) { $mutex.ReleaseMutex() }
+    $mutex.Dispose()
   }
-  [void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($Path))
 }
 
 function Load-Assemblies {
@@ -643,9 +830,11 @@ function Load-Assemblies {
     # Add-Type targets the current runtime. A Core-built helper cannot be used
     # by Windows PowerShell 5.1 even when its C# source is identical.
     $runtimeKey = $PSVersionTable.PSEdition.ToLowerInvariant() + '-clr' + [Environment]::Version.Major
-    $dll = Join-Path (Get-HelperCacheDir) ("wcu-native-" + $runtimeKey + '-' + (Get-CsHash -Source $script:WcuCs) + ".dll")
     $precompiled = (Get-Command Import-PackagedHelper -ErrorAction SilentlyContinue) -and (Import-PackagedHelper -Name native -Source $script:WcuCs)
-    if (-not $precompiled) { Import-HelperAssembly -Path $dll -Compile { param($out) Add-Type -TypeDefinition $script:WcuCs -OutputAssembly $out } }
+    if (-not $precompiled) {
+      $dll = Join-Path (Get-HelperCacheDir) ("wcu-native-" + $runtimeKey + '-' + (Get-CsHash -Source $script:WcuCs) + ".dll")
+      Import-HelperAssembly -Path $dll -Compile { param($out) Add-Type -TypeDefinition $script:WcuCs -OutputAssembly $out }
+    }
   }
   Write-BackendStage 'native-load-complete'
   Set-DpiAware
@@ -677,8 +866,10 @@ function Load-Assemblies {
 function Set-DpiAware {
   # Per-Monitor V2 (context value -4); fall back to system-aware. Must run
   # before any screen/UIA work so coordinates and pixels are physical.
-  $ok = [WindowsComputerUseNative]::SetProcessDpiAwarenessContext([IntPtr]::new(-4))
-  if ($ok -eq [IntPtr]::Zero) {
+  $ok = $false
+  try { $ok = [WindowsComputerUseNative]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) }
+  catch [EntryPointNotFoundException] {}
+  if (-not $ok) {
     [void][WindowsComputerUseNative]::SetProcessDPIAware()
   }
 }
@@ -739,6 +930,7 @@ function Get-Patterns {
 
 function Get-ValueText {
   param([object]$Element)
+  if (Invoke-Safe { $Element.Current.IsPassword } $true) { return $null }
   $pattern = $null
   if (Invoke-Safe { $Element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern) } $false) {
     return Invoke-Safe { $pattern.Current.Value } $null
@@ -755,7 +947,7 @@ function New-ElementCacheRequest {
   # below use Cached, including RuntimeId. Never fetch an entire subtree.
   $cache.AutomationElementMode = [System.Windows.Automation.AutomationElementMode]::Full
   foreach ($name in @('Name','AutomationId','ClassName','ControlType','BoundingRectangle',
-      'IsEnabled','IsOffscreen','HasKeyboardFocus','ProcessId','NativeWindowHandle','RuntimeId','FrameworkId')) {
+      'IsEnabled','IsOffscreen','HasKeyboardFocus','ProcessId','NativeWindowHandle','RuntimeId','FrameworkId','IsPassword')) {
     $cache.Add([System.Windows.Automation.AutomationElement]::("${name}Property"))
   }
   if ($DetailLevel -eq "full") {
@@ -839,7 +1031,8 @@ function Convert-ElementInfo {
     $info["processId"] = try { $cached.ProcessId } catch { $null }
     $info["nativeWindowHandle"] = try { $cached.NativeWindowHandle } catch { $null }
     $info["runtimeId"] = $rtStr
-    $info["value"] = if ($null -ne $valuePattern) { try { $valuePattern.Cached.Value } catch { $null } } else { $null }
+    $isPassword = Invoke-Safe { $cached.IsPassword } $true
+    $info["value"] = if ($null -ne $valuePattern -and -not $isPassword) { try { $valuePattern.Cached.Value } catch { $null } } else { $null }
     $info["patterns"] = [string[]]$patterns.ToArray()
   } else {
     if ($Depth -le 1) { $info["processId"] = try { $cached.ProcessId } catch { $null } }
@@ -911,13 +1104,13 @@ function Set-WindowForeground {
   # the current foreground window's thread and tapping the Alt key releases
   # the lock long enough to switch (classic AutoHotkey trick).
   $fgPtr = [WindowsComputerUseNative]::GetForegroundWindow()
-  $fgThread = [uint32]0
-  $tgtThread = [uint32]0
-  [void][WindowsComputerUseNative]::GetWindowThreadProcessId($fgPtr, [ref]$fgThread)
-  [void][WindowsComputerUseNative]::GetWindowThreadProcessId($ptr, [ref]$tgtThread)
+  $fgProcess = [uint32]0
+  $fgThread = [WindowsComputerUseNative]::GetWindowThreadProcessId($fgPtr, [ref]$fgProcess)
+  if (-not $fgThread) { return $false }
+  $ownThread = [WindowsComputerUseNative]::GetCurrentThreadId()
   $attached = $false
-  if ($fgThread -ne $tgtThread -and $fgThread -ne 0) {
-    $attached = [WindowsComputerUseNative]::AttachThreadInput($tgtThread, $fgThread, $true)
+  if ($fgThread -ne $ownThread) {
+    $attached = [WindowsComputerUseNative]::AttachThreadInput($ownThread, $fgThread, $true)
   }
   try {
     if ($env:WCU_CANCEL_EVENT) { [WindowsComputerUseNative]::ThrowIfCancelled() }
@@ -927,7 +1120,7 @@ function Set-WindowForeground {
     [WindowsComputerUseNative]::SetForegroundWindow($ptr) | Out-Null
     Start-Sleep -Milliseconds 120
   } finally {
-    if ($attached) { [void][WindowsComputerUseNative]::AttachThreadInput($tgtThread, $fgThread, $false) }
+    if ($attached) { [void][WindowsComputerUseNative]::AttachThreadInput($ownThread, $fgThread, $false) }
   }
 
   # Verify the switch actually happened; report it so callers can react.
@@ -958,16 +1151,22 @@ function Assert-InputProcess {
       ($script:TakeoverProcessId -gt 0 -and $ProcessId -eq $script:TakeoverProcessId)) {
     throw 'HOST_INPUT_DENIED: desktop input cannot target the DSH host or computer-use helper.'
   }
-  if ($env:WCU_HOST_EXECUTABLE) {
-    $process=Invoke-Safe { Get-Process -Id $ProcessId -ErrorAction Stop } $null
-    if ($null -eq $process) { throw 'INPUT_TARGET_UNAVAILABLE: the target process could not be opened or has exited. No input was sent.' }
-    $executable=Invoke-Safe { $process.Path } $null
-    if (-not $executable) {
-      throw 'INPUT_TARGET_ACCESS_UNCONFIRMED: Windows did not allow the target executable to be verified. The app may be running as administrator or the process may have exited. No input was sent.'
-    }
-    if ([string]::Equals([IO.Path]::GetFullPath($executable),[IO.Path]::GetFullPath($env:WCU_HOST_EXECUTABLE),[StringComparison]::OrdinalIgnoreCase)) {
-      throw 'HOST_INPUT_DENIED: desktop input cannot target a DSH host executable window.'
-    }
+  $checkImage = [bool]$env:WCU_HOST_EXECUTABLE
+  $target = [WindowsComputerUseNative]::ReadInputProcess([uint32]$ProcessId, $checkImage)
+  if ($target.Gone) { throw 'INPUT_TARGET_UNAVAILABLE: the target process has exited. No input was sent.' }
+  if ($checkImage -and $target.ImagePath -and
+      [string]::Equals([IO.Path]::GetFullPath($target.ImagePath),[IO.Path]::GetFullPath($env:WCU_HOST_EXECUTABLE),[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'HOST_INPUT_DENIED: desktop input cannot target a DSH host executable window.'
+  }
+  $currentIntegrity = [WindowsComputerUseNative]::ReadCurrentIntegrity()
+  if ($null -ne $target.Integrity -and $null -ne $currentIntegrity -and $target.Integrity -gt $currentIntegrity) {
+    throw 'ELEVATED_TARGET_DENIED: the target window has a higher Windows integrity level than the input worker. No input was sent.'
+  }
+  if ($target.TokenAccessDenied) {
+    throw 'INPUT_TARGET_ACCESS_UNCONFIRMED: Windows denied access to verify the target integrity level. It may be running as administrator. Open a non-elevated instance if possible. No input was sent.'
+  }
+  if ($null -eq $target.Integrity -or $null -eq $currentIntegrity -or ($checkImage -and -not $target.ImagePath)) {
+    throw 'INPUT_TARGET_ACCESS_UNCONFIRMED: Windows did not allow the target identity or integrity level to be verified. No input was sent.'
   }
 }
 
@@ -1147,6 +1346,21 @@ function Complete-Input {
   param([hashtable]$State, [System.Collections.IDictionary]$Result)
   $target = if ($State.target) { $State.target } else { [WindowsComputerUseNative]::GetForegroundWindow().ToInt64() }
   if ($target) { $script:InputWindow = @{ series = $script:WcuSeries; hwnd = [int64]$target; at = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() } }
+  if ($State.drain) {
+    $front = [WindowsComputerUseNative]::GetForegroundWindow()
+    if (Test-InputWindow $front.ToInt64() $State.target $State) {
+      # WM_NULL can return ahead of pending SendInput events. Wait for a paint
+      # on the receiving thread, bounded to avoid holding up a busy app.
+      $paint = [WindowsComputerUseNative]::RequestPaint($front)
+      $limit = if ($paint) { 1200 } else { 150 }
+      $watch = [Diagnostics.Stopwatch]::StartNew()
+      while ($watch.ElapsedMilliseconds -lt $limit -and [WindowsComputerUseNative]::GetForegroundWindow() -eq $front) {
+        if ($paint -and -not [WindowsComputerUseNative]::PaintPending($front)) { break }
+        Start-Sleep -Milliseconds 15
+      }
+      if (-not $paint -or [WindowsComputerUseNative]::PaintPending($front)) { $Result['inputQueue'] = 'unconfirmed' }
+    }
+  }
   if ($null -ne $State.moved) {
     $now = New-Object WindowsComputerUseNative+POINT
     [void][WindowsComputerUseNative]::GetCursorPos([ref]$now)
@@ -1158,8 +1372,10 @@ function Complete-Input {
   if (-not $State.borrowed) { return }
   if ($State.keep) { $Result['foreground'] = 'kept in front (activate:true)'; return }
   # Let the target handle the input before deciding.
-  $ignored = [UIntPtr]::Zero
-  for ($i = 0; $i -lt 2; $i++) { [void][WindowsComputerUseNative]::SendMessageTimeout([IntPtr]$State.target, 0, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 1000, [ref]$ignored) }
+  if (-not $State.drain) {
+    $ignored = [UIntPtr]::Zero
+    for ($i = 0; $i -lt 2; $i++) { [void][WindowsComputerUseNative]::SendMessageTimeout([IntPtr]$State.target, 0, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 1000, [ref]$ignored) }
+  }
   $front = [WindowsComputerUseNative]::GetForegroundWindow().ToInt64()
   if (-not (Test-InputWindow $front $State.target $State)) { $Result['foreground'] = 'left: another window is in front now'; return }
   $opened = @([WindowsComputerUseNative]::VisiblePopups([uint32]$State.procId) | Where-Object { $State.popups -notcontains $_ })
@@ -1622,7 +1838,12 @@ function Wait-SendInputEdit {
   $still = [Diagnostics.Stopwatch]::StartNew()
   do {
     [void](Test-Failsafe)
-    if ([WindowsComputerUseNative]::GetForegroundWindow() -ne $Front -or [WindowsComputerUseNative]::FocusedWindow($Front) -ne $Focus) { return $null }
+    if ([WindowsComputerUseNative]::GetForegroundWindow() -ne $Front -or [WindowsComputerUseNative]::FocusedWindow($Front) -ne $Focus) {
+      if ($null -eq $Edit) { return $null }
+      $value = [WindowsComputerUseNative]::ReadEditText($Focus, $Edit.capacity)
+      if ($null -ne $value -and [string]::Equals($value, $Edit.expected, [StringComparison]::Ordinal)) { return 'observed' }
+      return 'incomplete'
+    }
     $taken = -not ($paint -and [WindowsComputerUseNative]::PaintPending($Focus))
     if ($null -eq $Edit) {
       if ($taken -and $wait.ElapsedMilliseconds -ge 150) { return $null }
@@ -2146,13 +2367,20 @@ function Test-TreeBudget {
   return $true
 }
 
+function Test-RectOverlap {
+  param([object]$A, [object]$B)
+  return ($null -ne $A -and $null -ne $B -and $A.width -gt 0 -and $A.height -gt 0 -and $B.width -gt 0 -and $B.height -gt 0 -and
+    $A.x -lt ($B.x + $B.width) -and $B.x -lt ($A.x + $A.width) -and
+    $A.y -lt ($B.y + $B.height) -and $B.y -lt ($A.y + $A.height))
+}
+
 function Convert-Tree {
   param(
     [System.Windows.Automation.AutomationElement]$Element,
     [string]$Path, [int]$Depth, [int]$MaxDepth, [ref]$Count, [int]$MaxNodes,
     [string]$ViewMode = "control", [bool]$IncludeOffscreen = $false,
     [string]$DetailLevel = "compact", [object]$Traversal, [object]$Owner = $null,
-    [int]$Level = -1
+    [int]$Level = -1, [object]$GeckoPageBounds = $null
   )
   if ($Count.Value -ge $MaxNodes) { $Traversal.reason = "maxNodes"; return $null }
   if (-not (Test-TreeBudget $Traversal)) { return $null }
@@ -2165,6 +2393,12 @@ function Convert-Tree {
   $script:ObservationOwner = $Owner
   $info = Convert-ElementInfo -Element $Element -Id "uia:$Path" -Depth $Depth -DetailLevel $DetailLevel -UseCache
   $Count.Value++
+  if ($Traversal.pruneGeckoOffscreen -and $info.controlType -eq 'Document') {
+    # Gecko can mark the whole page offscreen while its native window is
+    # visible. Keep controls whose bounds overlap this document, but keep
+    # the provider's isOffscreen value and the input checks unchanged.
+    $GeckoPageBounds = if ($Owner.isOffscreen -eq $false -and $info.isOffscreen -eq $true -and (Test-RectOverlap $info.boundingBox $Owner.boundingBox)) { $info.boundingBox }
+  }
   # Chromium nests a page six or more levels down, under unnamed layout panes
   # (NonClientView, ClientView, View...), and Firefox-family browsers put it
   # under three unnamed Gecko panes (#56). In window-scoped trees those panes do
@@ -2183,7 +2417,7 @@ function Convert-Tree {
       $i = 0
       while ($null -ne $child) {
         if ($Count.Value -ge $MaxNodes -or -not (Test-TreeBudget $Traversal)) { break }
-        $childOut = Convert-Tree -Element $child -Path "$Path.$i" -Depth ($Depth + 1) -MaxDepth $MaxDepth -Count $Count -MaxNodes $MaxNodes -ViewMode $ViewMode -IncludeOffscreen $IncludeOffscreen -DetailLevel $DetailLevel -Traversal $Traversal -Owner $Owner -Level $childLevel
+        $childOut = Convert-Tree -Element $child -Path "$Path.$i" -Depth ($Depth + 1) -MaxDepth $MaxDepth -Count $Count -MaxNodes $MaxNodes -ViewMode $ViewMode -IncludeOffscreen $IncludeOffscreen -DetailLevel $DetailLevel -Traversal $Traversal -Owner $Owner -Level $childLevel -GeckoPageBounds $GeckoPageBounds
         if ($null -ne $childOut) { $childrenOut.Add($childOut) }
         if ($Count.Value -ge $MaxNodes -or $null -ne $Traversal.reason -or -not (Test-TreeBudget $Traversal)) { break }
         $child = $Traversal.walker.GetNextSibling($child, $Traversal.cache)
@@ -2194,7 +2428,8 @@ function Convert-Tree {
       $Traversal.error = $_.Exception.Message
     }
   }
-  if ($Depth -gt 0 -and $Traversal.pruneGeckoOffscreen -and $info.isOffscreen -eq $true -and $childrenOut.Count -eq 0 -and $info.controlType -notin @('Window','Pane','Document','Group','Tab','TabItem')) {
+  if ($Depth -gt 0 -and $Traversal.pruneGeckoOffscreen -and $info.isOffscreen -eq $true -and $childrenOut.Count -eq 0 -and $info.controlType -notin @('Window','Pane','Document','Group','Tab','TabItem') -and
+      (-not (Test-RectOverlap $info.boundingBox $GeckoPageBounds) -or -not (Test-RectOverlap $info.boundingBox $Owner.boundingBox))) {
     $Count.Value--
     $script:ObservationOwner = $previousOwner
     return $null
@@ -2431,6 +2666,7 @@ function Type-Text {
   $position = New-Object WindowsComputerUseNative+POINT
   if (-not [WindowsComputerUseNative]::GetCursorPos([ref]$position)) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows input desktop is unavailable.' }
   $script:LastPasteInfo = $null
+  [void](Test-Failsafe)
   $lease = Begin-ClipboardLease -Text $Text -RestoreClipboard $RestoreClipboard
   try {
     [void](Test-Failsafe)
@@ -2447,8 +2683,8 @@ function Type-Text {
     $requested = $lease.Complete(0)
     $script:LastPasteInfo = @{ clipboardRequested = $requested; clipboardPasteCompleted = $lease.NativePasteCompleted; clipboardRestored = $lease.Restored; clipboardRestoreFailed = $lease.RestorationFailed; clipboardRequestWindow = $lease.RequestWindow; clipboardRequestProcessId = $lease.RequestProcessId }
   } finally {
-    # Without a confirmed read, leave this paste's text available. Restoring
-    # the old clipboard now could send unrelated data to a slow recipient.
+    # The lease rolls back if nothing was sent. Once dispatched it keeps the
+    # requested text available for slow recipients until a read is confirmed.
     $lease.Dispose()
   }
 }
@@ -2768,6 +3004,10 @@ function Remove-OldScreenshots {
 
 function Capture-Screenshot {
   param([object]$WindowElement = $null, [int]$MaxWidth = 1600, [bool]$IncludeImageData = ($script:WcuImageData -ne $false), [switch]$InMemory)
+  $background = $env:WCU_BACKGROUND_DESKTOP -eq '1'
+  if ($background -and $null -eq $WindowElement) {
+    throw 'WCU_BACKGROUND_DESKTOP_TARGET_REQUIRED: capture a window by its nativeWindowHandle.'
+  }
   if (-not $InMemory) { Remove-OldScreenshots }
   $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
   $bmp = $null
@@ -2790,7 +3030,7 @@ function Capture-Screenshot {
       # PrintWindow may return success with a partial Chromium/CEF surface.
       # For an unobstructed foreground window, read the actual desktop pixels.
       # Recheck Z order, focus and geometry after the copy before accepting it.
-      if (Invoke-Safe { Test-WindowScreenCapture -Hwnd $hwnd -Bounds $rect -VirtualScreen $vs } $false) {
+      if (-not $background -and (Invoke-Safe { Test-WindowScreenCapture -Hwnd $hwnd -Bounds $rect -VirtualScreen $vs } $false)) {
         $screen = $null
         try {
           $screen = New-Object System.Drawing.Bitmap $rect.width, $rect.height
@@ -2813,7 +3053,7 @@ function Capture-Screenshot {
       if ($null -ne $bmp) {
         if ($method -ne "screen-region") { $method = "printwindow" }
         $bx = $rect.x; $by = $rect.y; $bw = $rect.width; $bh = $rect.height
-      } else {
+      } elseif (-not $background) {
         # PrintWindow may fail for composited surfaces. The final screen crop
         # is explicitly marked as possibly occluded.
         if ($null -eq $bmp) {
@@ -2841,6 +3081,7 @@ function Capture-Screenshot {
   }
 
   if ($null -eq $bmp) {
+    if ($background) { throw 'WCU_BACKGROUND_DESKTOP_LIMIT: Windows could not capture this window on the background desktop.' }
     if ($windowCaptureFailed) {
       # Target window has no capturable surface (minimized/hidden): capture
       # the whole screen but say so explicitly instead of pretending.
@@ -3264,6 +3505,10 @@ function Invoke-LaunchApp {
   $rawTarget = [Environment]::ExpandEnvironmentVariables([string](Get-Prop $InputObject 'target' ''))
   if ($rawTarget -match '^[\\/]{2,}') { throw 'LAUNCH_POLICY_DENIED: network paths are not supported.' }
   $resolved = Resolve-LaunchTarget $rawTarget
+  $background = $env:WCU_BACKGROUND_DESKTOP -eq '1'
+  if ($background -and ($resolved.kind -ne 'file' -or [IO.Path]::GetExtension($resolved.target) -notin @('.exe','.com'))) {
+    throw 'WCU_BACKGROUND_DESKTOP_LIMIT: supply the application executable. Explorer shortcuts and Store app activation require another desktop mode.'
+  }
   $approved = [bool](Get-Prop $InputObject '_wcuLaunchApproved' $false)
   $arguments = [string](Get-Prop $InputObject 'arguments' '')
   $directory = [string](Get-Prop $InputObject 'workingDirectory' '')
@@ -3306,6 +3551,18 @@ function Invoke-LaunchApp {
   $waitMs = [int](Get-Prop $InputObject 'waitMs' 1500)
   if ($waitMs -lt 0 -or $waitMs -gt 10000) { throw 'LAUNCH_INVALID_ARGUMENTS: waitMs must be 0-10000.' }
   $before = @(Get-NativeWindowList -MaxWindows 1000 | ForEach-Object { $_.ToArray() } | ForEach-Object { $_.nativeWindowHandle })
+  if ($background) {
+    [void](Test-Failsafe)
+    $working = if ($directory) { $directory } else { [IO.Directory]::GetCurrentDirectory() }
+    $appPid = [WindowsComputerUseNative]::StartBackgroundProgram($resolved.target,$arguments,$working)
+    if ($waitMs) { Start-Sleep -Milliseconds $waitMs }
+    $observed = @(Get-NativeWindowList -MaxWindows 1000 | ForEach-Object { $_.ToArray() } | Where-Object { $before -notcontains $_.nativeWindowHandle -and $_.processId -eq $appPid })
+    return [ordered]@{
+      ok=$true; action='launch_app'; target=$resolved.target; launchMethod='background-desktop'; verification='dispatched'
+      processId=$appPid; observedNewWindows=$observed
+      note='Use list_windows to check whether the app opened a window here. Some apps reuse an existing instance.'
+    }
+  }
   $shellWindows = $null; $desktop = $null; $document = $null; $application = $null
   try {
     # The desktop folder view belongs to Explorer. Its ShellExecute starts the
@@ -3379,6 +3636,17 @@ function Invoke-Action {
   # operation series (host turn) this call belongs to.
   $script:WcuQuiet = [bool](Get-Prop $inputObject '_wcuQuiet' $false)
   $script:WcuSeries = Get-Prop $inputObject '_wcuSeries' $null
+  $background = $env:WCU_BACKGROUND_DESKTOP -eq '1'
+  if ($background) {
+    $nativeTarget = Get-Prop $inputObject 'nativeWindowHandle' $null
+    if ($null -ne $nativeTarget -and [WindowsComputerUseNative]::TopLevelWindows() -notcontains [IntPtr]([long]$nativeTarget)) {
+      throw 'WCU_BACKGROUND_DESKTOP_WINDOW_UNAVAILABLE: the target window is not on this background desktop.'
+    }
+    if ($Action -in @('move','drag','focus','activate_window') -or (Get-Prop $inputObject 'activate' $false) -or
+        ($Action -eq 'element_info' -and $null -ne (Get-Prop $inputObject 'x' $null))) {
+      throw 'WCU_BACKGROUND_DESKTOP_LIMIT: this action requires the input desktop.'
+    }
+  }
   $inputLease = $null
   try {
   if ($Action -in @('launch_app','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','close_window','move_window') -or (Get-Prop $inputObject 'activate' $false)) {
@@ -3407,7 +3675,8 @@ function Invoke-Action {
         uiAutomation = $true
         treeObservation = @{cached=$true; defaultTreeTimeoutMs=5000; providerCallInterruptible=$false; chromiumHint="Use a scoped control tree; if traversal truncates or times out, check responsiveness before retrying and prefer screenshot/ocr."}
         screenshot = $true
-        sendInput = $true
+        sendInput = (-not $background)
+        desktopTarget = if ($background) { 'background' } else { 'current' }
         postmessage = $true
         ocr = "lazy"
         homing = $true
@@ -3432,7 +3701,7 @@ function Invoke-Action {
         # The window DSH works in may be behind the user's window: then the
         # screen shows the user's window, so capture DSH's window itself.
         $behind = $scope -ne 'desktop' -and -not (Has-WindowTarget $inputObject) -and (Get-WorkWindow) -ne [WindowsComputerUseNative]::GetForegroundWindow().ToInt64()
-        if (($captureWindow -or $behind) -and $treeResult.targetResponsive -ne $false) {
+        if (($captureWindow -or $behind -or $background) -and $treeResult.targetResponsive -ne $false) {
           $winEl = Get-ObservationWindow $inputObject $scope
         }
         $treeResult.screenshot = Capture-Screenshot -WindowElement $winEl -MaxWidth $maxWidth
@@ -3593,6 +3862,7 @@ function Invoke-Action {
         if ($targeted) { Assert-PointOnTarget $point.x $point.y $hwnd $state }
         $result.x = $point.x; $result.y = $point.y
         $state.moved = @{ x = $point.x; y = $point.y }
+        $state.drain = $true
         Click-At -X $point.x -Y $point.y -Button $button -Count 1
         $result["method"] = "sendinput"
       } finally { Complete-Input $state $result }
@@ -3636,6 +3906,7 @@ function Invoke-Action {
         if ($targeted) { Assert-PointOnTarget $point.x $point.y $hwnd $state }
         $result.x = $point.x; $result.y = $point.y
         $state.moved = @{ x = $point.x; y = $point.y }
+        $state.drain = $true
         Click-At -X $point.x -Y $point.y -Button $button -Count 2
         $result["method"] = "sendinput"
       } finally { Complete-Input $state $result }
@@ -3687,6 +3958,7 @@ function Invoke-Action {
         if ($targeted) { Assert-PointOnTarget ([int]$first.x) ([int]$first.y) $hwnd $state }
         Move-ToPoint -X ([int]$first.x) -Y ([int]$first.y)
         Start-Sleep -Milliseconds 50
+        $state.drain = $true
         try {
           if ([WindowsComputerUseNative]::SendMouseEvent(0, 0, [uint32]$flags[0], 0) -ne 1) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected mouse input.' }
           foreach ($pt in $path) {
@@ -3915,6 +4187,7 @@ function Invoke-Action {
           # (deliveredTo), so a result shows where they went, not only "sent".
           if($i -eq 0){$destination=Get-KeyDestination ([WindowsComputerUseNative]::GetForegroundWindow().ToInt64()) $via}
           Assert-InFront $state
+          $state.drain = $true
           if (-not [WindowsComputerUseNative]::SendKeyChord([string[]]$sequence[$i])) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected the key chord.' }
           if($i -eq 0){$result['deliveredTo']=$destination}
           if($sequence.Count -gt 1){$result['chordsSent']=$i+1}
@@ -3959,6 +4232,7 @@ function Invoke-Action {
           Confirm-ElementPoint $point
           Assert-PointOnTarget $point.x $point.y $hwnd $state
           $state.moved = @{ x = $point.x; y = $point.y }
+          $state.drain = $true
           Click-At -X $point.x -Y $point.y -Button "left" -Count 1
           $result["method"] = "ClickFallback"
         } finally { Complete-Input $state $result }
@@ -4168,7 +4442,7 @@ function Invoke-Action {
         if ([bool](Get-Prop $inputObject "activate" $false)) {
           try { $activationRefused = -not (Set-WindowForeground $winEl) }
           catch {
-            if ($_.Exception.Message -notlike 'INPUT_TARGET_ACCESS_UNCONFIRMED:*') { throw }
+            if ($_.Exception.Message -notmatch '^(INPUT_TARGET_ACCESS_UNCONFIRMED|ELEVATED_TARGET_DENIED):') { throw }
             $activationRefused = $true
             $activationError = $_.Exception.Message
           }

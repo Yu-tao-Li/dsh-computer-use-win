@@ -1,5 +1,5 @@
 import {readSafeValue} from './page-values.mjs';
-import {assertBrowserUrl, isBlockedRuntimeRequestUrl} from './policy.mjs';
+import {assertBrowserUrl, isBlockedRuntimeRequestUrl, canonicalFileUrl, browserChildEnv} from './policy.mjs';
 // Experimental Gecko lane. Own a fresh browser, or connect only to an endpoint
 // explicitly configured by the user. DOM semantics approximate, not replace, AX.
 import { execFile, spawn } from 'node:child_process';
@@ -9,11 +9,11 @@ import path from 'node:path';
 import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { domOutline, domElement, domFocused } from './browser-bidi-dom.mjs';
+import { acquireProfileLock } from './browser-profile-lock.mjs';
 
 export const GECKO_APP_ID = '{ec8030f7-c20a-464f-9b0e-13a3a9e97384}';
 const fail = (code, detail) => { throw new Error(`${code}: ${detail}`); };
 const check = request => { if (request?.cancelled) fail('COMPUTER_USE_CANCELLED', 'cancelled'); };
-const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
 const READ_SAFE_SRC = readSafeValue.toString();
 const wrappedBidiFns = new WeakMap();
 function wrappedBidiFn(fn) {
@@ -152,41 +152,38 @@ export function geckoProfileName(executable) {
   return 'kept-firefox-' + createHash('sha1').update(path.resolve(executable).toLowerCase()).digest('hex').slice(0, 16);
 }
 
-export async function launchGecko({ executable, root, headless = true, keep = false, timeoutMs = 20000, trace = () => {}, spawnImpl = spawn }) {
+export async function launchGecko({ executable, root, headless = true, keep = false, timeoutMs = 20000, trace = () => {}, spawnImpl = spawn, env = process.env }) {
   // Native nonactivating placement is a release gate. Never silently launch a
   // visible window in the wrong monitor or downgrade the user's setting.
   if (!headless) fail('BROWSER_BIDI_VISIBLE_UNVERIFIED', 'prototype requires browserVisible=false; nonactivating visible launch is not yet validated');
   mkdirSync(root, { recursive: true });
   const profile = keep ? path.join(root, geckoProfileName(executable)) : mkdtempSync(path.join(root, `bidi-${process.pid}-`));
   mkdirSync(profile, { recursive: true });
-  const lock = path.join(profile, 'dsh-bidi-owner');
-  for (;;) {
-    try { writeFileSync(lock, String(process.pid), { flag: 'wx' }); break; }
-    catch (error) {
-      // A server that crashed or was killed leaves its lock behind. Take the
-      // profile over once that process is gone, as profileLock does for Chromium.
-      let owner = 0;
-      if (error.code === 'EEXIST') try { owner = Number(readFileSync(lock, 'utf8')); } catch (readError) { if (readError.code === 'ENOENT') continue; }
-      if (owner > 0 && owner !== process.pid && !processAlive(owner)) { rmSync(lock, { force: true }); continue; }
-      fail('BROWSER_PROFILE_BUSY', `BiDi profile already owned${owner ? ` by running process ${owner}` : ''}; never share a single session (${error.code})`);
-    }
-  }
+  // Keep the old lock path so earlier versions also see that this profile is in use.
+  // A throwaway profile is already unique to the process that created it.
+  const release = keep ? await acquireProfileLock(path.join(profile, 'dsh-bidi-owner'), { timeoutMs: 0 }) : async () => {};
   const args = ['-no-remote', '-new-instance', '-profile', profile, '-headless', '--remote-debugging-port', '0', 'about:blank'];
   let child;
   try {
     writeFileSync(path.join(profile, 'user.js'), Object.entries(FIREFOX_PREFS).map(([k, v]) => `user_pref(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join('\n') + '\n');
     trace('launch', { executable, args, profile });
-    child = spawnImpl(executable, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    child = spawnImpl(executable, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env:browserChildEnv(env) });
   } catch (error) {
-    rmSync(lock, { force: true });
+    await release();
     if (!keep) rmSync(profile, { recursive: true, force: true });
     throw error;
   }
-  let stderr = '', exited = false, cleaned = false;
+  let stderr = '', exited = false, cleanupPromise;
   const exit = new Promise(resolve => child.once('exit', (code, signal) => { exited = true; trace('exit', { pid: child.pid, code, signal }); resolve(); }));
   child.stdout.on('data', data => trace('stdout', String(data)));
-  const cleanup = () => { if (!exited || cleaned) return; try { rmSync(lock, { force: true }); if (!keep) rmSync(profile, { recursive: true, force: true }); cleaned = true; } catch (error) { trace('cleanupError', error.message); } };
-  const stop = async () => { if (!exited) child.kill(); await Promise.race([exit, delay(3000)]); cleanup(); };
+  const cleanup = () => {
+    if (!exited) return;
+    return cleanupPromise ??= release().then(() => {
+      if (!keep) rmSync(profile, { recursive: true, force: true });
+    }).catch(error => trace('cleanupError', error.message));
+  };
+  void exit.then(cleanup);
+  const stop = async () => { if (!exited) child.kill(); await Promise.race([exit, delay(3000, undefined, { ref: false })]); await cleanup(); };
   try {
     const endpoint = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`BROWSER_TIMEOUT: Firefox startup; ${stderr.slice(-2000)}`)), timeoutMs);
@@ -257,10 +254,9 @@ export class BidiBrowserLane {
       const p = message.params ?? {};
       if (message.method === 'network.beforeRequestSent' && p.isBlocked && p.request?.request) {
         const reqTab = this.contexts.get(p.context);
-        const allowLocalFile = Boolean(reqTab?.approvedFileUrl || this.env.WCU_ALLOWED_FILE_ROOTS);
         let blocked = false;
         try {
-          blocked = isBlockedRuntimeRequestUrl(p.request.url ?? '', this.env, { isNavigation: Boolean(p.navigation), allowLocalFile }).blocked;
+          blocked = isBlockedRuntimeRequestUrl(p.request.url ?? '', this.env, { isNavigation: Boolean(p.navigation), approvedFileUrl:reqTab?.approvedFileUrl, checkFileRoots:true }).blocked;
         } catch { blocked = true; }
         this.connection?.send(blocked ? 'network.failRequest' : 'network.continueRequest', { request: p.request.request }, 3000).catch(() => {});
         return;
@@ -269,7 +265,10 @@ export class BidiBrowserLane {
       if (message.method === 'browsingContext.contextCreated' && p.parent == null && p.context) this.tabFor(p);
       if (!tab) return;
       if (message.method === 'browsingContext.contextDestroyed') { tab.closed = true; this.tabs.delete(tab.key); this.contexts.delete(p.context); }
-      if (message.method === 'browsingContext.navigationStarted') { tab.ids.clear(); tab.byShared.clear(); tab.last = null; tab.url = p.url; }
+      if (message.method === 'browsingContext.navigationStarted') {
+        tab.ids.clear(); tab.byShared.clear(); tab.last = null; tab.url = p.url;
+        if (tab.approvedFileUrl && (!/^file:/i.test(p.url ?? '') || canonicalFileUrl(p.url)!==tab.approvedFileUrl)) tab.approvedFileUrl=undefined;
+      }
       if (message.method === 'browsingContext.userPromptOpened') {
         tab.dialog = { type: p.type, message: p.message, ...(p.defaultValue !== undefined ? { defaultValue: p.defaultValue } : {}) };
         for (const wake of tab.promptWaiters) wake();
@@ -294,7 +293,7 @@ export class BidiBrowserLane {
         // Firefox, and health and list_windows report visible:false.
         this.owned = await launchGecko({ executable: this.executable.path,
           root: this.env.WCU_BROWSER_PROFILE || path.join(this.env.LOCALAPPDATA || os.tmpdir(), 'dsh-computer-use-win', 'agent-browser'),
-          headless: true, keep: this.env.WCU_BROWSER_SIGNIN === '1', trace: this.trace });
+          headless: true, keep: this.env.WCU_BROWSER_SIGNIN === '1', trace: this.trace, env:this.env });
         endpoint = this.owned.endpoint;
       }
       try {
@@ -302,8 +301,8 @@ export class BidiBrowserLane {
         this.connection = connection;
         await connection.send('session.new', { capabilities: { alwaysMatch: { unhandledPromptBehavior: { default: 'ignore' } } } });
         this.sessionOwned = true; this.listen(connection);
-        await connection.send('session.subscribe', { events: ['browsingContext.contextCreated', 'browsingContext.contextDestroyed', 'browsingContext.navigationStarted', 'browsingContext.load', 'browsingContext.userPromptOpened', 'browsingContext.userPromptClosed', 'network.beforeRequestSent'] });
-        await connection.send('network.addIntercept', { phases: ['beforeRequestSent'] }).catch(() => {});
+        await connection.send('session.subscribe', { events: ['browsingContext.contextCreated', 'browsingContext.contextDestroyed', 'browsingContext.navigationStarted', 'browsingContext.userPromptOpened', 'browsingContext.userPromptClosed', 'network.beforeRequestSent'] });
+        await connection.send('network.addIntercept', { phases: ['beforeRequestSent'] });
         await this.refresh();
         return connection;
       } catch (error) {
@@ -405,7 +404,7 @@ export class BidiBrowserLane {
       if (opener[1] && opener[1] !== this.key) fail('BROWSER_TAB_NOT_FOUND', 'unknown browser');
       const url = bidiUrl(args.value); assertBrowserUrl(url, {env:this.env, grants:request?.approvalGrants, approved:request?.policyApproved===true}); await this.ensure(request); check(request);
       tab = this.tabFor(await this.connection.send('browsingContext.create', { type: 'tab', background: true }));
-      if ((request?.policyApproved || request?.approvalGrants?.fileUrls?.size) && /^file:/i.test(url)) tab.approvedFileUrl = new URL(url).href;
+      if ((request?.policyApproved || request?.approvalGrants?.fileUrls?.size) && /^file:/i.test(url)) tab.approvedFileUrl = canonicalFileUrl(url);
       await this.untilPrompt(tab, () => this.connection.send('browsingContext.navigate', { context: tab.context, url, wait: 'interactive' }));
       detail.opened = this.describe(tab);
     } else {
@@ -441,7 +440,7 @@ export class BidiBrowserLane {
       }
       await this.untilPrompt(tab, async () => {
         if (action === 'set_value' && match[2] === 'address') {
-          const url = bidiUrl(args.value); assertBrowserUrl(url, {env:this.env, grants:request?.approvalGrants, approved:request?.policyApproved===true}); tab.approvedFileUrl=(request?.policyApproved||request?.approvalGrants?.fileUrls?.size)&&/^file:/i.test(url)?new URL(url).href:undefined; tab.ids.clear(); tab.byShared.clear(); tab.last = null;
+          const url = bidiUrl(args.value); assertBrowserUrl(url, {env:this.env, grants:request?.approvalGrants, approved:request?.policyApproved===true}); tab.approvedFileUrl=(request?.policyApproved||request?.approvalGrants?.fileUrls?.size)&&/^file:/i.test(url)?canonicalFileUrl(url):undefined; tab.ids.clear(); tab.byShared.clear(); tab.last = null;
           await this.connection.send('browsingContext.navigate', { context: tab.context, url, wait: 'interactive' });
         } else if (['click', 'double_click', 'invoke', 'move'].includes(action)) {
           await this.call(tab, domElement, ['prepareClick'], sharedId, request); check(request);

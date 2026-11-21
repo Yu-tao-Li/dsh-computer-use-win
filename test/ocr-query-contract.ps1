@@ -180,10 +180,12 @@ Assert-Equal $script:OcrLanguage 'ja' 'Requested language is passed to the recog
 Write-Output 'PASS full-size capture by default, requested language and reported language/scale'
 
 $targeted = [pscustomobject]@{nativeWindowHandle=42;activate=$true}
-$script:ActivationFailure = 'INPUT_TARGET_ACCESS_UNCONFIRMED: Windows could not check the executable.'
-$result = Invoke-Action -Action 'ocr' -InputObject $targeted
-Assert-Equal $result.ok $true 'OCR can still read without activation'
-if ($result.warning -notmatch 'INPUT_TARGET_ACCESS_UNCONFIRMED.+captured without activating') { throw 'Missing activation warning' }
+foreach ($code in @('INPUT_TARGET_ACCESS_UNCONFIRMED','ELEVATED_TARGET_DENIED')) {
+  $script:ActivationFailure = "${code}: Windows declined activation."
+  $result = Invoke-Action -Action 'ocr' -InputObject $targeted
+  Assert-Equal $result.ok $true 'OCR can still read without activation'
+  if ($result.warning -notmatch ($code+'.+captured without activating')) { throw 'Missing activation warning' }
+}
 $script:ActivationFailure = 'HOST_INPUT_DENIED: protected host'
 $threw = $false
 try { $null = Invoke-Action -Action 'ocr' -InputObject $targeted }

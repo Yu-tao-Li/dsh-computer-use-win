@@ -6,7 +6,7 @@ import {McpTestClient} from './mcp-test-client.mjs';
 assert.equal(TOOL_NAMES.length,26);assert.equal(new Set(TOOL_NAMES).size,26);assert.equal(LITE_TOOL_NAMES.length,12);
 assert(LITE_TOOL_NAMES.includes('screenshot'));
 const backend=await readFile(new URL('../scripts/windows-uia.ps1',import.meta.url),'utf8');
-const guard=backend.match(/if \(\$Action -in @\(([^)]+)\) -or \(Get-Prop \$inputObject 'activate'/);
+const guard=backend.match(/if \(\$Action -in @\(([^)]+)\) -or \(Get-Prop \$inputObject 'activate' \$false\)\) \{\s+\$inputLease = Enter-DesktopInput/);
 assert(guard,'Find the native input guard action list');
 assert.deepEqual(guard[1].split(',').map(x=>x.trim().replaceAll("'",'')).sort(),[...INPUT_ACTIONS,'launch_app'].sort());
 const cases=[

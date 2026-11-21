@@ -42,7 +42,7 @@ public sealed class WcuClipboardLease : IDisposable {
   readonly ManualResetEvent ready=new ManualResetEvent(false),finished=new ManualResetEvent(false);
   volatile Owner owner;
   Exception failure;
-  volatile bool read,closing,pasteSent,pasteBarrierDone,nativePasteCompleted;
+  volatile bool read,closing,pasteSent,pasteBarrierDone,nativePasteStarted,nativePasteCompleted;
   IntPtr pasteTarget;
   public bool Restored {get;private set;}
   public bool RestorationFailed {get;private set;}
@@ -71,6 +71,9 @@ public sealed class WcuClipboardLease : IDisposable {
     // Native edit controls finish WM_PASTE synchronously. This also confirms
     // completion when a clipboard monitor materialized the text first.
     pasteTarget=targetWindowHandle;
+    // A timed-out synchronous message can still reach the edit. Keep this
+    // lease's text available just as for a dispatched keyboard paste.
+    nativePasteStarted=true;
     IntPtr result;
     if(SendMessageTimeout(targetWindowHandle,0x0302,IntPtr.Zero,IntPtr.Zero,0x0002,1500,out result)==IntPtr.Zero)
       throw new TimeoutException("COMPUTER_USE_PASTE_UNCONFIRMED: the native paste did not finish within 1.5 s and was not sent again; check the field before retrying.");
@@ -92,14 +95,14 @@ public sealed class WcuClipboardLease : IDisposable {
     readonly WcuClipboardLease lease;
     readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer();
     System.Windows.Forms.IDataObject previous;
-    DateTime expires;
+    DateTime expires, closeDeadline;
     bool rendered;
     uint sequence;
     internal Owner(WcuClipboardLease value){
       lease=value;ShowInTaskbar=false;FormBorderStyle=FormBorderStyle.None;Opacity=0;
       var handle=Handle;
       IntPtr originalOwner=GetClipboardOwner();
-      if(lease.restore){
+      {
         // Preserve safe text/string formats before EmptyClipboard without forcing
         // heavy or hanging delayed OLE/GDI/stream renders from third-party owners.
         var original=Clipboard.GetDataObject();
@@ -113,10 +116,10 @@ public sealed class WcuClipboardLease : IDisposable {
               if(item is string)copy.SetData(format,false,item);
             }catch{}
           }
-          previous=copy;
+          if(copy.GetFormats(false).Length!=0)previous=copy;
         }
       }
-      if(lease.restore&&GetClipboardOwner()!=originalOwner)throw new InvalidOperationException("Clipboard changed while being preserved; no input sent");
+      if(GetClipboardOwner()!=originalOwner)throw new InvalidOperationException("Clipboard changed while being preserved; no input sent");
       // Materializing another owner's delayed formats can itself increment
       // the sequence number. The preserved snapshot is complete now.
       uint originalSequence=GetClipboardSequenceNumber();
@@ -125,13 +128,14 @@ public sealed class WcuClipboardLease : IDisposable {
       if(!opened)throw new InvalidOperationException("Clipboard is busy; no input sent");
       try{
         if(lease.closing)throw new OperationCanceledException("Clipboard preparation cancelled");
-        if(lease.restore&&GetClipboardSequenceNumber()!=originalSequence)throw new InvalidOperationException("Clipboard changed while being preserved; no input sent");
-        EmptyClipboard();
+        if(GetClipboardSequenceNumber()!=originalSequence)throw new InvalidOperationException("Clipboard changed while being preserved; no input sent");
+        if(!EmptyClipboard())throw new InvalidOperationException("Could not acquire clipboard ownership; no input sent");
         SetClipboardData(13,IntPtr.Zero);
         SetPrivacyFormat("ExcludeClipboardContentFromMonitorProcessing",1);
         SetPrivacyFormat("CanIncludeInClipboardHistory",0);
         SetPrivacyFormat("CanUploadToCloudClipboard",0);
       }finally{CloseClipboard();}
+      sequence=GetClipboardSequenceNumber();
       expires=DateTime.UtcNow.AddSeconds(2);timer.Interval=10;timer.Tick+=Tick;timer.Start();
       lease.owner=this;lease.ready.Set();
     }
@@ -165,6 +169,7 @@ public sealed class WcuClipboardLease : IDisposable {
     }
     protected override void WndProc(ref Message message){
       if(message.Msg==0x305&&message.WParam.ToInt32()==13){
+        if(CancelledBeforeDispatch){message.Result=IntPtr.Zero;return;}
         // WM_RENDERFORMAT is sent with the reader's clipboard still open.
         // Do not call OpenClipboard here.
         IntPtr requester=GetOpenClipboardWindow();uint reader;GetWindowThreadProcessId(requester,out reader);
@@ -180,12 +185,17 @@ public sealed class WcuClipboardLease : IDisposable {
       base.WndProc(ref message);
     }
     internal void Poke(){if(IsHandleCreated&&!IsDisposed)try{BeginInvoke((Action)(()=>Tick(this,EventArgs.Empty)));}catch(InvalidOperationException){}}
+    bool CancelledBeforeDispatch {
+      get{return (lease.closing||DateTime.UtcNow>=expires)&&!lease.pasteSent&&!lease.nativePasteStarted;}
+    }
     void Tick(object sender,EventArgs e){
       try{
         bool own=GetClipboardOwner()==Handle;
         if(!own){lease.finished.Set();Close();return;}
-        bool timeout=lease.closing||DateTime.UtcNow>=expires;
-        if(!lease.read&&!lease.nativePasteCompleted&&!timeout)return;
+        var now=DateTime.UtcNow;
+        bool timeout=lease.closing||now>=expires;
+        if(!timeout&&!lease.nativePasteCompleted&&!(lease.read&&lease.pasteSent))return;
+        if(timeout&&closeDeadline==default(DateTime))closeDeadline=now.AddMilliseconds(500);
         if(lease.read&&lease.pasteSent&&!lease.nativePasteCompleted&&!lease.pasteBarrierDone&&!timeout){
           lease.pasteBarrierDone=true;
           if(lease.pasteTarget!=IntPtr.Zero){
@@ -195,13 +205,24 @@ public sealed class WcuClipboardLease : IDisposable {
           }
         }
         // Taking the lock proves a slow reader has closed its clipboard.
-        if(!OpenClipboard(Handle))return;
-        bool canRestore=false;
+        if(!OpenClipboard(Handle)){
+          if(timeout&&now>=closeDeadline){lease.RestorationFailed=true;Close();}
+          return;
+        }
+        bool canRestore=false, cleared=false;
         try{
-          if(!rendered)Render();
-          canRestore=(lease.read||lease.nativePasteCompleted)&&lease.restore&&GetClipboardOwner()==Handle&&GetClipboardSequenceNumber()==sequence;
+          if(GetClipboardOwner()==Handle){
+            if(CancelledBeforeDispatch){
+              canRestore=GetClipboardSequenceNumber()==sequence;
+              if(canRestore&&previous==null){cleared=EmptyClipboard();canRestore=false;}
+            }else{
+              if(!rendered)Render();
+              canRestore=(lease.read||lease.nativePasteCompleted)&&lease.restore&&GetClipboardSequenceNumber()==sequence;
+            }
+          }
         }finally{CloseClipboard();}
         if(canRestore&&GetClipboardOwner()==Handle&&GetClipboardSequenceNumber()==sequence){if(previous!=null)Clipboard.SetDataObject(previous,true);else Clipboard.Clear();lease.Restored=true;}
+        if(cleared)lease.Restored=true;
         lease.finished.Set();Close();
       }catch(Exception error){if(lease.read||lease.nativePasteCompleted)lease.RestorationFailed=true;else lease.failure=error;lease.finished.Set();Close();}
     }

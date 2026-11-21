@@ -42,7 +42,7 @@ export function isBrowserElementId(id) {
   return typeof id==='string'&&(ELEMENT_ID.test(id)||NEW_TAB.test(id)||USER_CONNECT.test(id));
 }
 export function isBrowserCall(args) {
-  return !!args&&(args.browserTab!==undefined||isBrowserElementId(args.elementId));
+  return !!args&&((args.browserTab!==undefined&&args.browserTab!=='desktop')||isBrowserElementId(args.elementId));
 }
 export function isQuietCall(action,args={}) {
   const kind=byAction.get(action)?.quiet;

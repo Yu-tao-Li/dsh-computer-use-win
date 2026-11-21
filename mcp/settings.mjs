@@ -51,7 +51,8 @@ export function normalizeSettings(input = {}) {
   for(const key of Object.keys(SETTINGS_SCHEMA))validateSetting(key,value[key]);
   value.enabledTools=normalizeEnabledTools(value.enabledTools);
   if(value.toolPreset==='auto')value.toolPreset=value.enabledTools.length===TOOL_NAMES.length?'full':'custom';
-  if(value.browserApp==='firefox')value.browserAttachUser=false;
+  if(value.browserApp==='firefox'||value.desktopTarget!=='current')value.browserAttachUser=false;
+  value.hypervVm=value.hypervVm.trim();
   value.stopShortcut=normalizeStopShortcut(value.stopShortcut);
   value.progressLockShortcut=normalizeStopShortcut(value.progressLockShortcut);
   if(value.progressLockShortcut&&value.progressLockShortcut===value.stopShortcut)throw new Error('progressLockShortcut must differ from the stop shortcut');
@@ -66,7 +67,7 @@ export function enabledToolsForSettings(input = {}) {
 // Both permission and startup state matter when deciding whether to reconnect.
 export function toolSelectionKey(input = {}) {
   const settings=normalizeSettings(input);
-  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser});
+  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser,desktopTarget:settings.desktopTarget,hypervVm:settings.desktopTarget==='hyperv'?settings.hypervVm:''});
 }
 
 export function browserRoutingInstructions(settings = {}, allowed = enabledToolsForSettings(settings)) {
@@ -75,12 +76,13 @@ export function browserRoutingInstructions(settings = {}, allowed = enabledTools
   return (browserAttachUser ? 'User-browser attachment is enabled. list_windows only lists the selected browser, never connects. Before explicitly connecting through set_value elementId "<browser id>:connect" value "connect", ask the user to click Allow in their browser. Do not automatically retry a refusal or timeout. Only operate tabs the user mentioned or DSH opened. Before sending, posting, buying, deleting or changing account settings, ask the user unless they asked for exactly that step. ' : '') + (browserFirst
     ? 'Browser-first policy: for web-page tasks, use the browser lane whenever it can handle the requested step; Computer Use is the fallback. '
     : 'Choose the browser lane or desktop tools according to the user\'s request. ') +
-    (allowed.includes('list_windows') ? 'Start with list_windows to identify the intended browser/tab. ' : 'Window discovery is disabled in this selection; do not invent browser/tab IDs. ') +
+    (allowed.includes('list_windows') ? 'Use list_windows for existing Windows targets and browser tab IDs. An empty browser list before the first new-tab is normal. ' : 'Window discovery is disabled in this selection; do not invent browser/tab IDs. ') +
     (!allowed.includes('set_value') ? 'Opening a new browser tab is unavailable because set_value is disabled; explain this limitation instead of calling a disabled tool. '
       : browserSignIn ? 'For a new web task use set_value elementId "new-tab" with the URL; it opens a background tab in the DSH browser, whose profile is kept: sites the user signed in to there are still signed in. When a page asks to sign in, never type passwords or codes yourself: ask the user to sign in once in the DSH browser window (the window with the blue frame), wait until they say they are done, then read the page again. ' +
         (browserVisible ? '' : 'The DSH browser window is hidden now, so first ask the user to turn on "Show the DSH browser window" under Browser Use in DSH settings. ') +
         'Signed in, you act as the user: before sending, posting, buying, deleting or changing account settings, ask the user unless they asked for exactly that step. '
       : 'For a new public web task use set_value elementId "new-tab" with the URL; it opens an isolated DSH browser without the user\'s sign-ins. ') +
+    'Send only elementId and value for new-tab, then use opened.id as browserTab. For desktop fallback, omit browserTab or use "desktop" with an explicit Windows target. ' +
     'Use a connected user tab only when the task needs that existing session and the user authorized it; never substitute an unsigned-in agent tab for an authenticated workflow. Read the page with browserTab and use its element IDs for clicks, values and navigation. Screenshot when visual evidence is needed. Tool names still begin windows_computer_use_ but browserTab/page IDs route internally through CDP without moving the desktop pointer. ' +
     'Fall back to desktop UIA, then screenshots/OCR and coordinates, for native applications, browser chrome/native dialogs, missing CDP connections or content the page lane cannot handle. Before falling back, identify the same intended visible window and read fresh desktop state; never reuse page IDs or page pixels as desktop coordinates. Do not silently replay an action whose outcome is unknown: observe its result first. Stale IDs require re-reading the page; dialogs require handling the dialog; cancellation, user stop, permission refusal, disabled/read-only controls and invalid values are not reasons to bypass a refusal with desktop input. If the browser page is headless and desktop fallback is needed, explain that there is no visible window; do not operate an unrelated user window. Respect explicit user requests for a particular method, enabled-tool restrictions and approvals. Visible DSH browsers must not be activated or brought to the foreground unless the user asks; background page operations leave the user\'s mouse and foreground window alone during ordinary page actions. A browser-native JavaScript dialog may temporarily activate its window; report this limitation instead of promising that visible browser work can never affect focus.';
 }
