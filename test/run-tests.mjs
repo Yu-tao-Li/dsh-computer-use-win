@@ -15,6 +15,10 @@ makePrivateTemp(root);
 if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `artifactRoot=${root}\n`);
 const suites = [
   ['background-desktop',process.execPath,['test/background-desktop.mjs']],
+  ['work-modes-live',process.execPath,['test/work-modes-live.mjs']],
+  ['work-mode-contract',process.execPath,['test/work-mode-contract.mjs']],
+  ['restart-route',process.execPath,['test/restart-route.mjs']],
+  ['observation-budget',process.execPath,['test/observation-budget.mjs']],
   ['input-mutex',process.execPath,['test/input-mutex.mjs']],
   ['shared-stop',process.execPath,['test/shared-stop.mjs']],
   ['native-key-chord',powershell,['-NoProfile','-File','test/native-key-chord.ps1']],

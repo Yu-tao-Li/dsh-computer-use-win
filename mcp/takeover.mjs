@@ -267,7 +267,7 @@ export class TakeoverControl {
         this.persist();
       }
     }
-    const presentation=JSON.stringify([this.config.indicatorEnabled,this.config.cursorIndicatorEnabled,this.config.remoteIndicatorVisible,this.config.indicatorText,this.config.indicatorPosition,this.config.indicatorIdleMs,this.config.stopShortcut,this.locale]);
+    const presentation=JSON.stringify([this.config.indicatorEnabled,this.config.cursorIndicatorEnabled,this.config.remoteIndicatorVisible,this.config.indicatorText,this.config.desktopTarget==='fast',this.config.indicatorPosition,this.config.indicatorIdleMs,this.config.stopShortcut,this.locale]);
     if (this.child && this.sentPresentation!==presentation) {
       await this.command(((this.seriesHeld&&this.seriesIndicator)||this.shown>0)&&!this.paused&&!this.blockedSeries.has(this.seriesKey)?'begin':'configure', this.config);
       this.sentPresentation=presentation;
@@ -428,7 +428,7 @@ export class TakeoverControl {
   withWords(command, params) {
     if (!['begin', 'configure', 'preview', 'progress'].includes(command)) return params;
     const sent = { ...params, strings: helperStrings(this.locale) };
-    if (command !== 'progress') sent.indicatorText = indicatorText(params.indicatorText, this.locale);
+    if (command !== 'progress') sent.indicatorText = indicatorText(params.indicatorText, this.locale, this.config.desktopTarget === 'fast');
     return sent;
   }
   async command(command, params = {}) {

@@ -12,21 +12,25 @@
 
 ### 更新
 
-DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询失败或结果超过 6 小时会重查。GitHub 左侧只有一个按钮：已安装版本等于或高于 `latest` 时是“检查更新”，点击后跳过市场缓存重查，并短暂显示“已是最新版本”或“暂时无法检查更新”；确认有新版时变成“更新”。导航不显示标记。点击“更新”后重核 npm 与 DSH 市场目标，由市场下载安装并核对实际版本。市场的镜像还没同步到新版本时，页面每 15 秒重查一次，最多等 10 分钟，期间说明在等同步；新版本还在市场的等待期内时，这次点击会以强制方式再提交一次（市场在此之前已做完宿主兼容检查）。市场一次只做一件安装，正忙时页面每 5 秒再问一次，最多等 3 分钟；有 agent 正在运行时市场不更新，页面提示等它结束后重试。版本先查 npm 官方源，连不上再查腾讯云和 npmmirror 镜像；下载安装由 DSH 插件市场完成，线路跟随它的“下载区域”设置（“全球”直接从 npm 下载，“中国大陆”走镜像）。页面显示进度，并根据市场结果提示刷新、重启或直接生效。DSH Desktop 需要重启时，从托盘退出后重新打开。无市场或本地安装时，“更新”打开升级说明。
+DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询失败或结果超过 6 小时会重查。GitHub 左侧只有一个按钮：已安装版本等于或高于 `latest` 时是“检查更新”，点击后跳过市场缓存重查，并短暂显示“已是最新版本”或“暂时无法检查更新”；确认有新版时变成“更新”。导航不显示标记。点击“更新”后重核 npm 与 DSH 市场目标，由市场下载安装并核对实际版本。市场的镜像还没同步到新版本时，页面每 15 秒重查一次，最多等 10 分钟，期间说明在等同步；新版本还在市场的等待期内时，这次点击会以强制方式再提交一次（市场在此之前已做完宿主兼容检查）。市场一次只做一件安装，正忙时页面每 5 秒再问一次，最多等 3 分钟；有 agent 正在运行时市场不更新，页面提示等它结束后重试。版本先查 npm 官方源，连不上再查腾讯云和 npmmirror 镜像；下载安装由 DSH 插件市场完成，线路跟随它的“下载区域”设置（“全球”直接从 npm 下载，“中国大陆”走镜像）。页面显示进度。装好后弹出对话框，写明已更新到的版本，以及还差哪一步：需要重启时提醒“重启会中断正在进行的任务”，并给出 **立即重启** 和 **稍后**。dsh web 由插件市场重启；DSH Desktop 由插件自己重启：先像安装程序那样让 DSH Desktop 正常退出，退出后再自动打开。点 **稍后** 后，标题旁会一直显示 **重启以完成更新**，点它重新打开这个对话框。一分钟后页面仍在、说明没重启成功时，对话框改为手动步骤（从托盘退出后重新打开）。只需刷新页面或已直接生效时，对话框也照实说明。无市场或本地安装时，“更新”打开升级说明。
 
 ### 反馈问题
 
 标题右侧的“反馈问题”每次导出一份 TXT。下载文件夹写入失败时，Windows 会弹出“另存诊断文件”，可选择其他位置。保存后，插件在资源管理器中选中文件，并请求默认浏览器打开 GitHub 新建问题页。对话框显示文件名、完整路径，以及反馈页是否已打开。TXT 包含运行环境、相关设置、自检、最近 30 次工具调用和最多 200 行插件日志。工具输入文字只保留长度，无法可靠脱敏的日志条目会被省略，截图可由用户另行附上。
 
-### 本机后台桌面
+### 工作方式
 
-在 **DSH 在哪里操作** 选 **本机后台桌面**，保存即可。Wincu 在当前 Windows 会话中创建一个后台桌面，沿用你的账号、文件权限、已安装软件和 DSH 启动环境。用 `launch_app` 启动应用的可执行文件，再用 `list_windows` 找到该窗口。支持的应用可以在后台读控件、输入和截取窗口。启动时可通过 `workingDirectory` 指定本机项目目录。
+按你这时还用不用电脑来选，随时可以切换，切换立即生效，不用重启：
 
-本机后台桌面只操作它自己的窗口。需要整屏截图、鼠标拖拽或系统组合键时，切换到 **当前桌面** 或 **Hyper-V 虚拟机**。已在当前桌面启动的单实例应用可能拒绝另开实例。浏览器以无窗口模式运行，使用独立的临时配置。需要手动登录时请切到 **当前桌面**。普通设置保存和 MCP 重连会保留后台已打开的桌面应用。切换运行位置或退出 DSH 会关闭后台桌面，请先保存文件。
+- **少打扰**（默认）：你可以照常用电脑。读窗口、按按钮、填输入框都用 UI 自动化在后台完成，网页在后台标签页里操作。DSH 自己用 `launch_app` 打开的程序放在当前 Windows 会话里一个看不见的后台桌面上，沿用你的账号、文件权限、已安装软件和 DSH 启动环境，不会弹到你面前；`list_windows` 把这些窗口标成 `desktop:"background"`。只有后台做不了的步骤（拖拽、画图、只认真实鼠标键盘的程序）才借用你的鼠标键盘：先等你停手 2 秒，用完把窗口和鼠标放回原处；你 20 秒内一直没停手，这一步就不做，agent 稍后再试。少打扰从不把窗口一直顶在最前面。
+- **全速**：适合你暂时不用电脑时。DSH 直接用鼠标键盘，工作窗口一直留在最前面，不等你停手，也不在每步之后还原，所以最快、最稳，菜单也不会被打断。屏幕顶部提示“DSH 正在全速操作，请别动鼠标键盘”，按 Esc 随时停止。
+- **虚拟机**：在 Hyper-V 虚拟机里全速操作，完全不碰你的电脑；用的是虚拟机里的文件和软件，第一次要先配置（见下一节）。
 
-### Hyper-V 虚拟机
+后台桌面上的程序只接受 UI 自动化和窗口消息，按坐标点击、拖拽、系统组合键和整屏截图到不了那里；需要这些时，agent 会关掉它，用 `desktop:"current"` 在你的桌面上重新打开（这时同样等你停手）。快捷方式、商店应用和已安装应用的名称只能在你的桌面上打开。已在你的桌面上运行的单实例程序会把窗口开在你的桌面上。普通设置保存和 MCP 重连会保留后台桌面上的程序；选 **虚拟机** 或退出 DSH 会关闭它们，没保存的内容会丢失。
 
-在 **DSH 在哪里操作** 选 **Hyper-V 虚拟机**，设置页会列出下面的配置步骤，只需做一次：
+### 虚拟机（Hyper-V）
+
+在 **工作方式** 选 **虚拟机**，设置页会列出下面的配置步骤，只需做一次：
 
 1. 打开 Hyper-V：在“启用或关闭 Windows 功能”里勾选 Hyper-V 并重启。Windows 家庭版没有 Hyper-V。
 2. 允许你的账户管理 Hyper-V：以管理员身份打开 PowerShell，运行 `Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)`，再注销后重新登录。DSH 没有以管理员身份运行时，Windows 只让“Hyper-V Administrators”组的成员查询和连接虚拟机；这个组用 SID 指定，任何语言的 Windows 都一样。
@@ -37,7 +41,7 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
 
 **配置连接** 先用这组凭据登录虚拟机，再检查虚拟机里是否已有这个账户登录的桌面、是否装了 Node.js 22 或更新版本。结果会指出该做哪一步：Hyper-V 没打开指向第 1 步，账户没有权限指向第 2 步，找不到虚拟机指向第 5 步，登录失败指向第 4、6 步；凭据可用但虚拟机里还差桌面登录或 Node.js 时，凭据已保存，补上那一步后再点一次 **配置连接** 检查。Windows 的原始提示放在结果的提示框里。
 
-之后浏览器、截图、鼠标和键盘操作都在选定的虚拟机内执行。截图会复制回主机。应用读写虚拟机里的文件，并使用虚拟机安装的软件和运行环境。需要处理主机文件时，先把文件复制或共享到虚拟机。Hyper-V 管理器里的预览窗口可以关闭。要取消操作，用主机 DSH 的停止按钮。连接、登录或启动失败时，本轮操作会暂停。要继续直接操作主机，手动选回 **当前桌面**。
+之后浏览器、截图、鼠标和键盘操作都在选定的虚拟机内执行。截图会复制回主机。应用读写虚拟机里的文件，并使用虚拟机安装的软件和运行环境。需要处理主机文件时，先把文件复制或共享到虚拟机。Hyper-V 管理器里的预览窗口可以关闭。要取消操作，用主机 DSH 的停止按钮。连接、登录或启动失败时，本轮操作会暂停。要回到本机操作，选回 **少打扰** 或 **全速**。
 
 ### Agent 看不到电脑操控工具
 
@@ -97,19 +101,23 @@ Upgrade and fully restart DSH Desktop, then open **Settings → Computer Use** (
 
 The plugin list shows a short introduction that opens the complete settings page. Star and Issue links stay at the top of that page; Collapse folds that note into one dsh-computer-use-win link with the GitHub mark and Expand restores it. The choice saves at once, persists across restarts and upgrades, and neither saves nor discards other pending changes. An unavailable host form shows an explicit state and cannot be edited. Version 0.4.3 supplies live-field metadata and the shared reference protocol for mixed-version validators, and confirms saved values against the host response.
 
-DSH checks npm’s `latest` automatically at startup and repeats an old or failed check when settings open. One button sits left of GitHub: Check for updates while the installed version is current, which checks again past the market cache and briefly shows Up to date or Could not check for updates; Update when a newer npm release exists. The navigation shows no badge. Clicking Update rechecks the npm and market targets before the market installs and verifies the package. While the market’s mirror has not picked up the release, the page checks again every 15 seconds for up to 10 minutes and says it is waiting; a release still inside the market’s waiting period is sent once more with force, after the market has checked host compatibility. The market runs one install at a time: while it is busy, the page asks again every 5 seconds for up to 3 minutes; while an agent is running the market does not update, and the page says to retry after it finishes. The version check asks npm’s registry first and the Tencent Cloud and npmmirror mirrors only when npm cannot be reached; the DSH plugin market downloads and installs over the route its Download region setting names (Global downloads straight from npm, China mainland uses a mirror). The page shows progress and any activation step. On DSH Desktop, restart by quitting from the tray and reopening. Without a market or for a local install, Update opens the upgrade instructions.
+DSH checks npm’s `latest` automatically at startup and repeats an old or failed check when settings open. One button sits left of GitHub: Check for updates while the installed version is current, which checks again past the market cache and briefly shows Up to date or Could not check for updates; Update when a newer npm release exists. The navigation shows no badge. Clicking Update rechecks the npm and market targets before the market installs and verifies the package. While the market’s mirror has not picked up the release, the page checks again every 15 seconds for up to 10 minutes and says it is waiting; a release still inside the market’s waiting period is sent once more with force, after the market has checked host compatibility. The market runs one install at a time: while it is busy, the page asks again every 5 seconds for up to 3 minutes; while an agent is running the market does not update, and the page says to retry after it finishes. The version check asks npm’s registry first and the Tencent Cloud and npmmirror mirrors only when npm cannot be reached; the DSH plugin market downloads and installs over the route its Download region setting names (Global downloads straight from npm, China mainland uses a mirror). The page shows progress. When the install finishes, a dialog names the new version and the step left: a restart says that it stops any task in progress and offers **Restart now** and **Later**. On dsh web the plugin market restarts DSH; on DSH Desktop the plugin does, quitting DSH Desktop the way its installer does and opening it again. After **Later**, **Restart to finish** stays by the title and opens the dialog again. If the page is still open a minute later, DSH did not restart, and the dialog gives the manual steps (quit from the tray and reopen). A reload or a change already in use is stated the same way. Without a market or for a local install, Update opens the upgrade instructions.
 
 Report a problem exports one TXT at a time. If writing to Windows Downloads fails, Save As lets you choose another location. After saving, the plugin selects the file in File Explorer and asks the default browser to open GitHub’s new-issue page. The dialog shows the file name, full path and whether the issue page opened. The TXT contains environment details, relevant settings, a self-test, the last 30 tool calls and up to 200 plugin log lines. Tool input text is kept as its length. Log entries that cannot be reliably redacted are omitted. You can attach screenshots separately.
 
-### Background desktop
+### Work mode
 
-Select **Background desktop** under **Where DSH works** and save. Wincu creates a background desktop in your current Windows session. It keeps your account, file permissions, installed apps and the environment DSH started with. Start an app's executable with `launch_app`, then find its window with `list_windows`. Supported apps can be read, typed into and captured in the background. Pass `workingDirectory` at launch to start in a local project folder.
+Choose by whether you are using the PC right now. You can switch at any time; the change applies at once, without a restart:
 
-The local background desktop works only with its own windows. Full-screen screenshots, mouse drags and system key combinations need **Current desktop** or **Hyper-V VM**. A single-instance app already running on your desktop may refuse to open another instance. The browser runs without a window and with a separate temporary profile. To sign in by hand, switch to **Current desktop**. Ordinary settings changes and MCP reconnects keep the apps open on the background desktop. Switching the run location or quitting DSH closes the background desktop, so save your work first.
+- **Low disruption** (the default): keep using your PC. Reading windows, pressing buttons and filling in fields go through UI Automation in the background, and web pages are worked in background tabs. Apps DSH opens with `launch_app` run on a hidden desktop in your current Windows session that keeps your account, file permissions, installed apps and the environment DSH started with, and never pop up in front of you; `list_windows` marks their windows `desktop:"background"`. Only steps the background cannot do (drags, drawing, apps that accept only real input) borrow your mouse and keyboard: DSH waits until you pause for 2 seconds and puts the window and pointer back afterwards; if you keep working for 20 seconds, the step is not sent and the agent tries again later. Low disruption never keeps a window in front.
+- **Full speed**: for when you step away. DSH uses the mouse and keyboard directly, keeps its window in front, does not wait for you and does not restore anything between steps, which is fastest and keeps menus open. The banner at the top says DSH is working at full speed; press Esc to stop at any time.
+- **Virtual machine**: works at full speed inside a Hyper-V virtual machine and never touches your PC; it uses the VM’s own files and apps. Set it up once first (next section).
 
-### Hyper-V VM
+Apps on the hidden desktop take UI Automation and window messages only: clicks at screen positions, drags, system key combinations and full-screen screenshots cannot reach them. For those the agent closes the app and opens it again on your desktop with `desktop:"current"`, again after you pause. Shortcuts, Store apps and installed-app names open on your desktop only. A single-instance app already running on your desktop opens its window there. Ordinary settings changes and MCP reconnects keep the apps on the hidden desktop; choosing **Virtual machine** or quitting DSH closes them, and anything unsaved there is lost.
 
-Select **Hyper-V VM** under **Where DSH works**. The settings page lists these setup steps; they are needed once:
+### Virtual machine (Hyper-V)
+
+Select **Virtual machine** under **Work mode**. The settings page lists these setup steps; they are needed once:
 
 1. Turn on Hyper-V: in “Turn Windows features on or off”, select Hyper-V and restart. Windows Home does not have Hyper-V.
 2. Let your account manage Hyper-V: open PowerShell as administrator, run `Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)`, then sign out and back in. When DSH does not run as administrator, Windows lets only members of the Hyper-V Administrators group query and connect to virtual machines; the SID names that group in every Windows language.
@@ -120,7 +128,7 @@ Select **Hyper-V VM** under **Where DSH works**. The settings page lists these s
 
 **Configure connection** signs in to the VM with that credential, then checks that the account has a signed-in desktop there and that Node.js 22 or later is installed. The result names the step to look at: step 1 when Hyper-V is off, step 2 when your account lacks permission, step 5 when no VM has that name, steps 4 and 6 when signing in fails. When the credential works but the VM still lacks the signed-in desktop or Node.js, the credential is saved; finish that step and choose **Configure connection** again to check. Windows’ own message is in the result’s tooltip.
 
-Browser work, screenshots, mouse and keyboard actions run in the selected VM. Wincu copies screenshots back to the host, and other application files stay in the VM. You can close the Hyper-V preview window. Use DSH’s Stop button on the host to cancel a task. If the VM is unavailable, the task stops. Select **Current desktop** to resume operating the host.
+Browser work, screenshots, mouse and keyboard actions run in the selected VM. Wincu copies screenshots back to the host, and other application files stay in the VM. You can close the Hyper-V preview window. Use DSH’s Stop button on the host to cancel a task. If the VM is unavailable, the task stops. Select **Low disruption** or **Full speed** to work on the host again.
 
 ### Computer Use tools are missing from an Agent
 

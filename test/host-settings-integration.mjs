@@ -251,12 +251,23 @@ try {
   // unhandled rejection.
   const rejected=[],onRejection=error=>rejected.push(String(error?.message??error));
   process.on('unhandledRejection',onRejection);
+  // Low disruption: the server asks for the hidden desktop with a request file;
+  // the adapter opens it once and writes its name, and closes it for the VM.
+  const backgroundFile=path.join(root,controlRoot,'background-desktop.json');
+  const backgroundName=async()=>{try{return JSON.parse(await readFile(backgroundFile,'utf8')).name;}catch{return undefined;}};
+  await writeFile(path.join(root,controlRoot,'background-desktop-request.json'),'{}');
+  await until(async()=>/^Wincu-[0-9a-f]{32}$/.test(await backgroundName()??''));
+  const openedDesktop=await backgroundName();
+  await writeFile(path.join(root,controlRoot,'background-desktop-request.json'),'{}');
+  await new Promise(resolve=>setTimeout(resolve,600));
+  assert.equal(await backgroundName(),openedDesktop,'A second request keeps the open desktop');
   try{
     const before=logged.length;
     await settings.update(entry.options.id,{desktopTarget:'hyperv',hypervVm:'wcu-unreachable-vm'});
     await until(()=>logged.slice(before).some(text=>/WCU_HYPERV_/.test(text)));
+    await until(async()=>await backgroundName()===undefined);
     await new Promise(resolve=>setTimeout(resolve,1500));
-    await settings.update(entry.options.id,{desktopTarget:'current',hypervVm:''});
+    await settings.update(entry.options.id,{desktopTarget:'quiet',hypervVm:''});
     await until(()=>tools.schemas().length===26);
   }finally{process.off('unhandledRejection',onRejection);}
   assert.deepEqual(rejected,[],'A desktop that cannot start rejects nothing outside the adapter');
@@ -269,4 +280,4 @@ try {
 } finally {await ctx.fiber.dispose();process.env.TEMP=previousTemp;process.env.TMP=previousTmp;}
 // #71: each adapter removes its control directory once its server has exited.
 await until(async()=>!(await readdir(root)).some(name=>name.startsWith('dsh-wcu-control-')));
-console.log(JSON.stringify({passed:true,loaderKeepsWrapper:keepsWrapper,overlaySaveRetried:true,controlDirsRemoved:true}));
+console.log(JSON.stringify({passed:true,loaderKeepsWrapper:keepsWrapper,overlaySaveRetried:true,controlDirsRemoved:true,hiddenDesktopOnRequest:true,hiddenDesktopClosedForVm:true}));

@@ -9,6 +9,10 @@ export function backgroundDesktopArgs(name) {
     fileURLToPath(new URL('../scripts/background-desktop.ps1', import.meta.url)), '-DesktopName', name];
 }
 
+// The server asks the DSH adapter for the hidden desktop by writing this file
+// next to the one where the adapter then puts the desktop's name.
+export const backgroundRequestFile = file => file.replace(/\.json$/i, '') + '-request.json';
+
 export function startBackgroundDesktop(onExit) {
   if (process.platform !== 'win32') throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: use a native Windows DSH host.');
   const name = 'Wincu-' + randomUUID().replaceAll('-', '');

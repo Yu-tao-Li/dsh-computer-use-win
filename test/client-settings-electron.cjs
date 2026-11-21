@@ -33,6 +33,7 @@ app.whenReady().then(async()=>{
       "if(u==='/dsh-market/api/v1/updates'&&call.method==='POST'){if(o.busy)return {status:409,body:{schema,error:'busy',failure:{code:'OPERATION_BUSY',message:'busy',retryable:true}}};n++;return {status:202,body:{schema,operation:{schema,operationId:'boot-update-'+n,state:'running',progress:{percent:0}}}};}"+
       "if(u.startsWith('/dsh-market/api/v1/operations?operationId=boot-update-')){if(o.lost)return {status:404,body:null};const next=o.operations.shift()||{state:'running'};return {status:200,body:{schema,operation:{schema,operationId:decodeURIComponent(u.split('=')[1]),kind:'update',packageName:'dsh-computer-use-win',beforeVersion:o.installed,installedVersion:o.installed,progress:{percent:null},outcome:{refreshRequired:false,restartRequired:true},failure:null,...next}}};}"+
       "if(u==='/dsh-market/api/v1/restart'&&call.method==='POST')return {status:200,body:{ok:true}};"+
+      "if(u==='/dsh-computer-use-win/api/restart')return call.method==='GET'?{status:200,body:{supported:!!o.pluginRestart}}:o.pluginRestart?{status:200,body:{ok:true}}:{status:409,body:{ok:false,error:'WCU_RESTART_UNSUPPORTED'}};"+
       "if(u==='https://registry.npmjs.org/dsh-computer-use-win/latest'&&o.npmDown)throw new TypeError('npm unreachable');"+
       "if(u==='https://mirrors.cloud.tencent.com/npm/dsh-computer-use-win/latest'&&o.mirror)return {status:200,body:{name:'dsh-computer-use-win',version:o.mirror}};"+
       "if(u==='https://registry.npmjs.org/dsh-computer-use-win/latest'){const npm=o.npm===undefined?o.latest:o.npm;return npm?{status:200,body:{name:'dsh-computer-use-win',version:npm}}:{status:404,body:{error:'Not found'}};}"+
@@ -665,6 +666,13 @@ app.whenReady().then(async()=>{
   await savePicture('update-busy-waiting.png');
   await evaluate("window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]});void 0");
   await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
+  // Success opens a dialog with the new version. Neither the market nor the
+  // plugin restarts this host, so it says how to restart by hand.
+  await until("document.querySelector('[data-wincu-update-dialog]')?.open===true&&document.querySelector('[data-wincu-update-dialog]').dataset.wincuUpdateDialog==='manual'");
+  assert.equal(await evaluate("document.querySelector('[data-wincu-update-dialog]').querySelector('p').textContent"),'已更新到 v'+await evaluate('window.bump(window.V)'));
+  assert.ok(await evaluate("document.querySelector('[data-wincu-update-dialog]').textContent.includes('托盘')"));
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
   // A market that stays busy ends in one short word and a retry.
   await evaluate("window.__wcuUpdateSyncMs=40;void 0");
   await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,busy:true,operations:[]})");
@@ -690,7 +698,10 @@ app.whenReady().then(async()=>{
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
   await until(updateText+".includes('40%')");
   await savePicture('update-running.png');
-  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'&&document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='manual'");
+  await savePicture('update-dialog-manual.png');
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
   assert.deepEqual(await evaluate(posts+".map(c=>c.body)"),[{packageName:'dsh-computer-use-win'},{packageName:'dsh-computer-use-win',force:true}],'The first request leaves the waiting period on; a hold sends one forced request');
   assert.equal(await evaluate("document.querySelector('[data-wincu-update=updated] span').title"),'已更新到 v'+await evaluate('window.bump(window.V)'));
   assert.ok(await evaluate(noteText+".includes('托盘')"),'Desktop owns the restart: the page says how');
@@ -714,18 +725,48 @@ app.whenReady().then(async()=>{
   await evaluate("window.fakeFetch=window.fakeMarket({installed:window.bump(window.V),latest:window.bump(window.V)});document.querySelector('[data-wincu-update-recheck]').click()");
   await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
   assert.equal(await evaluate(posts+'.length'),1,'Confirming the outcome cannot issue a second install');
-  // dsh web with a market that restarts it: a restart button, no tray note.
+  // dsh web with a market that restarts it: the dialog warns that the task in
+  // progress stops and offers Restart now; no tray note.
   await recheck("window.fakeMarket({runtime:'web',restart:true,installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]})");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
-  await until("!!document.querySelector('[data-wincu-update-restart]')");
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='restart'");
+  assert.ok(await evaluate("document.querySelector('[data-wincu-update-dialog]').textContent.includes('重启会中断正在进行的任务')"));
   assert.equal(await evaluate(noteText),'');
-  await evaluate("document.querySelector('[data-wincu-update-restart]').click()");
+  await savePicture('update-dialog-restart.png');
+  // Later closes it; the button by the title opens it again.
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')&&document.querySelector('[data-wincu-update-restart]')?.textContent==='重启以完成更新'");
+  await evaluate("window.__wcuRestartWaitMs=300;document.querySelector('[data-wincu-update-restart]').click()");
+  await until("!!document.querySelector('[data-wincu-update-restart-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-restart-now]').click()");
   await until("window.fetchCalls.some(c=>c.method==='POST'&&c.url==='/dsh-market/api/v1/restart')");
+  // Still open after the wait: DSH did not restart, and the dialog says how to by hand.
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='failed'");
+  assert.ok(await evaluate("document.querySelector('[data-wincu-update-dialog]').textContent.includes('DSH 没有重启')&&document.querySelector('[data-wincu-update-dialog]').textContent.includes('dsh web')"));
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
+  // DSH Desktop: the market does not restart a host it does not supervise, so
+  // the plugin's own route does, and the dialog says DSH opens again.
+  await recheck("window.fakeMarket({pluginRestart:true,installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='restart'");
+  await evaluate("window.__wcuRestartWaitMs=60000;document.querySelector('[data-wincu-update-restart-now]').click()");
+  await until("window.fetchCalls.some(c=>c.method==='POST'&&c.url==='/dsh-computer-use-win/api/restart'&&c.headers['x-wcu-request']==='1')");
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='restarting'");
+  assert.ok(await evaluate("document.querySelector('[data-wincu-update-dialog]').textContent.includes('稍后会自动重新打开')"));
+  assert.equal(await evaluate("window.fetchCalls.some(c=>c.method==='POST'&&c.url==='/dsh-market/api/v1/restart')"),false);
+  await savePicture('update-dialog-restarting.png');
+  await evaluate("document.querySelector('[data-wincu-update-dialog]').close()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
   // A market that only needs the page reloaded offers that, and no restart note.
   await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V),outcome:{refreshRequired:true,restartRequired:false}}]})");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='refresh'");
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
   await until("!!document.querySelector('[data-wincu-update-refresh]')");
   assert.ok(await evaluate(updateText+".startsWith('已更新')"));
   assert.equal(await evaluate(noteText),'');
@@ -733,7 +774,9 @@ app.whenReady().then(async()=>{
   await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V),outcome:{refreshRequired:false,restartRequired:false}}]})");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
-  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'&&document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='done'");
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
   assert.equal(await evaluate(updateText),'已更新');
   assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-refresh],[data-wincu-update-restart]')"),false);
   // A newer version already on disk is an update waiting for the restart.
@@ -755,7 +798,7 @@ app.whenReady().then(async()=>{
   assert.equal(await evaluate("window.fetchCalls.filter(call=>call.url==='/dsh-computer-use-win/api/hyperv'&&call.method==='POST').length"),1,'Credential setup starts only after the explicit action');
   // The Hyper-V choice explains itself and lists its setup steps; a result
   // names the step that fixes it, in its tone, with Windows' words in the tooltip.
-  assert.equal(await evaluate("document.querySelector('[data-wincu-desktop-hint]').textContent.startsWith('在 Hyper-V 虚拟机里操作')"),true);
+  assert.equal(await evaluate("document.querySelector('[data-wincu-desktop-hint]').textContent.startsWith('在 Hyper-V 虚拟机里全速操作')"),true);
   assert.equal(await evaluate("document.querySelectorAll('[data-wincu-hyperv-steps] li').length"),6);
   assert.equal(await evaluate("document.querySelector('[data-wincu-hyperv-steps] li:nth-child(2) code').textContent"),'Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)');
   await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:500,body:{ok:false,error:'WCU_HYPERV_PERMISSION: add your Windows account to the Hyper-V Administrators group, then sign out and back in.'}}:window.previousFetch(call);window.clickButton('配置连接')");
@@ -765,18 +808,19 @@ app.whenReady().then(async()=>{
   await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:200,body:{ok:true,missing:'WCU_HYPERV_NODE_REQUIRED'}}:window.previousFetch(call);window.clickButton('配置连接')");
   await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.startsWith('登录信息已保存。还差第 3 步')");
   assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'warning|2');
-  await evaluate("window.selectDesktop('current')");
-  await until("document.querySelector('[data-wincu-desktop-hint]').textContent.includes('和你共用一套鼠标键盘')&&!document.querySelector('[data-wincu-hyperv-steps]')");
+  await evaluate("window.selectDesktop('quiet')");
+  await until("document.querySelector('[data-wincu-desktop-hint]').textContent.includes('照常用电脑')&&document.querySelectorAll('[data-wincu-quiet-notes] li').length===3&&!document.querySelector('[data-wincu-hyperv-steps]')");
   await evaluate("window.selectDesktop('hyperv')");
   await until("!!document.querySelector('[data-wincu-hyperv-steps]')&&!document.querySelector('[data-wincu-hyperv-result]')");
-  await evaluate("window.selectDesktop('background');window.clickButton('保存更改')");
-  await until("window.snapshot.value.desktopTarget==='background'&&document.body.textContent.includes('沿用本机账号')");
-  assert.ok(await evaluate("['browserVisible','browserSignIn'].every(key=>{const control=document.getElementById('wincu-page-'+key);return control.disabled&&!control.checked})"),'Private desktop has no interactive browser or saved sign-in');
-  assert.equal(await evaluate("document.getElementById('wincu-page-browserAttachUser').disabled"),true);
-  assert.equal(await evaluate("!!document.getElementById('wincu-page-hypervVm')"),false);
-  await evaluate("window.selectDesktop('current');window.clickButton('保存更改')");
-  await until("window.snapshot.value.desktopTarget==='current'&&!document.getElementById('wincu-page-hypervVm')");
-  assert.ok(await evaluate("['browserVisible','browserSignIn'].every(key=>!document.getElementById('wincu-page-'+key).disabled)"),'Interactive browser controls return on the current desktop');
+  await evaluate("window.selectDesktop('fast');window.clickButton('保存更改')");
+  await until("window.snapshot.value.desktopTarget==='fast'&&document.querySelector('[data-wincu-desktop-hint]').textContent.includes('按 Esc 停止')");
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-quiet-notes]')||!!document.getElementById('wincu-page-hypervVm')"),false);
+  assert.ok(await evaluate("['browserVisible','browserSignIn','browserAttachUser'].every(key=>!document.getElementById('wincu-page-'+key).disabled)"),'Both local modes keep every browser control');
+  await savePicture('work-mode-fast.png');
+  // A choice saved before 0.6.3 (current or background desktop) reads as Low disruption.
+  await evaluate("window.snapshot={...window.snapshot,value:{...window.snapshot.value,desktopTarget:'background'}};for(const fn of window.listeners)fn()");
+  await until("document.getElementById('wincu-page-desktopTarget-quiet').checked&&document.querySelectorAll('[data-wincu-quiet-notes] li').length===3");
+  await savePicture('work-mode-quiet.png');
   await evaluate("window.renderPage('en')");
   await until("document.body.textContent.includes('Press Esc to stop')");
   await evaluate("window.snapshot={...window.snapshot,writable:false};for(const fn of window.listeners)fn()");

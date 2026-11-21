@@ -8,10 +8,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { TakeoverControl, STOPPED, IN_WSL, linuxPath, windowsEnv, windowsScript, DEFAULT_POWERSHELL } from './takeover.mjs';
+import { backgroundDesktopArgs, backgroundRequestFile, startBackgroundDesktop } from './background-desktop.mjs';
 import { TOOL_NAMES,LITE_TOOL_NAMES,normalizeEnabledTools,browserRoutingInstructions } from './settings.mjs';
 import { BrowserLane } from './browser.mjs';
 import { isBrowserCall,isQuietCall,NEW_TAB,USER_CONNECT,ELEMENT_ID,BACKGROUND_FIRST,INTERRUPTIBLE_ACTIONS,INPUT_ACTIONS,toolAnnotations } from './catalog.mjs';
 import { assertOperation, collectApprovalRequirements, consumeGrant } from './policy.mjs';
+import { budgetOcr, budgetTree, summarizeTree, TreeDeltas } from './observation-budget.mjs';
 const usedApprovalGrants = new Map();
 const SESSION_INPUT_MARKER = '0x' + (((randomBytes(4).readUInt32BE(0) & 0x7fffffff) || 0x44534857) >>> 0).toString(16);
 process.env.WCU_INPUT_MARKER ||= SESSION_INPUT_MARKER;
@@ -93,7 +95,7 @@ const windowTargetProperties = {
   activate: {
     type: "boolean",
     default: false,
-    description: "Bring the target to the foreground and keep it there. Otherwise reads and element actions leave the foreground alone, and real input borrows it: the target comes forward for the action, then the foreground and pointer go back, unless a menu, list or dialog it opened is showing. Without a window target, the active window is the one this operation series last gave input to, else the foreground window. close_window ignores this; activate_window always activates."
+    description: "Bring the target to the foreground and keep it there. Otherwise reads and element actions leave the foreground alone, and real input borrows it: the target comes forward for the action, then the foreground and pointer go back, unless a menu, list or dialog it opened is showing. Without a window target, the active window is the one this operation series last gave input to, else the foreground window. close_window ignores this; activate_window always activates. The user's work mode decides over this flag: Low disruption (the default) never keeps a window in front, Full speed keeps the window at the front for every input action."
   }
 };
 
@@ -127,6 +129,19 @@ const browserTabProperty = {
   }
 };
 
+// Cheaper observations (#97), all opt-in: summary nodes, a byte budget and
+// tree deltas for UI Automation trees, a byte budget for OCR.
+const summaryDetailProperties = {
+  detailLevel: {
+    type: "string",
+    enum: ["summary", "compact", "full"],
+    default: "compact",
+    description: "summary returns only the id, control type, name and states (disabled, focused, offscreen) of each node; compact omits empty or heavyweight metadata on tree nodes; full returns localized type, process id, runtime id, value, and patterns on every node."
+  }
+};
+const maxBytesProperty = description => ({ maxBytes: { type: "integer", minimum: 2000, maximum: 2000000, description } });
+const treeMaxBytes = maxBytesProperty("Byte budget for this result (its UTF-8 JSON), unlike maxNodes, which counts nodes. Over it the tree becomes a summary, then keeps only actionable controls and their ancestors, and only then is cut, with the whole result saved to the file named by budget.fullResultPath. UI Automation trees only.");
+
 const treeBudgetProperties = {
   treeTimeoutMs: {
     type: "integer", minimum: 100, maximum: 30000, default: 5000,
@@ -134,18 +149,19 @@ const treeBudgetProperties = {
   }
 };
 
-const maxDepthDescription = "Levels below the root. In window-scoped trees, unnamed browser layout panes (Chromium: Electron, Chrome/Edge, CEF, WebView2; Gecko: Firefox and its forks) do not count, so page content stays within the default depth.";
+const maxDepthDescription = "Levels below the root. In window-scoped trees, unnamed browser layout panes (Chromium: Electron, Chrome/Edge, CEF, WebView2; Gecko: Firefox and its forks) do not count, so page content stays within the default depth. To check whether something changed, use find on that control or wait_for rather than reading the whole tree again.";
 const webContentNote = " In a Chromium-based window (Electron, Chrome/Edge, CEF, WebView2) the first observation enables the page's accessibility tree; webContent reports whether it is ready and whether the page carries text (contentState: content, empty or unknown).";
 
 const tools = [
   {
     name: "windows_computer_use_launch_app",
-    description: "Launch an executable, shortcut or installed application through the interactive Windows desktop Shell. The app outlives the tool call and MCP server and uses the desktop's environment. Requires Explorer. Argument-bearing and shortcut launches require approval or explicit standalone configuration. Known command interpreters and script hosts are refused with arguments; this is not a command sandbox. A successful result means dispatched; verify the intended window. Apps may activate themselves even with activate:false. Does not request elevation.",
+    description: "Launch an executable, shortcut or installed application, on the user's desktop through the interactive Windows Shell or on DSH's hidden desktop (see desktop). The app outlives the tool call and MCP server and uses the desktop's environment. Requires Explorer. Argument-bearing and shortcut launches require approval or explicit standalone configuration. Known command interpreters and script hosts are refused with arguments; this is not a command sandbox. A successful result means dispatched; verify the intended window. Apps may activate themselves even with activate:false. Does not request elevation.",
     inputSchema: { type: "object", additionalProperties: false, required: ["target"], properties: {
       target: { type: "string", minLength: 1, maxLength: 32767, description: "Absolute .exe/.com/.lnk path, executable name on PATH/App Paths, exact installed app name or AppUserModelID." },
       arguments: { type: "string", maxLength: 32767, default: "", description: "Windows command-line arguments for the executable or shortcut; quote individual arguments containing spaces. Not a shell command, and refused for command interpreters and script hosts." },
       workingDirectory: { type: "string", maxLength: 32767, default: "", description: "Existing absolute working directory. Not supported for AppUserModelID launches." },
       activate: { type: "boolean", default: false },
+      desktop: { type: "string", enum: ["background", "current"], description: "Where the app opens. background: DSH's hidden desktop in this Windows session, apart from the user's screen, pointer and keyboard; its windows take UI Automation and window-message actions only, and list_windows marks them desktop:'background'. current: the user's desktop, needed for real pointer or keyboard input, shortcuts and installed or Store apps. Default: background under the Low disruption work mode when the target is an executable, else current." },
       waitMs: { type: "integer", minimum: 0, maximum: 10000, default: 1500 }
     } }
   },
@@ -165,8 +181,9 @@ const tools = [
         ...windowTargetProperties,
         ...browserTabProperty,
         ...treeViewProperties,
-        ...treeDetailProperties,
+        ...summaryDetailProperties,
         ...treeBudgetProperties,
+        ...treeMaxBytes,
         includeScreenshot: { type: "boolean", default: true },
         captureWindow: {
           type: "boolean",
@@ -195,8 +212,10 @@ const tools = [
         ...windowTargetProperties,
         ...browserTabProperty,
         ...treeViewProperties,
-        ...treeDetailProperties,
+        ...summaryDetailProperties,
         ...treeBudgetProperties,
+        ...treeMaxBytes,
+        treeDeltaBase: { type: "string", pattern: "^(?:start|t[0-9a-f]{12})$", description: "Tree delta for re-reading one window. 'start' returns the tree plus a treeId; that treeId on a later read of the same window, with the same view and detail, returns only the controls added, removed and changed (delta) and a new treeId, or the whole tree with delta.fallback saying why. Not related to observationToken." },
         maxDepth: { type: "integer", minimum: 0, maximum: 12, default: 6, description: maxDepthDescription },
         maxNodes: { type: "integer", minimum: 1, maximum: 3000, default: 500 }
       }
@@ -467,6 +486,7 @@ const tools = [
         language: { type: "string", pattern: "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$", description: "Installed OCR language to read with, e.g. zh-Hans, en-US or ja; a prefix picks the matching installed one. Default: the Windows user languages. An unknown language fails and lists the installed ones." },
         resolveControl: { type: "boolean", default: false },
         includeScreenshot: { type: "boolean", default: false },
+        ...maxBytesProperty("Byte budget for this result (its UTF-8 JSON). Over it word boxes go first, then the joined text (the lines carry it), then lines from the end, with the whole result saved to the file named by budget.fullResultPath."),
         query: {
           type: "string",
           description: "Optional literal text query, case-insensitive and ignoring whitespace. Returns up to 3 matched word runs with screen boundingBox and center in word.x/y, and the matching lines instead of the whole text. control is null unless resolveControl:true opts into a UIA hit-test. Supports character-segmented CJK text."
@@ -548,7 +568,7 @@ for (const tool of tools) tool.annotations = toolAnnotations(tool.name);
 // shortened. The discovery tool returns the original definition on demand.
 const conciseDescriptions = {
   batch: 'Run up to 20 actions on one target; stops on error, navigation, dialog, or new window, then observes once.',
-  launch_app: 'Launch an executable, shortcut (.lnk), or installed app via Shell (persists after exit). Args and shortcuts need approval.',
+  launch_app: 'Launch an executable, shortcut (.lnk), or installed app (persists after exit); Low disruption opens executables on a hidden desktop. Args and shortcuts need approval.',
   health: 'Check Windows backend and browser lane status.',
   snapshot: 'Screenshot and bounded UIA tree (use OCR if UIA is sparse). browserTab: page outline and viewport.',
   accessibility_tree: 'Read bounded UIA tree (partial tree does not prove absence). browserTab: page outline with element IDs.',
@@ -577,6 +597,7 @@ const concisePropertyDescriptions = {
   windowTitle: 'Title substring.', processId: 'Target PID.', nativeWindowHandle: 'Target HWND.',
   includeInvisible: 'Also list hidden windows.',
   activate: 'Bring forward and keep on top.',
+  desktop: 'background = DSH hidden desktop (no real input); current = user desktop.',
   viewMode: 'UIA view (runtime IDs bypass filter).',
   includeOffscreen: 'Include offscreen nodes.', detailLevel: 'compact omits empty/heavy fields.',
   treeTimeoutMs: 'UIA budget ms.',
@@ -586,7 +607,9 @@ const concisePropertyDescriptions = {
   query: 'Literal text (OCR ignores case/spaces).',
   language: 'OCR language (e.g. zh-Hans, en-US).',
   resolveControl: 'Optional UIA hit-test (may block on documents).',
-  browserTab: 'Tab ID from list_windows.'
+  browserTab: 'Tab ID from list_windows.',
+  maxBytes: 'Byte budget; over it the result shrinks, full copy in a file.',
+  treeDeltaBase: "'start', then the treeId: changes only."
 };
 function compactSchema(schema, key) {
   const result = {};
@@ -777,7 +800,10 @@ async function screenshotOutput(screenshot, includeImage = true) {
 // one-shot action -> ~8-50ms hot). If the backend wedges or dies it is
 // killed and respawned lazily on the next call.
 // ----------------------------------------------------------------------------
-let backendProc = null;
+// The backend on the user's desktop, and one on DSH's hidden desktop, where Low
+// disruption opens the apps DSH starts. Each call goes to the backend whose
+// desktop holds its window (deskFor).
+const backends = { current: null, background: null };
 let backendNextId = 0;
 const backendWaiters = new Map(); // id -> {resolve, reject, timer, proc}
 const pendingToolCalls = new Map(); // MCP request id -> {proc}
@@ -899,27 +925,20 @@ function backendEnv(env) {
   return windowsEnv(clean, Object.keys(clean).filter(name => name.startsWith('WCU_')));
 }
 
-function spawnBackend() {
-  const proc = backendProc = spawn(
-    powershell,
-    [
-      "-NoLogo",
-      "-NoProfile",
-      "-Sta",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      windowsScript(backendPath),
-      "-Persistent"
-    ],
-    {
-      cwd: pluginRoot,
-      // Under WSL the backend reads the WCU_ variables only when WSLENV names them (#79).
-      env: backendEnv({ ...process.env, WCU_CANCEL_EVENT: takeover.helperDisabled ? '' : takeover.eventName, WCU_READY_EVENT: takeover.helperDisabled ? '' : takeover.eventName+'-ready' }),
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true
-    }
-  );
+function spawnBackend(desk = 'current', desktopName) {
+  const options = {
+    cwd: pluginRoot,
+    // Under WSL the backend reads the WCU_ variables only when WSLENV names them (#79).
+    env: backendEnv({ ...process.env, WCU_CANCEL_EVENT: takeover.helperDisabled ? '' : takeover.eventName, WCU_READY_EVENT: takeover.helperDisabled ? '' : takeover.eventName+'-ready' }),
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true
+  };
+  // The hidden desktop's backend starts through the desktop worker, which
+  // creates it on that desktop inside the desktop's job and relays its streams.
+  const proc = backends[desk] = desk === 'background'
+    ? spawn(powershell, [...backgroundDesktopArgs(desktopName), '-Executable', powershell, '-BackendScript', backendPath], options)
+    : spawn(powershell, ["-NoLogo", "-NoProfile", "-Sta", "-ExecutionPolicy", "Bypass", "-File", windowsScript(backendPath), "-Persistent"], options);
+  proc.wcuDesk = desk;
   proc.wcuReady=false;
   const readyTimeout=Math.min(30000,Math.max(100,Number(process.env.WCU_BACKEND_READY_TIMEOUT_MS)||30000));
   proc.wcuReadyTimer=setTimeout(()=>killBackend(new Error('WCU_BACKEND_PROTOCOL_ERROR: backend did not become ready within '+readyTimeout+'ms; no action was sent.'),proc),readyTimeout);
@@ -929,7 +948,7 @@ function spawnBackend() {
   // tracebacks) to our stderr so they surface in the MCP client's log and in CI.
   // The tail also explains an exit to the model (#54).
   proc.stderr.on("data", (chunk) => {
-    process.stderr.write(`[wcu-backend] ${chunk}`);
+    process.stderr.write(desk === 'background' ? `[wcu-backend:hidden-desktop] ${chunk}` : `[wcu-backend] ${chunk}`);
     stderrTail = (stderrTail + chunk).slice(-4000);
   });
   let invalid = false;
@@ -942,7 +961,7 @@ function spawnBackend() {
     allowHeaders: false, maxBytes: 64*1024*1024,
     onError: error => failProtocol(new Error('WCU_BACKEND_PROTOCOL_ERROR: ' + error.message)),
     onMessage(resp) {
-      if (invalid || backendProc !== proc) return;
+      if (invalid || backends[desk] !== proc) return;
       if(!resp||typeof resp!=='object'||Array.isArray(resp)){
         failProtocol(new Error('WCU_BACKEND_PROTOCOL_ERROR: invalid response shape'));return;
       }
@@ -950,7 +969,7 @@ function spawnBackend() {
         if(proc.wcuReady||resp.protocol!==BACKEND_PROTOCOL_VERSION||!Number.isSafeInteger(resp.pid)||resp.pid<=0){
           failProtocol(new Error('WCU_BACKEND_PROTOCOL_MISMATCH: invalid ready handshake; no action was sent.'));return;
         }
-        proc.wcuReady=true;clearTimeout(proc.wcuReadyTimer);dispatchNextBackend(proc);return;
+        proc.wcuReady=true;proc.wcuPid=resp.pid;clearTimeout(proc.wcuReadyTimer);dispatchNextBackend(proc);return;
       }
       if(!proc.wcuReady||!Number.isSafeInteger(resp.id)||typeof resp.ok!=='boolean'){
         failProtocol(new Error('WCU_BACKEND_PROTOCOL_ERROR: response arrived without a valid ready handshake or result shape'));return;
@@ -972,7 +991,7 @@ function spawnBackend() {
   proc.stdin.on("error", () => { /* EPIPE when the backend dies; the exit handler fails waiters */ });
   const onDeath = (err) => {
     clearTimeout(proc.wcuReadyTimer);
-    if (backendProc === proc) backendProc = null;
+    if (backends[desk] === proc) backends[desk] = null;
     if (err) { failBackendWaiters(err, proc); return; }
     // 'exit' can precede the last stderr chunk; wait briefly for the stream.
     const report = () => failBackendWaiters(backendExitError(proc.exitCode, stderrTail), proc);
@@ -982,6 +1001,7 @@ function spawnBackend() {
   };
   proc.on("error", onDeath);
   proc.on("exit", () => onDeath());
+  return proc;
 }
 
 // "Backend process exited" alone hid why every tool failed (#54). Quote the
@@ -994,18 +1014,18 @@ function backendExitError(code, stderr) {
 }
 
 function ensureBackend() {
-  if (backendProc && retiringBackends.has(backendProc)) throw new Error("COMPUTER_USE_STOPPING");
-  if (!backendProc || backendProc.exitCode !== null) {
-    spawnBackend();
-  }
-  return backendProc;
+  const live = backends.current;
+  if (live && retiringBackends.has(live)) throw new Error("COMPUTER_USE_STOPPING");
+  return live && live.exitCode === null ? live : spawnBackend('current');
 }
 
-function killBackend(error = new Error("Backend process stopped"), proc = backendProc) {
+function killBackend(error = new Error("Backend process stopped"), proc = backends.current) {
   if (proc) {
     clearTimeout(proc.wcuReadyTimer);
-    if (backendProc === proc) backendProc = null;
+    if (backends[proc.wcuDesk] === proc) backends[proc.wcuDesk] = null;
     failBackendWaiters(error, proc);
+    // The hidden desktop's backend is the worker's child: end it by its own id.
+    if (proc.wcuDesk === 'background' && proc.wcuPid) { try { process.kill(proc.wcuPid); } catch { /* already gone */ } }
     try {
       proc.kill();
     } catch {
@@ -1013,28 +1033,153 @@ function killBackend(error = new Error("Backend process stopped"), proc = backen
     }
   }
 }
+function killBackends(error) {
+  for (const proc of Object.values(backends)) if (proc) killBackend(error, proc);
+}
+
+// DSH's hidden desktop. Inside DSH the adapter owns it (dsh-plugin.mjs), so the
+// apps on it outlive an MCP restart: this server asks for it with a request
+// file and reads its name from WCU_BACKGROUND_FILE. A server started on its own
+// owns one itself, which closes when the server exits. A server that already
+// runs on a hidden desktop (WCU_BACKGROUND_DESKTOP) uses no second one.
+const hiddenDesktopSupported = process.platform === 'win32' && !IN_WSL && !backgroundDesktop;
+let ownedHiddenDesktop, hiddenStarting;
+function readHiddenDesktop() {
+  try { return JSON.parse(readFileSync(process.env.WCU_BACKGROUND_FILE, 'utf8')); } catch { return null; }
+}
+function hiddenDesktopKnown() {
+  if (!hiddenDesktopSupported) return false;
+  if (backends.background || ownedHiddenDesktop) return true;
+  return !!(process.env.WCU_BACKGROUND_FILE && readHiddenDesktop()?.name);
+}
+async function hiddenDesktopName(request) {
+  if (!process.env.WCU_BACKGROUND_FILE) {
+    ownedHiddenDesktop ??= startBackgroundDesktop(() => { ownedHiddenDesktop = undefined; });
+    const owner = ownedHiddenDesktop;
+    try { await owner.ready; }
+    catch (error) { if (ownedHiddenDesktop === owner) ownedHiddenDesktop = undefined; throw error; }
+    return owner.name;
+  }
+  let state = readHiddenDesktop();
+  if (state?.name) return state.name;
+  const requested = Date.now();
+  await writeFile(backgroundRequestFile(process.env.WCU_BACKGROUND_FILE), JSON.stringify({ at: requested }));
+  while (Date.now() - requested < 20000) {
+    if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
+    await new Promise(resolve => setTimeout(resolve, 150));
+    state = readHiddenDesktop();
+    if (state?.name) return state.name;
+    if (state?.error && state.at >= requested) throw new Error(String(state.error));
+  }
+  throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: DSH did not open its hidden desktop within 20 s.');
+}
+async function ensureHiddenBackend(request) {
+  if (!hiddenDesktopSupported) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the hidden desktop needs a native Windows DSH host.');
+  const live = backends.background;
+  if (live && retiringBackends.has(live)) throw new Error("COMPUTER_USE_STOPPING");
+  if (live && live.exitCode === null) return live;
+  hiddenStarting ??= hiddenDesktopName(request).then(name => spawnBackend('background', name)).finally(() => { hiddenStarting = undefined; });
+  return hiddenStarting;
+}
+
+// The user's work mode, read live from settings: quiet (Low disruption, the
+// default) or fast (Full speed). Inside a Hyper-V guest the whole machine is
+// DSH's, so it works at full speed there. A server started without DSH's
+// settings keeps the behaviour of earlier versions (direct): the foreground
+// as the agent asks, no wait for the user, apps on the user's desktop.
+const startupSettings = (() => { try { return JSON.parse(process.env.WCU_SETTINGS_JSON || '{}'); } catch { return {}; } })();
+const modeFromSettings = Boolean(process.env.WCU_CONFIG_FILE) || Object.hasOwn(startupSettings, 'desktopTarget');
+function workMode() {
+  if (['quiet', 'fast', 'direct'].includes(process.env.WCU_WORK_MODE)) return process.env.WCU_WORK_MODE;
+  if (!modeFromSettings) return 'direct';
+  return ['fast', 'hyperv'].includes(takeover.config.desktopTarget) ? 'fast' : 'quiet';
+}
+// On the user's desktop, Low disruption never keeps a window in front
+// (activate_window excepted) and Full speed keeps the one it works in there.
+const FAST_FRONT = new Set(['click', 'double_click', 'move', 'drag', 'scroll', 'type_text', 'keypress', 'focus', 'invoke', 'set_value', 'launch_app']);
+function modeArgs(action, args, mode) {
+  if (mode === 'quiet' && args.activate && action !== 'activate_window') return { ...args, activate: false };
+  if (mode === 'fast' && !args.activate && FAST_FRONT.has(action) && !isBrowserCall(args)) return { ...args, activate: true };
+  return args;
+}
+// Low disruption borrows the user's pointer and keyboard only after they have
+// rested for 2 s, and gives up after 20 s of continuous use. Windows reports
+// the time of the last input of any origin; input that arrives while DSH sends
+// its own counts as DSH's.
+const USER_PAUSE_MS = 2000, USER_PAUSE_LIMIT_MS = (process.env.NODE_ENV === 'test' && Number(process.env.WCU_TEST_USER_PAUSE_LIMIT_MS)) || 20000;
+const PAUSE_ACTIONS = new Set(['click', 'double_click', 'move', 'drag', 'scroll', 'type_text', 'keypress', 'focus', 'invoke', 'set_value', 'activate_window', 'launch_app']);
+const ownInput = { start: 0, end: 0 };
+async function waitForUserPause(request) {
+  const started = Date.now();
+  for (;;) {
+    if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
+    const { idleMs } = await dispatchBackend('input_idle', {}, 5000, undefined, 'current');
+    if (!Number.isFinite(idleMs) || idleMs < 0) return 0;
+    const lastInput = Date.now() - idleMs;
+    if (idleMs >= USER_PAUSE_MS || (lastInput >= ownInput.start - 100 && lastInput <= ownInput.end + 300)) return Date.now() - started;
+    if (Date.now() - started >= USER_PAUSE_LIMIT_MS) throw new Error('WCU_USER_ACTIVE: The user kept using the mouse or keyboard for 20 s. Under Low disruption DSH borrows them only after a 2-second pause, so nothing was sent. Try again in a moment, or use an element action, which needs neither.');
+    await new Promise(resolve => setTimeout(resolve, Math.max(100, Math.min(500, USER_PAUSE_MS - idleMs))));
+  }
+}
+
+// Which backend a call goes to: the hidden desktop's when its window is there,
+// by that desktop's own window list (at most a second old). Without a window
+// target a call follows the window this series last worked in.
+const HIDDEN_FREE = new Set(['health', 'list_windows', 'wait']);
+let hiddenList = { at: 0, windows: [] }, lastWindow = null;
+async function hiddenWindows() {
+  if (Date.now() - hiddenList.at < 1000) return hiddenList.windows;
+  const listed = await dispatchBackend('list_windows', { includeInvisible: true, maxWindows: 200, _wcuQuiet: true, _wcuImageData: false }, 10000, undefined, 'background');
+  hiddenList = { at: Date.now(), windows: listed.windows ?? [] };
+  return hiddenList.windows;
+}
+const hasWindowTarget = args => args.nativeWindowHandle != null || args.processId != null || !!args.windowTitle?.trim();
+function followsHidden() {
+  return lastWindow?.desk === 'background' && lastWindow.handle != null && lastWindow.series === takeover.seriesKey;
+}
+async function deskFor(action, args) {
+  if (!hiddenDesktopSupported || HIDDEN_FREE.has(action) || isBrowserCall(args) || args.scope === 'desktop' || !hiddenDesktopKnown()) return 'current';
+  if (!hasWindowTarget(args)) return followsHidden() ? 'background' : 'current';
+  const windows = await hiddenWindows();
+  const title = args.windowTitle?.trim().toLowerCase();
+  return windows.some(window => args.nativeWindowHandle != null ? window.nativeWindowHandle === args.nativeWindowHandle
+    : args.processId != null ? window.processId === args.processId
+    : String(window.name ?? '').toLowerCase().includes(title)) ? 'background' : 'current';
+}
+function rememberWindow(desk, handle) { lastWindow = { desk, handle: handle ?? null, series: takeover.seriesKey }; }
 
 let takeoverSetup = Promise.resolve();
 // Element actions start in the background, with no indicator and no Esc stop.
 // One that needs the real pointer or keyboard says so before sending any
 // (WCU_NEEDS_INPUT) and runs again with both.
-async function runBackend(action, args = {}, timeoutMs = 30000, request) {
+// A window on a hidden desktop takes UI Automation and window messages only:
+// Windows delivers real pointer and keyboard input to the desktop on screen.
+const HIDDEN_LIMIT = backgroundDesktop
+  ? 'WCU_BACKGROUND_DESKTOP_LIMIT: This desktop takes UI Automation and window-message actions only. Real pointer and keyboard input and full-screen capture need the user\'s desktop.'
+  : 'WCU_BACKGROUND_DESKTOP_LIMIT: This window is on DSH\'s hidden desktop, which takes UI Automation and window-message actions only (element ids, set_value, invoke, type_text, dispatch:"background", window screenshots). Real pointer and keyboard input and full-screen capture cannot reach it; for those, close the app and launch it again with desktop:"current".';
+async function runBackend(action, args = {}, timeoutMs = 30000, request) { return runBackendOn(undefined, action, args, timeoutMs, request); }
+// runBackend with the desktop chosen by the caller (else by deskFor).
+async function runBackendOn(desk, action, args = {}, timeoutMs = 30000, request) {
+  desk ??= await deskFor(action, args);
+  if (desk === 'background' && !hasWindowTarget(args) && !HIDDEN_FREE.has(action) && action !== 'launch_app' && followsHidden()) args = { ...args, nativeWindowHandle: lastWindow.handle };
+  if (desk === 'current' && !backgroundDesktop) args = modeArgs(action, args, workMode());
   const quiet = isQuietCall(action, args);
-  if (backgroundDesktop) {
-    if (args.activate || args.scope === 'desktop' || (!quiet && !['launch_app','close_window','move_window'].includes(action))) {
-      throw new Error('WCU_BACKGROUND_DESKTOP_LIMIT: Use a window or UI Automation control. Foreground input and full-screen capture require Current desktop or Hyper-V.');
-    }
-    const targeted = args.nativeWindowHandle || args.processId || args.windowTitle;
-    if (['tree','find','snapshot','screenshot','ocr','element_info','wait_for','close_window','move_window'].includes(action) && !targeted) {
+  if (backgroundDesktop || desk === 'background') {
+    if (args.activate || args.scope === 'desktop' || (!quiet && !['launch_app','close_window','move_window'].includes(action))) throw new Error(HIDDEN_LIMIT);
+    if (['tree','find','snapshot','screenshot','ocr','element_info','wait_for','close_window','move_window'].includes(action) && !hasWindowTarget(args)) {
       throw new Error('WCU_BACKGROUND_DESKTOP_TARGET_REQUIRED: list_windows can find a window on this desktop. Pass its nativeWindowHandle.');
     }
     const backgroundArgs = action==='ocr' ? { ...args, resolveControl:false } : args;
-    try { return await runBackendOnce(action, { ...backgroundArgs, _wcuQuiet: true }, timeoutMs, request, true); }
-    catch (error) {
+    try {
+      const result = await runBackendOnce(action, { ...backgroundArgs, _wcuQuiet: true }, timeoutMs, request, true, desk);
+      if (!backgroundDesktop && args.nativeWindowHandle != null) rememberWindow('background', args.nativeWindowHandle);
+      return result;
+    } catch (error) {
       if (!/^WCU_NEEDS_INPUT\b/.test(error.message)) throw error;
-      throw new Error('WCU_BACKGROUND_DESKTOP_LIMIT: The target did not accept the background operation. Choose Current desktop or Hyper-V for foreground input.');
+      throw new Error(HIDDEN_LIMIT);
     }
   }
+  if (hasWindowTarget(args) && !HIDDEN_FREE.has(action)) rememberWindow('current', args.nativeWindowHandle);
   const mayUpgrade = BACKGROUND_FIRST.has(action) || (action === 'click' && (args.dispatch ?? 'auto') === 'auto' && args.elementId != null);
   if (quiet && mayUpgrade) {
     try { return await runBackendOnce(action, { ...args, _wcuQuiet: true }, timeoutMs, request, true); }
@@ -1044,14 +1189,15 @@ async function runBackend(action, args = {}, timeoutMs = 30000, request) {
   return runBackendOnce(action, { ...args, _wcuQuiet: quiet }, timeoutMs, request, quiet);
 }
 
-async function runBackendOnce(action, args, timeoutMs, request, quiet) {
+async function runBackendOnce(action, args, timeoutMs, request, quiet, desk = 'current') {
   const changesDesktop = action!=='health';
   if (request) request.requiresInput = !quiet;
-  let acquired = false, capturing = false;
+  let acquired = false, capturing = false, waitedForUser = 0;
   // Reserve preparation in arrival order. Otherwise awaiting the native
   // indicator can let a later observation reach the backend before its input.
   const prepared = takeoverSetup.then(async () => {
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
+    if (!quiet && desk === 'current' && PAUSE_ACTIONS.has(action) && workMode() === 'quiet') waitedForUser = await waitForUserPause(request);
     if (changesDesktop) { await takeover.begin({ quiet }); acquired = true; }
     if(takeover.child && (['screenshot','ocr'].includes(action) || (action==='snapshot' && args.includeScreenshot!==false) || (action==='wait_for' && args.condition==='text'))) {
       try { await takeover.command('capture_begin');capturing=true; }
@@ -1064,7 +1210,14 @@ async function runBackendOnce(action, args, timeoutMs, request, quiet) {
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
     // The series lets typing without a window target follow the window the
     // series last gave input to, after the user got the foreground back.
-    return await dispatchBackend(action, { ...args, _wcuImageData: args._wcuImageData ?? (process.env.WCU_IMAGE_MODE !== 'file'), _wcuCornerFailsafe: false, _wcuTakeoverPid: takeover.helperProcessId, _wcuSeries: takeover.seriesKey ?? null }, timeoutMs, request);
+    // Input DSH sends itself is not the user's (waitForUserPause).
+    const own = !quiet && desk === 'current';
+    if (own) ownInput.start = Date.now();
+    let result;
+    try { result = await dispatchBackend(action, { ...args, _wcuImageData: args._wcuImageData ?? (process.env.WCU_IMAGE_MODE !== 'file'), _wcuCornerFailsafe: false, _wcuTakeoverPid: takeover.helperProcessId, _wcuSeries: takeover.seriesKey ?? null }, timeoutMs, request, desk); }
+    finally { if (own) ownInput.end = Date.now(); }
+    if (waitedForUser >= 500 && result && typeof result === 'object') result.waitedForUserMs = waitedForUser;
+    return result;
   } finally {
     if(capturing&&takeover.child)await takeover.command('capture_end').catch(error=>takeover.presentationError(error));
     if (acquired) await takeover.end({ quiet });
@@ -1072,13 +1225,13 @@ async function runBackendOnce(action, args, timeoutMs, request, quiet) {
   }
 }
 
-function dispatchBackend(action, args = {}, timeoutMs = 30000, request) {
+async function dispatchBackend(action, args = {}, timeoutMs = 30000, request, desk = 'current') {
   if (Number.isFinite(request?.deadlineMs)) {
     const remaining = request.deadlineMs - Date.now();
-    if (remaining <= 0) return Promise.reject(new Error(`Windows Computer Use backend timed out after batch wall-clock budget during ${action}`));
+    if (remaining <= 0) throw new Error(`Windows Computer Use backend timed out after batch wall-clock budget during ${action}`);
     timeoutMs = Math.max(250, Math.min(timeoutMs, remaining));
   }
-  const proc = ensureBackend();
+  const proc = desk === 'background' ? await ensureHiddenBackend(request) : ensureBackend();
   if (request) request.proc = proc;
   const id = ++backendNextId;
   return new Promise((resolve, reject) => {
@@ -1164,22 +1317,32 @@ async function callTool(name, args, request) {
     case "windows_computer_use_launch_app": {
       const launchKey = `${String(args.target ?? '').trim().toLowerCase()}\0${String(args.arguments ?? '').trim()}`;
       const launchApproved = request?.approvalGrants?.launches?.has(launchKey) === true || process.env.WCU_ALLOW_LAUNCH_ARGUMENTS === '1' || String(process.env.WCU_ALLOWED_LAUNCH_PROGRAMS??'').split('|').some(target=>target.trim().toLowerCase()===args.target.toLowerCase());
-      return backendText("launch_app", {...args, _wcuLaunchApproved: launchApproved}, 30000, request);
+      return launchApp({...args, _wcuLaunchApproved: launchApproved}, request);
     }
     case "windows_computer_use_health": {
       const result = await runBackend("health", args, undefined, request);
+      result.workMode = workMode();
       result.browserLane = await browserLane.health();
       if (adapterNotices) result.adapterNotices = adapterNotices;
       return { content: [{ type: "text", text: safeJson(result) }] };
     }
     case "windows_computer_use_snapshot": {
-      const result = await observeBackend("snapshot", args, request);
+      const result = await shapeTree(await observeBackend("snapshot", backendTreeArgs(args), request), args);
       return imageResult(result, args.includeScreenshot ?? true);
     }
     case "windows_computer_use_accessibility_tree":
       return observationText("tree", args, request);
     case "windows_computer_use_list_windows": {
       const result = await runBackend("list_windows", args, undefined, request);
+      // Windows on DSH's hidden desktop follow the user's, marked as such.
+      if (hiddenDesktopKnown()) {
+        try {
+          const hidden = await runBackendOn('background', "list_windows", args, undefined, request);
+          const windows = (hidden.windows ?? []).map(window => ({ ...window, desktop: 'background' }));
+          result.windows = [...(result.windows ?? []), ...windows];
+          if (windows.length) result.hiddenDesktop = 'Windows marked desktop:"background" are on DSH\'s hidden desktop, apart from the user\'s screen. Target them by nativeWindowHandle; they take UI Automation and window-message actions, not real pointer or keyboard input.';
+        } catch (error) { result.hiddenDesktopError = error.message; }
+      }
       try { await browserLane.annotateWindows(result); } catch (error) { result.browserLane = { error: error.message }; }
       return { content: [{ type: "text", text: safeJson(result) }] };
     }
@@ -1211,8 +1374,13 @@ async function callTool(name, args, request) {
       return backendText("activate_window", args, undefined, request);
     case "windows_computer_use_wait":
       return backendText("wait", args, Math.max(31000, Number(args?.milliseconds || 500) + 1000), request);
-    case "windows_computer_use_ocr":
-      return imageResult(await runBackend("ocr", args, 20000, request));
+    case "windows_computer_use_ocr": {
+      const result = await runBackend("ocr", args, 20000, request);
+      if (!args.maxBytes) return imageResult(result);
+      const { screenshot, ...rest } = result;
+      const shaped = await budgetOcr(rest, args.maxBytes);
+      return imageResult(screenshot ? { ...shaped, screenshot } : shaped);
+    }
     case "windows_computer_use_screenshot":
       return imageResult(await runBackend("screenshot", args, 15000, request));
     case "windows_computer_use_wait_for":
@@ -1307,8 +1475,21 @@ async function observeBackend(action, args, request) {
   return result;
 }
 
+// detailLevel summary is read as compact and reduced here; a delta or a byte
+// budget applies to the result as read.
+const treeDeltas = new TreeDeltas();
+const backendTreeArgs = args => args.detailLevel === 'summary' ? { ...args, detailLevel: 'compact' } : args;
+async function shapeTree(result, args) {
+  if (!result?.tree) return result;
+  if (args.detailLevel === 'summary') result = { ...result, tree: summarizeTree(result.tree), detailLevel: 'summary' };
+  if (args.treeDeltaBase) result = treeDeltas.apply(args.treeDeltaBase, JSON.stringify([result.scope, result.tree.nativeWindowHandle ?? result.tree.id, result.viewMode, result.includeOffscreen, result.detailLevel, args.maxDepth]), result);
+  // An inline screenshot travels as an image block, not as text: the budget
+  // and the saved copy leave it out.
+  if (args.maxBytes) { const { screenshot, ...rest } = result; result = await budgetTree(rest, args.maxBytes); if (screenshot) result.screenshot = screenshot; }
+  return result;
+}
 async function observationText(action, args, request) {
-  return imageResult(await observeBackend(action, args, request));
+  return imageResult(await shapeTree(await observeBackend(action, backendTreeArgs(args), request), args));
 }
 
 let batchOwner = null;
@@ -1353,12 +1534,13 @@ async function runBatch(args, request) {
   const steps = [], content = [], deadline = Date.now() + args.timeoutMs, batchDeadline = Date.now() + totalBudgetMs;
   if (request) request.deadlineMs = batchDeadline;
   let stopReason = 'completed', afterLastStep, message, before, nativeHandle, nativePid, lease = false;
+  const targetDesk = target.browserTab ? 'current' : await deskFor('batch', target);
   batchOwner = request; request.batchSuppressObservation = true;
   const state = async () => {
     if (target.browserTab) return browserLane.batchState(target, request);
     // Shown windows only, as before minimized windows were listed: a minimized
     // twin must not make the target ambiguous or count as a new window.
-    const listed = await runBackend('list_windows', { maxWindows: 200, includeMinimized: false }, 10000, request);
+    const listed = await runBackendOn(targetDesk, 'list_windows', { maxWindows: 200, includeMinimized: false }, 10000, request);
     const windows = listed.windows ?? [];
     let matches = windows.filter(window =>
       (!nativeHandle || String(window.nativeWindowHandle) === nativeHandle) &&
@@ -1442,8 +1624,32 @@ async function runBatch(args, request) {
 }
 
 const inputActions = INPUT_ACTIONS;
-async function backendText(action, args, timeoutMs, request) {
-  const result = await runBackend(action, args, timeoutMs, request);
+// Under Low disruption an executable opens on DSH's hidden desktop. A shortcut,
+// an installed or Store app, or a program that desktop cannot start opens on
+// the user's desktop instead (after a pause in the user's input), unless the
+// agent chose the desktop.
+async function launchApp(args, request) {
+  const { desktop, ...plain } = args;
+  const mode = workMode();
+  if ((desktop ?? (mode === 'quiet' && hiddenDesktopSupported ? 'background' : 'current')) === 'background') {
+    try {
+      const result = await runBackendOn('background', 'launch_app', { ...plain, activate: false }, 30000, request);
+      hiddenList.at = 0;
+      const opened = result.observedNewWindows?.[0];
+      if (opened) rememberWindow('background', opened.nativeWindowHandle);
+      result.desktop = 'background';
+      result.note = 'Opened on DSH\'s hidden desktop, apart from the user\'s screen, pointer and keyboard. Target its windows by nativeWindowHandle (list_windows marks them desktop:"background"); they take UI Automation and window-message actions only. An app that reused an instance already open on the user\'s desktop shows its window there instead.';
+      return imageResult(result, false);
+    } catch (error) {
+      if (desktop || !/^WCU_BACKGROUND_DESKTOP_(?:LIMIT|UNAVAILABLE)\b/.test(error.message)) throw error;
+    }
+  }
+  if (mode === 'quiet') await waitForUserPause(request);
+  return backendText('launch_app', plain, 30000, request, 'current');
+}
+
+async function backendText(action, args, timeoutMs, request, desk) {
+  const result = desk ? await runBackendOn(desk, action, args, timeoutMs, request) : await runBackend(action, args, timeoutMs, request);
   if (inputActions.has(action)) {
     // Keys and text without a window target, before DSH has worked in any
     // window this turn, reach whatever window is in front (issue #82).
@@ -1655,13 +1861,14 @@ let shuttingDown;
 function installShutdown() {
   process.once('SIGINT', () => { void shutdown(130); });
   process.once('SIGTERM', () => { void shutdown(143); });
-  process.on('exit', () => { killBackend(); browserLane.close(); takeover.child?.kill(); });
+  process.on('exit', () => { killBackends(); void ownedHiddenDesktop?.dispose(); browserLane.close(); takeover.child?.kill(); });
 }
 
 function shutdown(code) {
   if (!shuttingDown) {
     process.stdin.pause();
-    killBackend();
+    killBackends();
+    void ownedHiddenDesktop?.dispose();
     shuttingDown = Promise.allSettled([takeover.close(), browserLane.shutdown()]).then(() => process.exit(code));
   }
   return shuttingDown;

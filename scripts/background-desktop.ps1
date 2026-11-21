@@ -1,9 +1,16 @@
+# Owner: creates the hidden desktop and the job that ends its programs, and
+# holds both until its standard input closes. Worker: starts one program on
+# that desktop inside the job and relays its standard streams: the MCP server
+# (-EntryPath, a whole server on the hidden desktop) or the UI Automation
+# backend (-BackendScript, which the server on the user's desktop uses for the
+# windows there).
 [CmdletBinding(DefaultParameterSetName='Worker')]
 param(
   [Parameter(Mandatory)][ValidatePattern('^Wincu-[0-9a-f]{32}$')][string]$DesktopName,
   [Parameter(Mandatory,ParameterSetName='Owner')][switch]$Own,
-  [Parameter(Mandatory,ParameterSetName='Worker')][string]$Executable,
-  [Parameter(Mandatory,ParameterSetName='Worker')][string]$EntryPath
+  [Parameter(Mandatory,ParameterSetName='Worker')][Parameter(Mandatory,ParameterSetName='Backend')][string]$Executable,
+  [Parameter(Mandatory,ParameterSetName='Worker')][string]$EntryPath,
+  [Parameter(Mandatory,ParameterSetName='Backend')][ValidatePattern('\\windows-uia\.ps1$')][string]$BackendScript
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -108,7 +115,7 @@ public static class WincuBackgroundDesktop {
             CloseDesktop(desktop);
         }
     }
-    public static int Run(string name, string executable, string entry, string directory) {
+    public static int Run(string name, string executable, string commandLine, string directory) {
         var process = new ProcessInfo();
         var startup = new StartupInfo { Size=Marshal.SizeOf(typeof(StartupInfo)), Desktop="winsta0\\"+name, Flags=0x100 };
         IntPtr job = OpenJobObject(1, false, name);
@@ -118,7 +125,7 @@ public static class WincuBackgroundDesktop {
             startup.Input=InheritStream(-10);
             startup.Output=InheritStream(-11);
             startup.Error=InheritStream(-12);
-            var args = new StringBuilder("\""+executable+"\" \""+entry+"\"");
+            var args = new StringBuilder(commandLine);
             if (!CreateProcess(executable, args, IntPtr.Zero, IntPtr.Zero, true, 0x08000004,
                     IntPtr.Zero, directory, ref startup, out process))
                 throw Error("Could not start Wincu in the background desktop");
@@ -143,10 +150,14 @@ public static class WincuBackgroundDesktop {
     [WincuBackgroundDesktop]::Own($DesktopName)
     exit 0
   }
-  $Executable = (Get-Item -LiteralPath $Executable).FullName
-  $EntryPath = (Get-Item -LiteralPath $EntryPath).FullName
+  # A bare program name (WINDOWS_CU_POWERSHELL=powershell.exe) is looked up on PATH.
+  $Executable = if ([IO.Path]::IsPathRooted($Executable)) { (Get-Item -LiteralPath $Executable).FullName }
+    else { (Get-Command -Name $Executable -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source }
+  $commandLine = if ($PSCmdlet.ParameterSetName -eq 'Backend') {
+    '"' + $Executable + '" -NoLogo -NoProfile -Sta -ExecutionPolicy Bypass -File "' + (Get-Item -LiteralPath $BackendScript).FullName + '" -Persistent'
+  } else { '"' + $Executable + '" "' + (Get-Item -LiteralPath $EntryPath).FullName + '"' }
   $env:WCU_BACKGROUND_DESKTOP = '1'
-  exit ([WincuBackgroundDesktop]::Run($DesktopName,$Executable,$EntryPath,[IO.Directory]::GetCurrentDirectory()))
+  exit ([WincuBackgroundDesktop]::Run($DesktopName,$Executable,$commandLine,[IO.Directory]::GetCurrentDirectory()))
 } catch {
   [Console]::Error.WriteLine('WCU_BACKGROUND_DESKTOP_START_FAILED: ' + $_.Exception.Message)
   exit 1

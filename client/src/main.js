@@ -70,7 +70,9 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] dialog.wcu-dialog p.wcu-dialog-detail{margin-top:6px;color:var(--wcu-muted);font-size:12px;overflow-wrap:anywhere}
       [data-wincu-settings] dialog.wcu-dialog .wcu-dialog-file{margin-top:8px;font-weight:600;overflow-wrap:anywhere}
       [data-wincu-settings] dialog.wcu-dialog .wcu-dialog-path{display:block;margin-top:4px;font-size:12px;overflow-wrap:anywhere;user-select:text}
-      [data-wincu-settings] .wcu-dialog-actions{display:flex;justify-content:flex-end;margin-top:16px}
+      [data-wincu-settings] dialog.wcu-dialog p.wcu-dialog-title{font-weight:600}
+      [data-wincu-settings] dialog.wcu-dialog p.wcu-dialog-body{margin-top:6px;font-size:13px}
+      [data-wincu-settings] .wcu-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
       [data-wincu-settings] .wcu-spinner{width:12px;height:12px;border-radius:50%;border:2px solid color-mix(in srgb,var(--wcu-muted) 35%,transparent);border-top-color:var(--wcu-muted);animation:wcu-spin .8s linear infinite}
       @keyframes wcu-spin{to{transform:rotate(360deg)}}
       @media (prefers-reduced-motion:reduce){[data-wincu-settings] .wcu-spinner{animation:none}}
@@ -286,7 +288,10 @@ window.__ModuleLoader__.load({
     // A connection result names the setup step that fixes it: [message, step].
     const HYPERV_ISSUES={WCU_HYPERV_UNAVAILABLE:['hypervErrUnavailable',1],WCU_HYPERV_PERMISSION:['hypervErrPermission',2],WCU_HYPERV_VM_UNAVAILABLE:['hypervErrVmState',3],WCU_HYPERV_NODE_REQUIRED:['hypervMissingNode',3],
       WCU_HYPERV_DESKTOP_REQUIRED:['hypervMissingDesktop',4],WCU_HYPERV_VM_UNKNOWN:['hypervErrVmUnknown',5],WCU_HYPERV_VM_REQUIRED:['hypervVmRequired',5],WCU_HYPERV_SIGNIN_FAILED:['hypervErrSignIn',6]};
-    const DESKTOP_OPTIONS=[['current','desktopCurrent','desktopCurrentHint'],['background','desktopBackground','desktopBackgroundHint'],['hyperv','desktopHyperv','desktopHypervHint']];
+    // Work modes: [value, label, one-line hint]. Saved choices from before 0.6.3
+    // (the current or the background desktop) read as Low disruption.
+    const DESKTOP_OPTIONS=[['quiet','modeQuiet','modeQuietHint'],['fast','modeFast','modeFastHint'],['hyperv','modeVm','modeVmHint']];
+    const LEGACY_DESKTOP_TARGETS={current:'quiet',background:'quiet'};
     // Copies a folder path to paste into File Explorer. Without clipboard
     // access the path is left selected.
     function CopyButton({text,t}){
@@ -337,14 +342,15 @@ window.__ModuleLoader__.load({
       cursor:(on,id)=>drawing(h('defs',null,h('radialGradient',{id},h('stop',{offset:0,className:'a-spot0'}),h('stop',{offset:1,className:'a-spot1'}))),
         box('a-ink',14,13,42,3,1.5),box('a-ink',14,20,30,3,1.5),box('a-ink',14,27,36,3,1.5),box('a-ink',14,34,24,3,1.5),
         ...(on?[h('circle',{cx:50,cy:33,r:21,fill:`url(#${id})`})]:[]),arrow(48,25),...(on?[box('a-acc',60,44,26,11,5.5),h('text',{className:'a-tag',x:73,y:51.9,textAnchor:'middle'},'DSH')]:[])),
-      // Where DSH works: your desktop, its pointer beside yours; a hidden desktop
-      // on this PC (dashed), your pointer left alone; or the desktop inside a
-      // Hyper-V window, DSH's pointer inside it and yours outside.
+      // Work modes. Low disruption: your window and pointer, DSH's pointer on a
+      // hidden desktop beside them (dashed). Full speed: DSH's pointer at work in
+      // the window in front, with speed strokes. Virtual machine: DSH's pointer
+      // inside a Hyper-V window, yours outside.
       desktop:target=>drawing(...monitor(),...(target==='hyperv'
         ?[box('a-win',16,9,66,38,3),h('path',{className:'a-bar',d:'M16 12a3 3 0 0 1 3-3h60a3 3 0 0 1 3 3v3H16z'}),box('a-desk',20,19,58,24,2),h('text',{className:'a-cap',x:39,y:35.5,textAnchor:'middle'},'VM'),dshArrow(57,25),box('a-frame',16,9,66,38,3),arrow(87,27)]
-        :target==='background'
-          ?[box('a-win',15,12,40,27,2.5),box('a-ink',19,19,24,2.2,1.1),box('a-ink',19,24,17,2.2,1.1),box('a-frame',15,12,40,27,2.5),arrow(38,26),box('a-ghost',60,9,37,32,2.5),dshArrow(75,20)]
-          :[box('a-win',18,11,58,32,2.5),h('path',{className:'a-bar',d:'M18 13.5a2.5 2.5 0 0 1 2.5-2.5h53a2.5 2.5 0 0 1 2.5 2.5V16H18z'}),box('a-ink',23,22,30,2.2,1.1),box('a-ink',23,27,22,2.2,1.1),box('a-frame',18,11,58,32,2.5),dshArrow(50,25),arrow(64,28)])),
+        :target==='fast'
+          ?[box('a-win',18,11,58,32,2.5),h('path',{className:'a-bar',d:'M18 13.5a2.5 2.5 0 0 1 2.5-2.5h53a2.5 2.5 0 0 1 2.5 2.5V16H18z'}),box('a-ink',23,22,30,2.2,1.1),box('a-ink',23,27,22,2.2,1.1),box('a-frame',18,11,58,32,2.5),box('a-acc',38,29,8,1.8,.9),box('a-acc',41,33,6,1.8,.9),dshArrow(50,25)]
+          :[box('a-win',15,12,40,27,2.5),box('a-ink',19,19,24,2.2,1.1),box('a-ink',19,24,17,2.2,1.1),box('a-frame',15,12,40,27,2.5),arrow(38,26),box('a-ghost',60,9,37,32,2.5),dshArrow(75,20)])),
       // One square per tool: filled loads at startup, dashed loads on demand, faint is off.
       tools:(loaded,allowed)=>drawing(...toolGroups.flatMap(([,entries],row)=>entries.map(([name],col)=>box(loaded.has(name)?'a-acc':allowed.has(name)?'a-open':'a-ink',15.5+col*12,12.5+row*12,9,9,2.2)))),
       esc:()=>drawing(box('a-ink2',33,19,46,34,7),box('a-win',33,16,46,34,7),box('a-frame',33,16,46,34,7),h('text',{className:'a-cap',x:56,y:37.2,textAnchor:'middle'},'Esc')),
@@ -424,6 +430,7 @@ window.__ModuleLoader__.load({
       // A newer version already on disk is an update waiting for a restart.
       const phase=compareVersions(installed,PLUGIN_VERSION)>0?'updated':compareVersions(latest,installed)>0?'available':latest?'latest':'unknown';
       updateStore.set({phase,source,installed,latest,failure:null,waiting:null,checkedAt:Date.now(),restartRequired:phase==='updated',refreshRequired:false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
+      if(phase==='updated')void probeRestart();
     }
     // Checks run on their own: once per DSH start, and again when the settings
     // page opens on a result that is old or missing. "Check for updates" asks
@@ -503,16 +510,39 @@ window.__ModuleLoader__.load({
         if(!(compareVersions(operation.installedVersion,target)>=0&&compareVersions(operation.installedVersion,found.installedVersion)>0)
           || compareVersions(operation.installedVersion,operation.beforeVersion)<0)return failUpdate({code:'RESOLVED_VERSION_MISMATCH',message:String(operation.installedVersion??'')});
         if(compareVersions(operation.installedVersion,target)>0&&!(compareVersions(await latestNpmVersion(),operation.installedVersion)>=0))return failUpdate({code:'UPDATE_STATUS_UNKNOWN'});
-        updateStore.set({phase:'updated',installed:operation.installedVersion,percent:null,restartRequired:operation.outcome?.restartRequired===true,refreshRequired:operation.outcome?.refreshRequired===true});
+        const restartRequired=operation.outcome?.restartRequired===true;
+        if(restartRequired)await probeRestart();
+        updateStore.set({phase:'updated',installed:operation.installedVersion,percent:null,restartRequired,refreshRequired:operation.outcome?.refreshRequired===true,dialog:true,restartFailed:false});
       }catch{failUpdate({code:'UPDATE_STATUS_UNKNOWN'});}
     }
-    async function restartForUpdate(){
-      const market=updateMarket;
-      if(!updateStore.state.restartSupported||!market)return;
-      updateStore.set({restarting:true});
-      try{const {ok}=await requestJson(market.endpoints.restart,{method:'POST',body:{},timeoutMs:15000});if(ok)return;}
-      catch{/* A successful restart may disconnect the page before it replies. */}
-      updateStore.set({restarting:false,restartSupported:false});
+    // Who runs "Restart now": the plugin market, which restarts a host nothing
+    // supervises, else this plugin, which restarts DSH Desktop (mcp/restart.mjs).
+    // null: neither can, and the page says how to restart by hand.
+    const RESTART_ROUTE='/dsh-computer-use-win/api/restart';
+    async function probeRestart(){
+      if(updateStore.state.restartSupported){updateStore.set({restartVia:'market'});return;}
+      let via=null;
+      try{
+        const {status,data}=await requestJson(RESTART_ROUTE,{headers:{'x-wcu-request':'1'},timeoutMs:5000});
+        if(status===200&&data?.supported===true)via='plugin';
+      }catch{}
+      updateStore.set({restartVia:via});
+    }
+    // A restart that works closes this page together with DSH. A page still
+    // open a minute later means DSH did not restart; the dialog then says how
+    // to restart by hand.
+    const restartWaitMs=()=>Number.isFinite(globalThis.__wcuRestartWaitMs)?globalThis.__wcuRestartWaitMs:60000;
+    async function restartNow(){
+      const {restartVia,restarting}=updateStore.state;
+      if(!restartVia||restarting)return;
+      updateStore.set({restarting:true,restartFailed:false});
+      let ok=true;
+      try{
+        const url=restartVia==='market'?updateMarket?.endpoints?.restart:RESTART_ROUTE;
+        ({ok}=await requestJson(url,{method:'POST',body:{},headers:restartVia==='plugin'?{'x-wcu-request':'1'}:{},timeoutMs:15000}));
+      }catch{/* A restart under way may close the connection before it replies. */}
+      if(!ok){updateStore.set({restarting:false,restartFailed:true});return;}
+      setTimeout(()=>{if(updateStore.state.restarting)updateStore.set({restarting:false,restartFailed:true});},restartWaitMs());
     }
     const fill=(text,values)=>String(text).replace(/\{(\w+)\}/g,(_,key)=>values[key]??'');
     const UPDATE_STALE_MS=6*60*60*1000;
@@ -547,11 +577,15 @@ window.__ModuleLoader__.load({
         ?small(t('updateNow'),{'data-wincu-update-now':true,disabled:state.checking,title:fill(t('updateAvailable'),{version:state.latest}),onClick:()=>{void startUpdate();}})
         :h('a',{className:'wcu-update-link',href:t('updateHelpUrl'),target:'_blank',rel:'noopener noreferrer',title:fill(t('updateAvailable'),{version:state.latest})+' · '+t('updateHow'),'data-wincu-update-help':true},t('updateNow')));
       if(state.phase==='updating')return wrap('',h('span',{className:'wcu-spinner','aria-hidden':true}),h('span',null,t('updateRunning')+(state.percent!=null?' '+state.percent+'%':'')));
-      // What finishes it comes from the market: a restart (a button, or the note
-      // below the title), a page reload, or nothing.
-      if(state.phase==='updated')return wrap('success',h('span',{title:fill(t('updateDoneTitle'),{version:state.installed})},t('updateDone')),
-        state.restartRequired&&state.restartSupported&&small(t('updateRestart'),{'data-wincu-update-restart':true,disabled:state.restarting,onClick:()=>{void restartForUpdate();}}),
-        !state.restartRequired&&state.refreshRequired&&small(t('updateRefresh'),{'data-wincu-update-refresh':true,onClick:()=>{try{window.location.reload();}catch{}}}));
+      // What finishes it comes from the market: a restart, a page reload, or
+      // nothing. The dialog opens when an update the user started succeeds;
+      // until DSH restarts, a button here opens it again (or, without a
+      // one-click restart, the note below the title says what to do).
+      if(state.phase==='updated')return h(React.Fragment,null,
+        wrap('success',h('span',{title:fill(t('updateDoneTitle'),{version:state.installed})},t('updateDone')),
+          state.restartRequired&&state.restartVia&&small(t(state.restarting?'updateRestartingShort':'updateRestartPending'),{'data-wincu-update-restart':true,disabled:state.restarting,onClick:()=>updateStore.set({dialog:true})}),
+          !state.restartRequired&&state.refreshRequired&&small(t('updateRefresh'),{'data-wincu-update-refresh':true,onClick:()=>{try{window.location.reload();}catch{}}})),
+        state.dialog?h(UpdateDialog,{t,state}):null);
       if(state.phase==='failed'){
         const code=state.failure?.code;
         return wrap('error',h('span',null,t(code==='OPERATION_BUSY'?'updateBusy':code==='UPDATE_STATUS_UNKNOWN'?'updateUnconfirmed':'updateFailed')),
@@ -587,6 +621,37 @@ window.__ModuleLoader__.load({
           afterLink!==undefined?h('a',{href:REPORT_ISSUE_URL,target:'_blank',rel:'noopener noreferrer'},t('reportIssuePage')):null,afterLink):null,
         dialog.link?h('a',{href:REPORT_ISSUE_URL,target:'_blank',rel:'noopener noreferrer'},t('reportOpenIssue')):null,
         h('div',{className:'wcu-dialog-actions'},h('button',{ref:ok,type:'button',className:'wcu-small wcu-primary',onClick:dismiss},t('reportOk'))));
+    }
+    // After an update the user started: the new version, and the one step that
+    // finishes it. A restart first says that it stops the task in progress, then
+    // runs with one click where DSH allows it; elsewhere the dialog says how to
+    // restart by hand.
+    function UpdateDialog({t,state}){
+      const ref=React.useRef(null),main=React.useRef(null);
+      React.useEffect(()=>{
+        const node=ref.current;if(!node)return;
+        const closed=()=>updateStore.set({dialog:false});
+        node.addEventListener('close',closed);
+        try{if(!node.open)node.showModal();}catch{node.setAttribute('open','');}
+        main.current?.focus({preventScroll:true});
+        return ()=>node.removeEventListener('close',closed);
+      },[]);
+      const dismiss=()=>{const node=ref.current;if(node&&typeof node.close==='function'&&node.open)node.close();else updateStore.set({dialog:false});};
+      const button=(text,props)=>h('button',{type:'button',className:'wcu-small',...props},text);
+      const oneClick=state.restartRequired&&state.restartVia&&!state.restartFailed;
+      const kind=oneClick?(state.restarting?'restarting':'restart'):state.restartRequired?(state.restartFailed?'failed':'manual'):state.refreshRequired?'refresh':'done';
+      const body=oneClick?t(state.restarting?'updateRestarting':'updateDialogRestart')
+        :state.restartRequired?(state.restartFailed?t('updateRestartFailed')+' ':'')+t(state.runtime==='web'?'updateRestartWeb':'updateRestartDesktop')
+        :t(state.refreshRequired?'updateDialogRefresh':'updateDialogReady');
+      const actions=oneClick?[button(t('updateLater'),{key:'later',disabled:state.restarting,onClick:dismiss}),
+          button(t(state.restarting?'updateRestartingShort':'updateRestartNow'),{key:'now',ref:main,className:'wcu-small wcu-primary','data-wincu-update-restart-now':true,disabled:state.restarting,onClick:()=>{void restartNow();}})]
+        :kind==='refresh'?[button(t('updateLater'),{key:'later',onClick:dismiss}),
+          button(t('updateRefresh'),{key:'refresh',ref:main,className:'wcu-small wcu-primary',onClick:()=>{try{window.location.reload();}catch{}}})]
+        :[button(t('reportOk'),{key:'ok',ref:main,className:'wcu-small wcu-primary',onClick:dismiss})];
+      return h('dialog',{ref,className:'wcu-dialog','data-wincu-update-dialog':kind,'aria-labelledby':'wcu-update-dialog-title','aria-describedby':'wcu-update-dialog-body'},
+        h('p',{id:'wcu-update-dialog-title',className:'wcu-dialog-title'},fill(t('updateDoneTitle'),{version:state.installed})),
+        h('p',{id:'wcu-update-dialog-body',className:'wcu-dialog-body',role:kind==='restarting'||kind==='failed'?'status':undefined},body),
+        h('div',{className:'wcu-dialog-actions'},...actions));
     }
     function ReportButton({t}){
       const [state,setState]=React.useState({phase:'idle',dialog:null});
@@ -624,7 +689,7 @@ window.__ModuleLoader__.load({
       // A wait, for the market to pick up a fresh release or to finish another
       // install, says why the update takes longer.
       if(state.phase==='updating'&&state.waiting)return h('p',{className:'wcu-update-note','data-wincu-update-note':state.waiting==='busy'?'busy':'syncing'},t(state.waiting==='busy'?'updateBusyWaiting':'updateSyncing'));
-      if(state.phase==='updated'&&state.restartRequired&&!state.restartSupported)return h('p',{className:'wcu-update-note','data-wincu-update-note':'restart'},t(state.runtime==='web'?'updateRestartWeb':'updateRestartDesktop'));
+      if(state.phase==='updated'&&state.restartRequired&&state.restartVia===null)return h('p',{className:'wcu-update-note','data-wincu-update-note':'restart'},t(state.runtime==='web'?'updateRestartWeb':'updateRestartDesktop'));
       // One plain sentence; the market's own message is in the tooltip.
       if(state.phase==='failed'&&!['OPERATION_BUSY','UPDATE_STATUS_UNKNOWN'].includes(state.failure?.code))return h('p',{className:'wcu-update-note','data-tone':'error','data-wincu-update-note':'failed',title:state.failure.message||undefined},
         t(state.failure.code==='AGENTS_RUNNING'?'updateAgentsRunning':state.failure.code==='RESOLVED_VERSION_MISMATCH'?'updateMismatch':state.failure.code==='MARKET_NOT_SYNCED'?'updateMarketWaiting':state.failure.code==='NPM_CHECK_FAILED'?'updateNpmUnavailable':'updateFailedHint')+' ',
@@ -646,6 +711,7 @@ window.__ModuleLoader__.load({
       const available=state.status===undefined?state.value!==undefined:state.status==='ready';
       const writable=available&&state.writable;
       const saved = {...defaults,...state.value};
+      saved.desktopTarget = LEGACY_DESKTOP_TARGETS[saved.desktopTarget] ?? saved.desktopTarget;
       if(!state.value?.toolPreset||saved.toolPreset==='auto')saved.toolPreset=saved.enabledTools.length===allToolNames.length?'full':'custom';
       const [draft,setDraft] = React.useState(saved), [dirty,setDirty] = React.useState(false);
       const [saving,setSaving] = React.useState(false), [message,setMessage] = React.useState(''),[tone,setTone]=React.useState('');
@@ -665,7 +731,7 @@ window.__ModuleLoader__.load({
       // The Firefox that DSH starts has no window yet, so choosing Firefox turns
       // the switches off, and choosing another browser turns them back.
       const change = (field,value) => {const next={...draft,[field]:value};
-        if(field==='desktopTarget'&&value!=='current')next.browserAttachUser=false;
+        if(field==='desktopTarget'&&value==='hyperv')next.browserAttachUser=false;
         if(field==='desktopTarget'||field==='hypervVm')setHypervMessage('');
         // Choosing Custom starts with every tool checked: the user unchecks what
         // to leave out and saves. A Custom selection already saved stays as saved.
@@ -768,7 +834,6 @@ window.__ModuleLoader__.load({
         finally{setNoteSaving(false);}
       };
       const disabled = saving||!writable||recording,indicatorDisabled=disabled||!draft.indicatorEnabled;
-      const backgroundDesktop = draft.desktopTarget==='background';
       const activeTools=draft.toolPreset==='lazy'?['tools']:draft.toolPreset==='full'?allToolNames:draft.toolPreset==='lite'?liteToolNames:draft.enabledTools;
       const customDisabled=disabled||draft.toolPreset!=='custom';
       const dirtyStatus=[t('dirty'),['browserVisible','browserApp','browserSignIn','browserAttachUser'].some(key=>draft[key]!==saved[key])?t('browserChange'):'',['toolPreset','enabledTools','mode'].some(key=>!equal(draft[key],saved[key]))?t('toolsChange'):''].filter(Boolean).join(' ');
@@ -815,14 +880,14 @@ window.__ModuleLoader__.load({
                 h('legend',null,h('label',{className:'wcu-tool-group-label'},h('input',{type:'checkbox',id:idPrefix+'-tool-group-'+group,checked:count===names.length,'aria-checked':count&&count<names.length?'mixed':count===names.length,ref:input=>{if(input)input.indeterminate=count>0&&count<names.length;},onChange:e=>selectTools(names,e.target.checked)}),t('toolGroup_'+group),h('span',{className:'wcu-tool-count'},count+' / '+names.length))),
                 h('div',{className:'wcu-tool-grid'},...entries.map(([name])=>h('label',{className:'wcu-tool-item',key:name,title:'windows_computer_use_'+name},h('input',{type:'checkbox',id:idPrefix+'-tool-'+name,'data-wincu-tool':name,checked:draft.enabledTools.includes(name),disabled:customDisabled,onChange:e=>selectTools([name],e.target.checked)}),h('span',null,h('strong',null,t('tool_'+name)),h('small',null,t('toolHint_'+name)))))));})))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-desktop-title'},
-          head(idPrefix+'-desktop-title','desktopTarget',null),
-          // Each choice says what it does; the one chosen keeps its notes or,
-          // for Hyper-V, its setup steps in view.
+          head(idPrefix+'-desktop-title','workMode',null),
+          // Each mode says in one line when it fits; the one chosen keeps its
+          // notes or, for the virtual machine, its setup steps in view.
           item(picture(arts.desktop(draft.desktopTarget)),
             h('div',{className:'wcu-segment wcu-presets wcu-desktops',role:'radiogroup','aria-labelledby':idPrefix+'-desktop-title'},...DESKTOP_OPTIONS.map(([value,label])=>h('label',{key:value},
               h('input',{type:'radio',name:idPrefix+'-desktopTarget',id:idPrefix+'-desktopTarget-'+value,value,checked:draft.desktopTarget===value,disabled,onChange:()=>change('desktopTarget',value)}),t(label)))),
             h('p',{className:'wcu-hint','data-wincu-desktop-hint':true},t((DESKTOP_OPTIONS.find(([value])=>value===draft.desktopTarget)??DESKTOP_OPTIONS[0])[2]))),
-          draft.desktopTarget==='background'&&h('div',{className:'wcu-notice','data-wincu-background-notes':true},h('ul',null,...[1,2,3].map(n=>h('li',{key:n},t('desktopBackgroundNote'+n))))),
+          draft.desktopTarget==='quiet'&&h('div',{className:'wcu-notice','data-wincu-quiet-notes':true},h('ul',null,...[1,2,3].map(n=>h('li',{key:n},t('modeQuietNote'+n))))),
           draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
             h('strong',null,t('hypervSetup')),
             h('ol',null,...[1,2,3,4,5,6].map(n=>h('li',{key:n,'data-tone':hypervMessage&&hypervMessage.step===n?hypervMessage.tone:undefined},t('hypervStep'+n),
@@ -835,20 +900,20 @@ window.__ModuleLoader__.load({
           head(idPrefix+'-browser-title','browserTitle','browserInfo'),
           h('div',{className:'wcu-grid'},
             switchItem('browserFirst','browserFirst','browserFirstHint',arts.browserFirst(draft.browserFirst)),
-            switchItem('browserVisible','browserVisible',backgroundDesktop?'backgroundBrowserHint':'browserVisibleHint',arts.browserVisible(!backgroundDesktop&&draft.browserVisible),backgroundDesktop||draft.browserApp==='firefox',!backgroundDesktop&&draft.browserVisible),
+            switchItem('browserVisible','browserVisible','browserVisibleHint',arts.browserVisible(draft.browserVisible),draft.browserApp==='firefox',draft.browserVisible),
             item(h('label',{className:'wcu-art',htmlFor:idPrefix+'-browserApp','aria-hidden':true},arts.app(draft.browserApp==='default'?t('browserAppShort'):draft.browserApp==='firefox'?'Firefox':t('browserApp_'+draft.browserApp))),
               title(t('browserApp'),'browserAppHint',{htmlFor:idPrefix+'-browserApp'}),
               h('select',{className:'wcu-control',id:idPrefix+'-browserApp',value:draft.browserApp,disabled,onChange:e=>change('browserApp',e.target.value)},
                 ...['default','edge','chrome','firefox'].map(app=>h('option',{key:app,value:app},t('browserApp_'+app))))),
-            switchItem('browserSignIn','browserSignIn',backgroundDesktop?'backgroundBrowserHint':'browserSignInHint',arts.signIn(!backgroundDesktop&&draft.browserSignIn),backgroundDesktop,!backgroundDesktop&&draft.browserSignIn),
-            switchItem('browserAttachUser','browserAttachUser','browserAttachUserHint',arts.app(t('myBrowser')),draft.browserApp==='firefox'||draft.desktopTarget!=='current')),
+            switchItem('browserSignIn','browserSignIn','browserSignInHint',arts.signIn(draft.browserSignIn),false,draft.browserSignIn),
+            switchItem('browserAttachUser','browserAttachUser','browserAttachUserHint',arts.app(t('myBrowser')),draft.browserApp==='firefox'||draft.desktopTarget==='hyperv')),
           draft.browserAttachUser&&draft.browserApp!=='firefox'&&h('div',{className:'wcu-notice','data-wincu-attach-notice':true},
             h('strong',null,t('attachSetup')),h('ol',null,h('li',null,t('attachStep1'),...['chrome://inspect/#remote-debugging','edge://inspect/#remote-debugging'].map(url=>h('span',{className:'wcu-address',key:url},h('code',null,url),h(CopyButton,{text:url,t})))),h('li',null,t('attachStep2'))),
             h('strong',null,t('attachRisks')),h('ul',null,h('li',null,t('attachRisk1')),h('li',null,t('attachRisk2')))),
           // Kept sign-ins need nothing set up, but how to sign in, where the
           // sign-ins stay and the risks remain in view while the switch is on.
           draft.browserApp==='firefox'&&h('p',{className:'wcu-notice','data-wincu-firefox-notice':true},t('firefoxNotice'),' ',h('a',{href:'https://github.com/Yu-tao-Li/dsh-computer-use-win/blob/main/docs/browser-bidi.md',target:'_blank',rel:'noopener noreferrer'},t('learnMore'))),
-          !backgroundDesktop&&draft.browserSignIn&&draft.browserApp!=='firefox'&&h('div',{className:'wcu-notice','data-wincu-signin-notice':true},
+          draft.browserSignIn&&draft.browserApp!=='firefox'&&h('div',{className:'wcu-notice','data-wincu-signin-notice':true},
             h('strong',null,t('signInSetup')),
             h('ol',null,h('li',null,t('signInStep1')),h('li',null,t('signInStep2')),
               !draft.browserVisible&&h('li',{'data-wincu-signin-hidden':true},t('signInStepHidden')),
@@ -1009,7 +1074,7 @@ window.__ModuleLoader__.load({
       ctx.effect(()=>{
         const delay=Number.isFinite(globalThis.__wcuUpdateDelayMs)?globalThis.__wcuUpdateDelayMs:8000;
         // Tests set the delay; they also get a way back to a fresh, unchecked state.
-        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,waiting:null,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restarting:false,restartRequired:false,refreshRequired:false});}};
+        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,waiting:null,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restartVia:undefined,restarting:false,restartFailed:false,dialog:false,restartRequired:false,refreshRequired:false});}};
         if(updateStarted||delay<0||typeof setTimeout!=='function'||typeof fetch!=='function')return ()=>{};
         updateStarted=true;
         const timer=setTimeout(()=>{void checkUpdate();},delay);

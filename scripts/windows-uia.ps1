@@ -98,6 +98,15 @@ using System;
 using System.Runtime.InteropServices;
 
 public static class WindowsComputerUseNative {
+  [StructLayout(LayoutKind.Sequential)] struct LastInputInfo { public uint Size; public uint Time; }
+  [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LastInputInfo info);
+  // Milliseconds since the last mouse or keyboard input in this session, of
+  // any origin; -1 when Windows does not say. Low disruption waits for a pause.
+  public static long InputIdleMilliseconds() {
+    var info = new LastInputInfo { Size = 8 };
+    if (!GetLastInputInfo(ref info)) return -1;
+    return unchecked((uint)Environment.TickCount - info.Time);
+  }
   // Shared with the stop listener. Remote-control input without this marker
   // remains eligible for Esc / the configured stop shortcut.
   public static readonly uint InputMarker = ParseInputMarker();
@@ -3507,7 +3516,7 @@ function Invoke-LaunchApp {
   $resolved = Resolve-LaunchTarget $rawTarget
   $background = $env:WCU_BACKGROUND_DESKTOP -eq '1'
   if ($background -and ($resolved.kind -ne 'file' -or [IO.Path]::GetExtension($resolved.target) -notin @('.exe','.com'))) {
-    throw 'WCU_BACKGROUND_DESKTOP_LIMIT: supply the application executable. Explorer shortcuts and Store app activation require another desktop mode.'
+    throw 'WCU_BACKGROUND_DESKTOP_LIMIT: the hidden desktop starts an application executable only. Shortcuts and installed or Store apps open on the user''s desktop (desktop:"current").'
   }
   $approved = [bool](Get-Prop $InputObject '_wcuLaunchApproved' $false)
   $arguments = [string](Get-Prop $InputObject 'arguments' '')
@@ -3599,6 +3608,10 @@ function Get-DesktopInputMutexName {
 }
 
 function Enter-DesktopInput {
+  # The session's input is shared by everything on the user's desktop. A hidden
+  # desktop receives no real input, so its actions skip this lease (-Skip).
+  param([switch]$Skip)
+  if ($Skip) { return $null }
   # Local names isolate Windows sessions; the SID isolates users in a session.
   # Never queue or replay an input request after a competing operation.
   $mutex = New-Object System.Threading.Mutex($false, (Get-DesktopInputMutexName))
@@ -3650,7 +3663,7 @@ function Invoke-Action {
   $inputLease = $null
   try {
   if ($Action -in @('launch_app','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','close_window','move_window') -or (Get-Prop $inputObject 'activate' $false)) {
-    $inputLease = Enter-DesktopInput
+    $inputLease = Enter-DesktopInput -Skip:$background
     $script:TakeoverProcessId = [int](Get-Prop $inputObject '_wcuTakeoverPid' 0)
     if ($env:WCU_CANCEL_EVENT) { [WindowsComputerUseNative]::SetStopListener($script:TakeoverProcessId) }
     [void](Test-Failsafe)
@@ -3658,6 +3671,7 @@ function Invoke-Action {
 
   switch ($Action) {
     "launch_app" { return (Invoke-LaunchApp $inputObject) }
+    "input_idle" { return [ordered]@{ ok = $true; action = 'input_idle'; idleMs = [WindowsComputerUseNative]::InputIdleMilliseconds() } }
     "health" {
       $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
       # Health checks backend availability independently of any application's
