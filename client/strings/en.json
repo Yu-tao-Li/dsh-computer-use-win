@@ -263,6 +263,8 @@
   "updateUnconfirmed": "Update status unknown",
   "updateRecheck": "Confirm version",
   "updateSyncing": "The new version was just released. Waiting for the plugin market to pick it up, usually a few minutes.",
+  "updateBusyWaiting": "The plugin market is finishing another install; the update continues after it.",
+  "updateAgentsRunning": "An agent is running, and the plugin market does not update meanwhile. Choose Retry after it finishes.",
   "updateMarketWaiting": "The plugin market has not picked up the new version yet. Try again later.",
   "updateNpmUnavailable": "The latest version on npm could not be confirmed. Try again.",
   "updateMismatch": "The installed version is not the new one; try again later.",

@@ -42,7 +42,7 @@
 
 #### 1.2 升级
 
-DSH 每次启动时会按 npm 的 `latest` 自动检查。**设置 → 电脑操控** 标题右侧 GitHub 左边有一个按钮：没有新版时是“检查更新”，点一下马上再查；有新版时变成“更新”。点“更新”后，DSH 插件市场安装新版本并显示进度；新版本刚发布、插件市场还没同步时，页面会等它同步好再装。页面提示需要重启时，按第 2 步从托盘完全退出，再重新打开 DSH Desktop。
+DSH 每次启动时会按 npm 的 `latest` 自动检查。**设置 → 电脑操控** 标题右侧 GitHub 左边有一个按钮：没有新版时是“检查更新”，点一下马上再查；有新版时变成“更新”。点“更新”后，DSH 插件市场安装新版本并显示进度；新版本刚发布、插件市场还没同步时，页面会等它同步好再装。下载线路跟随插件市场的“下载区域”设置：“全球”直接从 npm 下载，“中国大陆”走镜像。页面提示需要重启时，按第 2 步从托盘完全退出，再重新打开 DSH Desktop。
 
 也可以运行同一条安装命令，然后同样完全退出、再重新打开 DSH Desktop。没有插件市场，或者插件是从本地文件装的时，“更新”会打开这段升级说明。
 
@@ -396,7 +396,7 @@ You need a Windows computer with DSH Desktop installed. The plugin uses Windows 
 
 #### 1.2 Upgrade
 
-DSH checks npm’s `latest` at every start. A button sits to the left of GitHub at the top of **Settings → Computer Use**: Check for updates checks again at once, and it turns into Update when a newer version exists. Click Update to let the DSH plugin market install it and show progress; right after a release, the page waits until the market has picked up the new version. If the page asks you to restart, quit from the tray and reopen DSH Desktop as in step 2.
+DSH checks npm’s `latest` at every start. A button sits to the left of GitHub at the top of **Settings → Computer Use**: Check for updates checks again at once, and it turns into Update when a newer version exists. Click Update to let the DSH plugin market install it and show progress; right after a release, the page waits until the market has picked up the new version. The download follows the market’s Download region setting: Global downloads straight from npm, China mainland uses a mirror. If the page asks you to restart, quit from the tray and reopen DSH Desktop as in step 2.
 
 You can also run the same install command, then fully quit and reopen DSH Desktop the same way. Without the plugin market, or when the plugin was installed from a local file, Update opens these upgrade steps.
 

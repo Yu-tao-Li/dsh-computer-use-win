@@ -585,6 +585,8 @@ window.__ModuleLoader__.load({
     "updateUnconfirmed": "更新状态待确认",
     "updateRecheck": "确认版本",
     "updateSyncing": "新版本刚发布，正在等插件市场同步，通常几分钟。",
+    "updateBusyWaiting": "插件市场正在处理别的安装，完成后接着更新。",
+    "updateAgentsRunning": "有 agent 正在运行，插件市场这时不更新；等它结束后点“重试”。",
     "updateMarketWaiting": "插件市场还没同步到新版本，请稍后重试。",
     "updateNpmUnavailable": "暂时无法确认 npm 上的最新版本，请重试。",
     "updateMismatch": "装上的不是新版本，请稍后再试。",
@@ -886,6 +888,8 @@ window.__ModuleLoader__.load({
     "updateUnconfirmed": "Update status unknown",
     "updateRecheck": "Confirm version",
     "updateSyncing": "The new version was just released. Waiting for the plugin market to pick it up, usually a few minutes.",
+    "updateBusyWaiting": "The plugin market is finishing another install; the update continues after it.",
+    "updateAgentsRunning": "An agent is running, and the plugin market does not update meanwhile. Choose Retry after it finishes.",
     "updateMarketWaiting": "The plugin market has not picked up the new version yet. Try again later.",
     "updateNpmUnavailable": "The latest version on npm could not be confirmed. Try again.",
     "updateMismatch": "The installed version is not the new one; try again later.",
@@ -1302,18 +1306,24 @@ window.__ModuleLoader__.load({
         return status===200&&versionParts(data?.package?.installedVersion)?data.package:null;
       }catch{return null;}
     }
+    // npm's own registry first. Where it cannot be reached, the public mirrors
+    // DSH's market uses in mainland China answer instead.
+    const UPDATE_REGISTRIES=['https://registry.npmjs.org','https://mirrors.cloud.tencent.com/npm','https://registry.npmmirror.com'];
     async function latestNpmVersion(){
-      try{
-        const {ok,data}=await requestJson('https://registry.npmjs.org/'+UPDATE_PACKAGE+'/latest');
-        return ok&&versionParts(data?.version)?data.version:null;
-      }catch{return null;}
+      for(const registry of UPDATE_REGISTRIES){
+        try{
+          const {ok,data}=await requestJson(registry+'/'+UPDATE_PACKAGE+'/latest',{timeoutMs:8000});
+          if(ok&&versionParts(data?.version))return data.version;
+        }catch{}
+      }
+      return null;
     }
     function settleUpdateCheck({found,latest}){
       const installed=found?.installedVersion??PLUGIN_VERSION;
       const source=found?.source==='npm'?'market':'help';
       // A newer version already on disk is an update waiting for a restart.
       const phase=compareVersions(installed,PLUGIN_VERSION)>0?'updated':compareVersions(latest,installed)>0?'available':latest?'latest':'unknown';
-      updateStore.set({phase,source,installed,latest,failure:null,syncing:false,checkedAt:Date.now(),restartRequired:phase==='updated',refreshRequired:false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
+      updateStore.set({phase,source,installed,latest,failure:null,waiting:null,checkedAt:Date.now(),restartRequired:phase==='updated',refreshRequired:false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
     }
     // Checks run on their own: once per DSH start, and again when the settings
     // page opens on a result that is old or missing. "Check for updates" asks
@@ -1328,7 +1338,7 @@ window.__ModuleLoader__.load({
       })().finally(()=>{updateChecking=undefined;updateStore.set({checking:false});});
       return updateChecking;
     }
-    function failUpdate(failure){updateStore.set({phase:'failed',percent:null,syncing:false,failure:{code:String(failure?.code||'UPDATE_FAILED'),message:String(failure?.message||'').slice(0,300),retryable:failure?.retryable!==false}});}
+    function failUpdate(failure){updateStore.set({phase:'failed',percent:null,waiting:null,failure:{code:String(failure?.code||'UPDATE_FAILED'),message:String(failure?.message||'').slice(0,300),retryable:failure?.retryable!==false}});}
     // One market operation: the request, then its progress until it ends.
     async function runUpdateOperation(market,force){
       const {status,data}=await requestJson(market.endpoints.updates,{method:'POST',body:{packageName:UPDATE_PACKAGE,...(force?{force:true}:{})},timeoutMs:30000});
@@ -1347,15 +1357,29 @@ window.__ModuleLoader__.load({
       if(operation.state!=='succeeded')return {failure:operation.failure??{code:operation.state==='cancelled'?'UPDATE_CANCELLED':'UPDATE_FAILED'}};
       return {operation};
     }
+    // Tests shorten both waits below.
+    const updateWaitMs=normal=>Number.isFinite(globalThis.__wcuUpdateSyncMs)?globalThis.__wcuUpdateSyncMs:normal;
+    // The market runs one install at a time. A busy market is waited for
+    // (every 5 s, up to 3 minutes) rather than reported.
+    const UPDATE_BUSY_TRIES=36;
+    async function runWhenFree(market,force){
+      let result=await runUpdateOperation(market,force);
+      for(let tries=0;result.failure?.code==='OPERATION_BUSY'&&tries<UPDATE_BUSY_TRIES;tries++){
+        updateStore.set({waiting:'busy'});
+        await new Promise(resolve=>setTimeout(resolve,updateWaitMs(5000)));
+        result=await runUpdateOperation(market,force);
+      }
+      updateStore.set({waiting:null});
+      return result;
+    }
     // The market installs from its own registry, a mirror in some regions, which
     // can trail npm by a few minutes after a release. A click waits for it
     // (up to 40 checks, 15 s apart) rather than failing.
     const UPDATE_SYNC_CHECKS=40;
-    const updateSyncMs=()=>Number.isFinite(globalThis.__wcuUpdateSyncMs)?globalThis.__wcuUpdateSyncMs:15000;
     async function startUpdate(){
       const state=updateStore.state,market=updateMarket;
       if(!market||state.source!=='market'||state.checking||!['available','failed'].includes(state.phase))return;
-      updateStore.set({phase:'updating',percent:null,failure:null,syncing:false});
+      updateStore.set({phase:'updating',percent:null,failure:null,waiting:null});
       try{
         const [checked,target]=await Promise.all([marketPackage(market),latestNpmVersion()]);
         if(!target)return failUpdate({code:'NPM_CHECK_FAILED'});
@@ -1366,12 +1390,12 @@ window.__ModuleLoader__.load({
           if(checks>0&&!found)return failUpdate({code:'UPDATE_FAILED'});
           // Another source, or a market ahead of npm, does not change by waiting.
           if((found&&(found.source!=='npm'||compareVersions(found.latestVersion,target)>0))||checks>=UPDATE_SYNC_CHECKS)return failUpdate({code:'MARKET_NOT_SYNCED'});
-          if(checks>0){updateStore.set({syncing:true});await new Promise(resolve=>setTimeout(resolve,updateSyncMs()));}
+          if(checks>0){updateStore.set({waiting:'sync'});await new Promise(resolve=>setTimeout(resolve,updateWaitMs(15000)));}
           found=await marketPackage(market,{fresh:true});
         }
-        updateStore.set({syncing:false});
-        let result=await runUpdateOperation(market,false);
-        if(UPDATE_HOLD_CODES.includes(result.failure?.code))result=await runUpdateOperation(market,true);
+        updateStore.set({waiting:null});
+        let result=await runWhenFree(market,false);
+        if(UPDATE_HOLD_CODES.includes(result.failure?.code))result=await runWhenFree(market,true);
         if(result.failure)return failUpdate(result.failure);
         const {operation}=result;
         // The API asks each client to compare the installed version with the
@@ -1497,12 +1521,13 @@ window.__ModuleLoader__.load({
     // user (a restart the market does not run) or did not finish.
     function UpdateNote({t}){
       const state=React.useSyncExternalStore(listener=>updateStore.subscribe(listener),()=>updateStore.state);
-      // A wait for the market to pick up a fresh release says why it takes longer.
-      if(state.phase==='updating'&&state.syncing)return h('p',{className:'wcu-update-note','data-wincu-update-note':'syncing'},t('updateSyncing'));
+      // A wait, for the market to pick up a fresh release or to finish another
+      // install, says why the update takes longer.
+      if(state.phase==='updating'&&state.waiting)return h('p',{className:'wcu-update-note','data-wincu-update-note':state.waiting==='busy'?'busy':'syncing'},t(state.waiting==='busy'?'updateBusyWaiting':'updateSyncing'));
       if(state.phase==='updated'&&state.restartRequired&&!state.restartSupported)return h('p',{className:'wcu-update-note','data-wincu-update-note':'restart'},t(state.runtime==='web'?'updateRestartWeb':'updateRestartDesktop'));
       // One plain sentence; the market's own message is in the tooltip.
       if(state.phase==='failed'&&!['OPERATION_BUSY','UPDATE_STATUS_UNKNOWN'].includes(state.failure?.code))return h('p',{className:'wcu-update-note','data-tone':'error','data-wincu-update-note':'failed',title:state.failure.message||undefined},
-        t(state.failure.code==='RESOLVED_VERSION_MISMATCH'?'updateMismatch':state.failure.code==='MARKET_NOT_SYNCED'?'updateMarketWaiting':state.failure.code==='NPM_CHECK_FAILED'?'updateNpmUnavailable':'updateFailedHint')+' ',
+        t(state.failure.code==='AGENTS_RUNNING'?'updateAgentsRunning':state.failure.code==='RESOLVED_VERSION_MISMATCH'?'updateMismatch':state.failure.code==='MARKET_NOT_SYNCED'?'updateMarketWaiting':state.failure.code==='NPM_CHECK_FAILED'?'updateNpmUnavailable':'updateFailedHint')+' ',
         h('a',{href:t('updateHelpUrl'),target:'_blank',rel:'noopener noreferrer'},t('updateHow')));
       return null;
     }
@@ -1872,7 +1897,7 @@ window.__ModuleLoader__.load({
       ctx.effect(()=>{
         const delay=Number.isFinite(globalThis.__wcuUpdateDelayMs)?globalThis.__wcuUpdateDelayMs:8000;
         // Tests set the delay; they also get a way back to a fresh, unchecked state.
-        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,syncing:false,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restarting:false,restartRequired:false,refreshRequired:false});}};
+        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,waiting:null,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restarting:false,restartRequired:false,refreshRequired:false});}};
         if(updateStarted||delay<0||typeof setTimeout!=='function'||typeof fetch!=='function')return ()=>{};
         updateStarted=true;
         const timer=setTimeout(()=>{void checkUpdate();},delay);

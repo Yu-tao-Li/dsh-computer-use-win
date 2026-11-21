@@ -33,6 +33,8 @@ app.whenReady().then(async()=>{
       "if(u==='/dsh-market/api/v1/updates'&&call.method==='POST'){if(o.busy)return {status:409,body:{schema,error:'busy',failure:{code:'OPERATION_BUSY',message:'busy',retryable:true}}};n++;return {status:202,body:{schema,operation:{schema,operationId:'boot-update-'+n,state:'running',progress:{percent:0}}}};}"+
       "if(u.startsWith('/dsh-market/api/v1/operations?operationId=boot-update-')){if(o.lost)return {status:404,body:null};const next=o.operations.shift()||{state:'running'};return {status:200,body:{schema,operation:{schema,operationId:decodeURIComponent(u.split('=')[1]),kind:'update',packageName:'dsh-computer-use-win',beforeVersion:o.installed,installedVersion:o.installed,progress:{percent:null},outcome:{refreshRequired:false,restartRequired:true},failure:null,...next}}};}"+
       "if(u==='/dsh-market/api/v1/restart'&&call.method==='POST')return {status:200,body:{ok:true}};"+
+      "if(u==='https://registry.npmjs.org/dsh-computer-use-win/latest'&&o.npmDown)throw new TypeError('npm unreachable');"+
+      "if(u==='https://mirrors.cloud.tencent.com/npm/dsh-computer-use-win/latest'&&o.mirror)return {status:200,body:{name:'dsh-computer-use-win',version:o.mirror}};"+
       "if(u==='https://registry.npmjs.org/dsh-computer-use-win/latest'){const npm=o.npm===undefined?o.latest:o.npm;return npm?{status:200,body:{name:'dsh-computer-use-win',version:npm}}:{status:404,body:{error:'Not found'}};}"+
       "return {status:404,body:null};};};"+
     "window.V="+JSON.stringify(require('../package.json').version)+";window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.V,available:false});"+
@@ -645,14 +647,40 @@ app.whenReady().then(async()=>{
   assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-now]')"),false,'npm alone cannot update in place');
   assert.equal(await evaluate("(a=>a.textContent==='更新'&&a.href.includes('#12-')&&a.title.includes('v'+window.bump(window.V)))(document.querySelector('[data-wincu-update-help]'))"),true);
   assert.equal(await evaluate("(b=>b.hasAttribute('data-wincu-nav')&&!b.hasAttribute('data-wincu-update')&&getComputedStyle(b,'::after').content==='none')(document.querySelector('#fake-nav button'))"),true,'An available update leaves the nav button without a dot');
-  // The market is busy with another change: no install, a retry.
+  // npm's registry first; when it cannot be reached, a mirror answers.
+  await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,npmDown:true,mirror:window.bump(window.V),operations:[]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  assert.deepEqual(await evaluate("window.fetchCalls.filter(c=>c.url.endsWith('/dsh-computer-use-win/latest')).map(c=>c.url).slice(0,2)"),['https://registry.npmjs.org/dsh-computer-use-win/latest','https://mirrors.cloud.tencent.com/npm/dsh-computer-use-win/latest'],'npm first, then a mirror');
+  await recheck("window.fakeMarket({installed:window.V,latest:window.V,available:false,operations:[]})");
+  await until("window.__wcuUpdateTest.state().phase==='latest'");
+  assert.equal(await evaluate("window.fetchCalls.some(c=>c.url.includes('mirrors.cloud.tencent.com')||c.url.includes('npmmirror'))"),false,'A mirror is not asked while npm answers');
+  // The market is busy with another install: the page waits for it, says so,
+  // then installs.
   await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,busy:true,operations:[]})");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   assert.equal(await evaluate("(b=>b.textContent+'|'+b.title)(document.querySelector('[data-wincu-update-now]'))"),'更新|有新版本 v'+await evaluate('window.bump(window.V)'),'One word on the button, the version in its tooltip');
   await savePicture('update-available.png');
+  await evaluate("window.__wcuUpdateSyncMs=200;document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update-note=busy]')?.textContent.includes('插件市场正在处理别的安装')&&"+updateText+".includes('更新中')");
+  await savePicture('update-busy-waiting.png');
+  await evaluate("window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]});void 0");
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
+  // A market that stays busy ends in one short word and a retry.
+  await evaluate("window.__wcuUpdateSyncMs=40;void 0");
+  await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,busy:true,operations:[]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
   await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='failed'&&!!document.querySelector('[data-wincu-update-retry]')");
   assert.ok(await evaluate(updateText+".includes('插件市场正忙')"));
+  assert.ok(await evaluate(posts+'.length>10'),'The busy market was asked again before the page gave up');
+  // An agent is running: the market does not update meanwhile, and the page
+  // says to retry after it.
+  await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'failed',failure:{code:'AGENTS_RUNNING',message:'agents are running',retryable:true}}]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='failed'&&!!document.querySelector('[data-wincu-update-retry]')");
+  assert.ok(await evaluate(noteText+".startsWith('有 agent 正在运行')"));
+  assert.equal(await evaluate("document.querySelector('[data-wincu-update-note=failed]').title"),'agents are running','The market’s own words are in the tooltip');
   // A release younger than the market's waiting period: the same click goes on
   // with force, with no second question.
   await recheck("window.market=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'failed',failure:{code:'RELEASE_TOO_FRESH',message:'release age',retryable:true}},{state:'running',progress:{percent:40}},{state:'succeeded',installedVersion:window.bump(window.V)}]})");

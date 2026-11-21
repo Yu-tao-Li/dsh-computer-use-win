@@ -263,6 +263,8 @@
   "updateUnconfirmed": "更新状态待确认",
   "updateRecheck": "确认版本",
   "updateSyncing": "新版本刚发布，正在等插件市场同步，通常几分钟。",
+  "updateBusyWaiting": "插件市场正在处理别的安装，完成后接着更新。",
+  "updateAgentsRunning": "有 agent 正在运行，插件市场这时不更新；等它结束后点“重试”。",
   "updateMarketWaiting": "插件市场还没同步到新版本，请稍后重试。",
   "updateNpmUnavailable": "暂时无法确认 npm 上的最新版本，请重试。",
   "updateMismatch": "装上的不是新版本，请稍后再试。",
