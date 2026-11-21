@@ -1,6 +1,6 @@
 # 电脑操控设置 / Computer Use settings
 
-> 当前插件版本 `0.6.2`：设置标题显示包版本，悬停说明使用统一中英文词典，预览与已停止状态互不覆盖。
+> 当前插件版本 `0.6.3`：设置标题显示包版本，悬停说明使用统一中英文词典，预览与已停止状态互不覆盖。
 
 ## 简体中文
 
@@ -12,7 +12,7 @@
 
 ### 更新
 
-DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询失败或结果超过 6 小时会重查。已安装版本等于或高于 `latest` 时隐藏“更新”；确认有新版时在 GitHub 左侧显示“更新”，导航同时显示小红点。点击后重核 npm 与 DSH 市场目标，由市场下载安装并核对实际版本。页面显示进度，并根据市场结果提示刷新、重启或直接生效。DSH Desktop 需要重启时，从托盘退出后重新打开。市场暂缓新版本时，按宿主结果提示“仍要更新”；市场与 npm 不一致时提示稍后重试。无市场或本地安装时，“更新”打开升级说明。
+DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询失败或结果超过 6 小时会重查。GitHub 左侧只有一个按钮：已安装版本等于或高于 `latest` 时是“检查更新”，点击后跳过市场缓存重查，并短暂显示“已是最新版本”或“暂时无法检查更新”；确认有新版时变成“更新”。导航不显示标记。点击“更新”后重核 npm 与 DSH 市场目标，由市场下载安装并核对实际版本。市场的镜像还没同步到新版本时，页面每 15 秒重查一次，最多等 10 分钟，期间说明在等同步；新版本还在市场的等待期内时，这次点击会以强制方式再提交一次（市场在此之前已做完宿主兼容检查）。页面显示进度，并根据市场结果提示刷新、重启或直接生效。DSH Desktop 需要重启时，从托盘退出后重新打开。无市场或本地安装时，“更新”打开升级说明。
 
 ### 反馈问题
 
@@ -88,7 +88,7 @@ Upgrade and fully restart DSH Desktop, then open **Settings → Computer Use** (
 
 The plugin list shows a short introduction that opens the complete settings page. Star and Issue links stay at the top of that page; Collapse folds that note into one dsh-computer-use-win link with the GitHub mark and Expand restores it. The choice saves at once, persists across restarts and upgrades, and neither saves nor discards other pending changes. An unavailable host form shows an explicit state and cannot be edited. Version 0.4.3 supplies live-field metadata and the shared reference protocol for mixed-version validators, and confirms saved values against the host response.
 
-DSH checks npm’s `latest` automatically at startup and repeats an old or failed check when settings open. A newer npm release shows Update left of GitHub and a navigation dot. Clicking it rechecks the npm and market targets before the market installs and verifies the package. The page shows progress and any activation step. On DSH Desktop, restart by quitting from the tray and reopening. A market release-age hold can offer Update anyway; a version mismatch between npm and the market offers a retry. Without a market or for a local install, Update opens the upgrade instructions.
+DSH checks npm’s `latest` automatically at startup and repeats an old or failed check when settings open. One button sits left of GitHub: Check for updates while the installed version is current, which checks again past the market cache and briefly shows Up to date or Could not check for updates; Update when a newer npm release exists. The navigation shows no badge. Clicking Update rechecks the npm and market targets before the market installs and verifies the package. While the market’s mirror has not picked up the release, the page checks again every 15 seconds for up to 10 minutes and says it is waiting; a release still inside the market’s waiting period is sent once more with force, after the market has checked host compatibility. The page shows progress and any activation step. On DSH Desktop, restart by quitting from the tray and reopening. Without a market or for a local install, Update opens the upgrade instructions.
 
 Report a problem exports one TXT at a time. If writing to Windows Downloads fails, Save As lets you choose another location. After saving, the plugin selects the file in File Explorer and asks the default browser to open GitHub’s new-issue page. The dialog shows the file name, full path and whether the issue page opened. The TXT contains environment details, relevant settings, a self-test, the last 30 tool calls and up to 200 plugin log lines. Tool input text is kept as its length. Log entries that cannot be reliably redacted are omitted. You can attach screenshots separately.
 

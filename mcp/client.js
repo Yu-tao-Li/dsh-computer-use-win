@@ -5,7 +5,7 @@ window.__ModuleLoader__.load({
   factory: (require) => {
     const React = require('react'), h = React.createElement;
     const NS = 'windowsComputerUse.settings';
-    const PLUGIN_VERSION = '0.6.2';
+    const PLUGIN_VERSION = '0.6.3';
     const allToolNames = [
   "health",
   "snapshot",
@@ -566,6 +566,11 @@ window.__ModuleLoader__.load({
     "shortcutConflict": "锁定快捷键不能与停止快捷键相同。",
     "invalidOverlay": "请填写有效范围内的浮窗数值与快捷键（Esc 不可用作锁定键）。",
     "updateAvailable": "有新版本 v{version}",
+    "updateCheck": "检查更新",
+    "updateChecking": "检查中…",
+    "updateLatest": "已是最新版本",
+    "updateCheckFailed": "暂时无法检查更新",
+    "updateCurrent": "当前版本 v{version}",
     "updateNow": "更新",
     "updateHow": "怎么更新",
     "updateHelpUrl": "https://github.com/Yu-tao-Li/dsh-computer-use-win#12-%E5%8D%87%E7%BA%A7",
@@ -579,10 +584,9 @@ window.__ModuleLoader__.load({
     "updateRetry": "重试",
     "updateUnconfirmed": "更新状态待确认",
     "updateRecheck": "确认版本",
-    "updateMarketWaiting": "插件市场的版本与 npm 不一致，请稍后重试。",
+    "updateSyncing": "新版本刚发布，正在等插件市场同步，通常几分钟。",
+    "updateMarketWaiting": "插件市场还没同步到新版本，请稍后重试。",
     "updateNpmUnavailable": "暂时无法确认 npm 上的最新版本，请重试。",
-    "updateForce": "仍要更新",
-    "updateTooFresh": "新版本刚发布，插件市场暂时没有装上它；可以点“仍要更新”。",
     "updateMismatch": "装上的不是新版本，请稍后再试。",
     "updateFailedHint": "可以稍后重试，或者按“怎么更新”里的命令手动更新。",
     "updateRefresh": "刷新页面",
@@ -863,6 +867,11 @@ window.__ModuleLoader__.load({
     "shortcutConflict": "Lock shortcut cannot match the stop shortcut.",
     "invalidOverlay": "Enter valid overlay numbers and a supported lock shortcut (Esc is reserved).",
     "updateAvailable": "New version v{version}",
+    "updateCheck": "Check for updates",
+    "updateChecking": "Checking…",
+    "updateLatest": "Up to date",
+    "updateCheckFailed": "Could not check for updates",
+    "updateCurrent": "Current version v{version}",
     "updateNow": "Update",
     "updateHow": "How to update",
     "updateHelpUrl": "https://github.com/Yu-tao-Li/dsh-computer-use-win/blob/main/README.en.md#12-upgrade",
@@ -876,10 +885,9 @@ window.__ModuleLoader__.load({
     "updateRetry": "Retry",
     "updateUnconfirmed": "Update status unknown",
     "updateRecheck": "Confirm version",
-    "updateMarketWaiting": "The plugin market and npm list different versions. Try again later.",
+    "updateSyncing": "The new version was just released. Waiting for the plugin market to pick it up, usually a few minutes.",
+    "updateMarketWaiting": "The plugin market has not picked up the new version yet. Try again later.",
     "updateNpmUnavailable": "The latest version on npm could not be confirmed. Try again.",
-    "updateForce": "Update anyway",
-    "updateTooFresh": "The new version is very recent, so the plugin market did not install it yet; choose Update anyway.",
     "updateMismatch": "The installed version is not the new one; try again later.",
     "updateFailedHint": "Try again later, or update by hand with the command under How to update.",
     "updateRefresh": "Reload page",
@@ -1245,7 +1253,10 @@ window.__ModuleLoader__.load({
     // older hosts get the upgrade instructions.
     const UPDATE_PACKAGE='dsh-computer-use-win';
     const UPDATE_SCHEMA='dsh-market/update-api/v1';
-    const UPDATE_FORCE_CODES=['RELEASE_TOO_FRESH','VERSION_UNCHANGED'];
+    // The market holds a release younger than its waiting period. The click
+    // asked for the update, so it is sent once more with force; the market
+    // checks host compatibility before it gets this far.
+    const UPDATE_HOLD_CODES=['RELEASE_TOO_FRESH','VERSION_UNCHANGED'];
     const UPDATE_TERMINAL=['succeeded','failed','cancelled','rolled-back'];
     const versionParts=value=>{const m=/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(value??'').trim());return m?{core:[+m[1],+m[2],+m[3]],pre:m[4]?m[4].split('.'):[]}:null;};
     // Semantic-version order; NaN when either side is not a version.
@@ -1265,7 +1276,6 @@ window.__ModuleLoader__.load({
     const updateStore={state:{phase:'idle'},listeners:new Set(),
       set(patch){this.state={...this.state,...patch};for(const listener of [...this.listeners])listener();},
       subscribe(listener){this.listeners.add(listener);return ()=>this.listeners.delete(listener);}};
-    const updateBadge=()=>updateStore.state.phase==='available';
     async function requestJson(url,{method='GET',body,timeoutMs=10000,headers={}}={}){
       const controller=typeof AbortController==='function'?new AbortController():undefined;
       const timer=controller&&setTimeout(()=>controller.abort(),timeoutMs);
@@ -1303,10 +1313,11 @@ window.__ModuleLoader__.load({
       const source=found?.source==='npm'?'market':'help';
       // A newer version already on disk is an update waiting for a restart.
       const phase=compareVersions(installed,PLUGIN_VERSION)>0?'updated':compareVersions(latest,installed)>0?'available':latest?'latest':'unknown';
-      updateStore.set({phase,source,installed,latest,failure:null,checkedAt:Date.now(),restartRequired:phase==='updated',refreshRequired:false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
+      updateStore.set({phase,source,installed,latest,failure:null,syncing:false,checkedAt:Date.now(),restartRequired:phase==='updated',refreshRequired:false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
     }
     // Checks run on their own: once per DSH start, and again when the settings
-    // page opens on a result that is old or missing. Nothing to click.
+    // page opens on a result that is old or missing. "Check for updates" asks
+    // the market to skip its cache.
     function checkUpdate({fresh=false}={}){
       if(updateStore.state.phase==='updating')return Promise.resolve();
       if(updateChecking)return updateChecking;
@@ -1317,32 +1328,52 @@ window.__ModuleLoader__.load({
       })().finally(()=>{updateChecking=undefined;updateStore.set({checking:false});});
       return updateChecking;
     }
-    function failUpdate(failure){updateStore.set({phase:'failed',percent:null,failure:{code:String(failure?.code||'UPDATE_FAILED'),message:String(failure?.message||'').slice(0,300),retryable:failure?.retryable!==false}});}
-    async function startUpdate({force=false}={}){
+    function failUpdate(failure){updateStore.set({phase:'failed',percent:null,syncing:false,failure:{code:String(failure?.code||'UPDATE_FAILED'),message:String(failure?.message||'').slice(0,300),retryable:failure?.retryable!==false}});}
+    // One market operation: the request, then its progress until it ends.
+    async function runUpdateOperation(market,force){
+      const {status,data}=await requestJson(market.endpoints.updates,{method:'POST',body:{packageName:UPDATE_PACKAGE,...(force?{force:true}:{})},timeoutMs:30000});
+      let operation=data?.operation;
+      if(status!==202||!operation?.operationId)return {failure:data?.failure??{code:status===409?'OPERATION_BUSY':'UPDATE_FAILED',message:data?.error||('HTTP '+status),retryable:status===409}};
+      const id=operation.operationId,deadline=Date.now()+15*60000;
+      while(!UPDATE_TERMINAL.includes(operation.state)){
+        if(Date.now()>deadline)return {failure:{code:'UPDATE_STATUS_UNKNOWN'}};
+        await new Promise(resolve=>setTimeout(resolve,1000));
+        const polled=await requestJson(market.endpoints.operations+'?operationId='+encodeURIComponent(id),{timeoutMs:15000}).catch(()=>null);
+        if(polled?.status===404)return {failure:{code:'UPDATE_STATUS_UNKNOWN'}};
+        if(polled?.data?.operation?.operationId===id)operation=polled.data.operation;
+        const percent=operation.progress?.percent;
+        updateStore.set({percent:Number.isFinite(percent)?Math.max(0,Math.min(100,Math.round(percent))):null});
+      }
+      if(operation.state!=='succeeded')return {failure:operation.failure??{code:operation.state==='cancelled'?'UPDATE_CANCELLED':'UPDATE_FAILED'}};
+      return {operation};
+    }
+    // The market installs from its own registry, a mirror in some regions, which
+    // can trail npm by a few minutes after a release. A click waits for it
+    // (up to 40 checks, 15 s apart) rather than failing.
+    const UPDATE_SYNC_CHECKS=40;
+    const updateSyncMs=()=>Number.isFinite(globalThis.__wcuUpdateSyncMs)?globalThis.__wcuUpdateSyncMs:15000;
+    async function startUpdate(){
       const state=updateStore.state,market=updateMarket;
       if(!market||state.source!=='market'||state.checking||!['available','failed'].includes(state.phase))return;
-      updateStore.set({phase:'updating',percent:null,failure:null});
+      updateStore.set({phase:'updating',percent:null,failure:null,syncing:false});
       try{
         const [checked,target]=await Promise.all([marketPackage(market),latestNpmVersion()]);
         if(!target)return failUpdate({code:'NPM_CHECK_FAILED'});
-        if(checked?.source==='linked'||(checked&&compareVersions(checked.installedVersion,target)>=0))return settleUpdateCheck({found:checked,latest:target});
-        const found=compareVersions(checked?.latestVersion,target)===0?checked:await marketPackage(market,{fresh:true});
-        if(found?.source==='linked'||(found&&compareVersions(found.installedVersion,target)>=0))return settleUpdateCheck({found,latest:target});
-        if(found?.source!=='npm'||compareVersions(found.latestVersion,target)!==0)return failUpdate({code:'MARKET_NOT_SYNCED'});
-        const {status,data}=await requestJson(market.endpoints.updates,{method:'POST',body:{packageName:UPDATE_PACKAGE,...(force?{force:true}:{})},timeoutMs:30000});
-        let operation=data?.operation;
-        if(status!==202||!operation?.operationId)return failUpdate(data?.failure??{code:status===409?'OPERATION_BUSY':'UPDATE_FAILED',message:data?.error||('HTTP '+status),retryable:status===409});
-        const id=operation.operationId,deadline=Date.now()+15*60000;
-        while(!UPDATE_TERMINAL.includes(operation.state)){
-          if(Date.now()>deadline)return failUpdate({code:'UPDATE_STATUS_UNKNOWN'});
-          await new Promise(resolve=>setTimeout(resolve,1000));
-          const polled=await requestJson(market.endpoints.operations+'?operationId='+encodeURIComponent(id),{timeoutMs:15000}).catch(()=>null);
-          if(polled?.status===404)return failUpdate({code:'UPDATE_STATUS_UNKNOWN'});
-          if(polled?.data?.operation?.operationId===id)operation=polled.data.operation;
-          const percent=operation.progress?.percent;
-          updateStore.set({percent:Number.isFinite(percent)?Math.max(0,Math.min(100,Math.round(percent))):null});
+        let found=checked;
+        for(let checks=0;;checks++){
+          if(found?.source==='linked'||(found&&compareVersions(found.installedVersion,target)>=0))return settleUpdateCheck({found,latest:target});
+          if(found?.source==='npm'&&compareVersions(found.latestVersion,target)===0)break;
+          if(checks>0&&!found)return failUpdate({code:'UPDATE_FAILED'});
+          // Another source, or a market ahead of npm, does not change by waiting.
+          if((found&&(found.source!=='npm'||compareVersions(found.latestVersion,target)>0))||checks>=UPDATE_SYNC_CHECKS)return failUpdate({code:'MARKET_NOT_SYNCED'});
+          if(checks>0){updateStore.set({syncing:true});await new Promise(resolve=>setTimeout(resolve,updateSyncMs()));}
+          found=await marketPackage(market,{fresh:true});
         }
-        if(operation.state!=='succeeded')return failUpdate(operation.failure??{code:operation.state==='cancelled'?'UPDATE_CANCELLED':'UPDATE_FAILED'});
+        updateStore.set({syncing:false});
+        let result=await runUpdateOperation(market,false);
+        if(UPDATE_HOLD_CODES.includes(result.failure?.code))result=await runUpdateOperation(market,true);
+        if(result.failure)return failUpdate(result.failure);
+        const {operation}=result;
         // The API asks each client to compare the installed version with the
         // version it offered before it reports success or offers a restart.
         if(!(compareVersions(operation.installedVersion,target)>=0&&compareVersions(operation.installedVersion,found.installedVersion)>0)
@@ -1361,16 +1392,33 @@ window.__ModuleLoader__.load({
     }
     const fill=(text,values)=>String(text).replace(/\{(\w+)\}/g,(_,key)=>values[key]??'');
     const UPDATE_STALE_MS=6*60*60*1000;
-    // Left of the GitHub link, and only when there is something to say: one
-    // transparent "Update" button when a newer version can be installed, a
-    // word or two while it runs and after it. Versions sit in the tooltips.
+    const updateResultMs=()=>Number.isFinite(globalThis.__wcuUpdateResultMs)?globalThis.__wcuUpdateResultMs:4000;
+    // Left of the GitHub link, one transparent button: "Check for updates", or
+    // "Update" when a newer version can be installed; a word or two while
+    // either runs and after it. Versions sit in the tooltips.
     function UpdateInline({t}){
       const state=React.useSyncExternalStore(listener=>updateStore.subscribe(listener),()=>updateStore.state);
+      // What a check the user asked for found, shown for a moment before the
+      // button returns; null when nothing was asked.
+      const [asked,setAsked]=React.useState(null),resultTimer=React.useRef();
       // DSH can stay open for days: an old or failed check is repeated when
       // the page opens.
-      React.useEffect(()=>{const current=updateStore.state;if(current.phase==='unknown'||(['latest','available'].includes(current.phase)&&Date.now()-(current.checkedAt??0)>UPDATE_STALE_MS))void checkUpdate();},[]);
+      React.useEffect(()=>{const current=updateStore.state;if(current.phase==='unknown'||(['latest','available'].includes(current.phase)&&Date.now()-(current.checkedAt??0)>UPDATE_STALE_MS))void checkUpdate();return ()=>clearTimeout(resultTimer.current);},[]);
+      const checkNow=async()=>{
+        clearTimeout(resultTimer.current);setAsked('checking');
+        // A check already running may have read the market's cache: ask again.
+        try{await updateChecking;await checkUpdate({fresh:true});}catch{}
+        const phase=updateStore.state.phase;
+        if(phase!=='latest'&&phase!=='unknown'){setAsked(null);return;}
+        setAsked(phase);resultTimer.current=setTimeout(()=>setAsked(null),updateResultMs());
+      };
       const small=(text,props)=>h('button',{type:'button',className:'wcu-small',...props},text);
       const wrap=(tone,...children)=>h('span',{className:'wcu-update','data-wincu-update':state.phase,'data-tone':tone||undefined},...children);
+      if(['idle','latest','unknown'].includes(state.phase)){
+        if(asked==='checking')return wrap('',h('span',{className:'wcu-spinner','aria-hidden':true}),h('span',{role:'status'},t('updateChecking')));
+        if(asked)return wrap('',h('span',{role:'status','data-wincu-update-result':asked},t(asked==='latest'?'updateLatest':'updateCheckFailed')));
+        return wrap('',small(t('updateCheck'),{'data-wincu-update-check':true,title:fill(t('updateCurrent'),{version:PLUGIN_VERSION}),onClick:()=>{void checkNow();}}));
+      }
       if(state.phase==='available')return wrap('',state.source==='market'
         ?small(t('updateNow'),{'data-wincu-update-now':true,disabled:state.checking,title:fill(t('updateAvailable'),{version:state.latest}),onClick:()=>{void startUpdate();}})
         :h('a',{className:'wcu-update-link',href:t('updateHelpUrl'),target:'_blank',rel:'noopener noreferrer',title:fill(t('updateAvailable'),{version:state.latest})+' · '+t('updateHow'),'data-wincu-update-help':true},t('updateNow')));
@@ -1383,8 +1431,7 @@ window.__ModuleLoader__.load({
       if(state.phase==='failed'){
         const code=state.failure?.code;
         return wrap('error',h('span',null,t(code==='OPERATION_BUSY'?'updateBusy':code==='UPDATE_STATUS_UNKNOWN'?'updateUnconfirmed':'updateFailed')),
-          UPDATE_FORCE_CODES.includes(code)?small(t('updateForce'),{'data-wincu-update-force':true,onClick:()=>{void startUpdate({force:true});}})
-          :code==='UPDATE_STATUS_UNKNOWN'?small(t('updateRecheck'),{'data-wincu-update-recheck':true,disabled:state.checking,onClick:()=>{void checkUpdate({fresh:true});}})
+          code==='UPDATE_STATUS_UNKNOWN'?small(t('updateRecheck'),{'data-wincu-update-recheck':true,disabled:state.checking,onClick:()=>{void checkUpdate({fresh:true});}})
           :state.failure?.retryable&&updateMarket&&state.source==='market'?small(t('updateRetry'),{'data-wincu-update-retry':true,onClick:()=>{void startUpdate();}}):null);
       }
       return null;
@@ -1450,9 +1497,12 @@ window.__ModuleLoader__.load({
     // user (a restart the market does not run) or did not finish.
     function UpdateNote({t}){
       const state=React.useSyncExternalStore(listener=>updateStore.subscribe(listener),()=>updateStore.state);
+      // A wait for the market to pick up a fresh release says why it takes longer.
+      if(state.phase==='updating'&&state.syncing)return h('p',{className:'wcu-update-note','data-wincu-update-note':'syncing'},t('updateSyncing'));
       if(state.phase==='updated'&&state.restartRequired&&!state.restartSupported)return h('p',{className:'wcu-update-note','data-wincu-update-note':'restart'},t(state.runtime==='web'?'updateRestartWeb':'updateRestartDesktop'));
-      if(state.phase==='failed'&&!['OPERATION_BUSY','UPDATE_STATUS_UNKNOWN'].includes(state.failure?.code))return h('p',{className:'wcu-update-note','data-tone':'error','data-wincu-update-note':'failed'},
-        t(UPDATE_FORCE_CODES.includes(state.failure.code)?'updateTooFresh':state.failure.code==='RESOLVED_VERSION_MISMATCH'?'updateMismatch':state.failure.code==='MARKET_NOT_SYNCED'?'updateMarketWaiting':state.failure.code==='NPM_CHECK_FAILED'?'updateNpmUnavailable':'updateFailedHint')+(state.failure.message?' ('+state.failure.message.slice(0,160)+') ':' '),
+      // One plain sentence; the market's own message is in the tooltip.
+      if(state.phase==='failed'&&!['OPERATION_BUSY','UPDATE_STATUS_UNKNOWN'].includes(state.failure?.code))return h('p',{className:'wcu-update-note','data-tone':'error','data-wincu-update-note':'failed',title:state.failure.message||undefined},
+        t(state.failure.code==='RESOLVED_VERSION_MISMATCH'?'updateMismatch':state.failure.code==='MARKET_NOT_SYNCED'?'updateMarketWaiting':state.failure.code==='NPM_CHECK_FAILED'?'updateNpmUnavailable':'updateFailedHint')+' ',
         h('a',{href:t('updateHelpUrl'),target:'_blank',rel:'noopener noreferrer'},t('updateHow')));
       return null;
     }
@@ -1802,18 +1852,17 @@ window.__ModuleLoader__.load({
     function watchNavIcon(names){
       if(typeof document==='undefined'||typeof MutationObserver!=='function')return ()=>{};
       const style=document.createElement('style');
-      style.textContent=`[data-wincu-nav]>svg:first-child{display:none}[data-wincu-nav]::before{content:'';flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:${navMouse} center/16px no-repeat;mask:${navMouse} center/16px no-repeat}[data-wincu-nav][data-wincu-update]::after{content:'';flex:none;width:7px;height:7px;margin-left:auto;border-radius:50%;background:var(--dsw-alias-state-error-primary,#e5484d)}`;
+      style.textContent=`[data-wincu-nav]>svg:first-child{display:none}[data-wincu-nav]::before{content:'';flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:${navMouse} center/16px no-repeat;mask:${navMouse} center/16px no-repeat}`;
       document.head.append(style);
-      const mark=root=>{for(const button of root.querySelectorAll('button[class*="navCell"]')){const mine=button.firstElementChild?.localName==='svg'&&names.includes(button.lastElementChild?.textContent);if(mine!==button.hasAttribute('data-wincu-nav'))button.toggleAttribute('data-wincu-nav',mine);if(button.hasAttribute('data-wincu-update')!==(mine&&updateBadge()))button.toggleAttribute('data-wincu-update',mine&&updateBadge());}};
-      // An update waiting to be installed shows a dot on this section's nav button.
-      const unsubscribe=updateStore.subscribe(()=>{for(const button of document.querySelectorAll('[data-wincu-nav]'))button.toggleAttribute('data-wincu-update',updateBadge());});
+      // The nav button carries the icon only: an update is offered on the page.
+      const mark=root=>{for(const button of root.querySelectorAll('button[class*="navCell"]')){const mine=button.firstElementChild?.localName==='svg'&&names.includes(button.lastElementChild?.textContent);if(mine!==button.hasAttribute('data-wincu-nav'))button.toggleAttribute('data-wincu-nav',mine);}};
       const layers=new Map();
       // Only layers that arrive with a settings nav are observed, so chat updates cost nothing.
       const watch=node=>{if(node.nodeType!==1||layers.has(node)||!node.querySelector('button[class*="navCell"]'))return;const observer=new MutationObserver(()=>mark(node));observer.observe(node,{childList:true,subtree:true,characterData:true});layers.set(node,observer);mark(node);};
       const top=new MutationObserver(records=>{for(const record of records){record.addedNodes.forEach(watch);record.removedNodes.forEach(node=>{layers.get(node)?.disconnect();layers.delete(node);});}});
       top.observe(document.body,{childList:true});
       for(const node of document.body.children)watch(node);
-      return ()=>{unsubscribe();top.disconnect();for(const observer of layers.values())observer.disconnect();layers.clear();style.remove();for(const button of document.querySelectorAll('[data-wincu-nav]')){button.removeAttribute('data-wincu-nav');button.removeAttribute('data-wincu-update');}};
+      return ()=>{top.disconnect();for(const observer of layers.values())observer.disconnect();layers.clear();style.remove();for(const button of document.querySelectorAll('[data-wincu-nav]'))button.removeAttribute('data-wincu-nav');};
     }
     function apply(ctx) {
       ctx.effect(()=>ctx.locale.register(NS,dictionaries));
@@ -1823,7 +1872,7 @@ window.__ModuleLoader__.load({
       ctx.effect(()=>{
         const delay=Number.isFinite(globalThis.__wcuUpdateDelayMs)?globalThis.__wcuUpdateDelayMs:8000;
         // Tests set the delay; they also get a way back to a fresh, unchecked state.
-        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restarting:false,restartRequired:false,refreshRequired:false});}};
+        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,syncing:false,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restarting:false,restartRequired:false,refreshRequired:false});}};
         if(updateStarted||delay<0||typeof setTimeout!=='function'||typeof fetch!=='function')return ()=>{};
         updateStarted=true;
         const timer=setTimeout(()=>{void checkUpdate();},delay);

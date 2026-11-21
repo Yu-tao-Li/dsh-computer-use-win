@@ -245,11 +245,26 @@ try {
   assert.equal(fiber.uid,originalFiber,'Tool changes keep the adapter owner while refreshing its bridge');
   await settings.update(entry.options.id,{resumeToken:1,previewToken:1});
   await until(async()=>JSON.parse(await readFile(liveFile,'utf8')).resumeToken===1);
+  // A desktop that cannot start, here a VM no host has, is logged and retried,
+  // and nothing rejects outside the adapter: cordis 4.0 drops the restart
+  // promise of Fiber.update(), and DSH's fail-loud handler quits the host on an
+  // unhandled rejection.
+  const rejected=[],onRejection=error=>rejected.push(String(error?.message??error));
+  process.on('unhandledRejection',onRejection);
+  try{
+    const before=logged.length;
+    await settings.update(entry.options.id,{desktopTarget:'hyperv',hypervVm:'wcu-unreachable-vm'});
+    await until(()=>logged.slice(before).some(text=>/WCU_HYPERV_/.test(text)));
+    await new Promise(resolve=>setTimeout(resolve,1500));
+    await settings.update(entry.options.id,{desktopTarget:'current',hypervVm:''});
+    await until(()=>tools.schemas().length===26);
+  }finally{process.off('unhandledRejection',onRejection);}
+  assert.deepEqual(rejected,[],'A desktop that cannot start rejects nothing outside the adapter');
   const settingsMatrix=process.env.WCU_TEST_ALL_SETTINGS==='1'
     ?await (await import('./settings-matrix.mjs')).runSettingsMatrix({settings,namespace:entry.options.id,liveFile,documentPath:editor.documentPath,until,root}):undefined;
   const report={passed:true,hostVersion:require('@deepseek-ai/dsh/package.json').version,bridgeVersion:require('@deepseek-ai/dsh-mcp-client/package.json').version,
     namespace:entry.options.id,settingsMatrix,volatileSettings:true,liveDisplayConfig:true,toolSelectionReload:[26,2,0,26],presetReload:[1,12,26,1,26,1,26,1,1,26],lazyPresetPersistence:true,lazyWorkerRestart:true,lazyDynamicRegistry:[1,3,26,1,2,1],customSelectionPreserved:true,allToolsDefault:true,toolSelectionPersistence:true,invalidToolRejected:true,
-    remoteVisibilityPersistence:true,remoteVisibilityLiveConfig:true,previewAndResumeSignals:true,cursorIndicatorPersistence:true,cursorIndicatorLiveConfig:true,shortcutPersistence:true,shortcutValidation:true,shortcutClear:true,lockedConfigWriteRetried:true,existingUserProfilesModified:false,physicalInputSent:false,profileFixture:root};
+    remoteVisibilityPersistence:true,remoteVisibilityLiveConfig:true,previewAndResumeSignals:true,cursorIndicatorPersistence:true,cursorIndicatorLiveConfig:true,shortcutPersistence:true,shortcutValidation:true,shortcutClear:true,lockedConfigWriteRetried:true,unreachableDesktopContained:true,existingUserProfilesModified:false,physicalInputSent:false,profileFixture:root};
   await writeFile(path.join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 } finally {await ctx.fiber.dispose();process.env.TEMP=previousTemp;process.env.TMP=previousTmp;}
 // #71: each adapter removes its control directory once its server has exited.

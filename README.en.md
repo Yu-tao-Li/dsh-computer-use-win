@@ -42,7 +42,7 @@ You need a Windows computer with DSH Desktop installed. The plugin uses Windows 
 
 #### 1.2 Upgrade
 
-DSH checks npm’s `latest` at every start. When it finds a newer version, Update appears to the left of GitHub at the top of **Settings → Computer Use** and a dot appears in the navigation. Click Update to let the DSH plugin market verify the target and install it. If the page asks you to restart, quit from the tray and reopen DSH Desktop as in step 2.
+DSH checks npm’s `latest` at every start. A button sits to the left of GitHub at the top of **Settings → Computer Use**: Check for updates checks again at once, and it turns into Update when a newer version exists. Click Update to let the DSH plugin market install it and show progress; right after a release, the page waits until the market has picked up the new version. If the page asks you to restart, quit from the tray and reopen DSH Desktop as in step 2.
 
 You can also run the same install command, then fully quit and reopen DSH Desktop the same way. Without the plugin market, or when the plugin was installed from a local file, Update opens these upgrade steps.
 
@@ -195,7 +195,7 @@ Change these in **Settings → Computer Use**. Most take effect after you click 
 
 | Setting | Your choices |
 |---|---|
-| Update | Appears left of the GitHub link at the top right when a newer version exists, and installs it only when clicked; hidden otherwise; see 1.2 |
+| Update | The button left of the GitHub link at the top right: Check for updates, or Update when a newer version exists, which installs it only when clicked; see 1.2 |
 | Report a problem | Saves a TXT to Downloads and opens GitHub’s new-issue page; see 8.4 |
 | Tool loading | **All** (26 tools, the default); **Lite** (12 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
 | Run computer use on | **Current desktop** (the default); **Local background desktop**: a second desktop in your current Windows session that keeps your account, files and installed apps and leaves your mouse and keyboard alone, for reading controls, filling in forms and capturing windows; clicks at screen positions, drags, system shortcuts and full-screen screenshots need the current desktop; **Separate desktop (Hyper-V)**: works inside a Windows VM with Node.js 22 or later. See [settings and stopping](docs/computer-use-settings.md) |
@@ -396,7 +396,7 @@ MIT licensed. Derived from [cgissing/windows-computer-use](https://github.com/cg
 
 #### 1.2 升级
 
-DSH 每次启动时会按 npm 的 `latest` 自动检查。有新版时，**设置 → 电脑操控** 标题右侧 GitHub 左边会出现“更新”，左侧“电脑操控”旁有小红点。点“更新”后，DSH 插件市场核对目标、安装并显示进度。页面提示需要重启时，按第 2 步从托盘完全退出，再重新打开 DSH Desktop。
+DSH 每次启动时会按 npm 的 `latest` 自动检查。**设置 → 电脑操控** 标题右侧 GitHub 左边有一个按钮：没有新版时是“检查更新”，点一下马上再查；有新版时变成“更新”。点“更新”后，DSH 插件市场安装新版本并显示进度；新版本刚发布、插件市场还没同步时，页面会等它同步好再装。页面提示需要重启时，按第 2 步从托盘完全退出，再重新打开 DSH Desktop。
 
 也可以运行同一条安装命令，然后同样完全退出、再重新打开 DSH Desktop。没有插件市场，或者插件是从本地文件装的时，“更新”会打开这段升级说明。
 
@@ -549,7 +549,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 
 | 设置 | 可以怎么选 |
 |---|---|
-| 更新 | 有新版本时，标题右侧 GitHub 左边出现“更新”，点了才安装；平时不显示，见 1.2 |
+| 更新 | 标题右侧 GitHub 左边的按钮：平时是“检查更新”，有新版本时变成“更新”，点了才安装，见 1.2 |
 | 反馈问题 | 保存诊断 TXT 到下载文件夹并打开 GitHub 新建问题页面，见 8.4 |
 | 工具加载 | **全部**（26 个，默认）；**精简**（12 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
 | 电脑操控的运行位置 | **当前桌面**（默认）；**本机后台桌面**：在当前 Windows 会话里另开一个后台桌面，沿用本机账号、文件和已安装的软件，不动你的鼠标键盘，适合读控件、填表和截取窗口；按坐标点击、拖拽、系统快捷键和整屏截图要切回当前桌面；**独立桌面（Hyper-V）**：在一台装了 Node.js 22 或更新版本的 Windows 虚拟机里操作。见[设置与停止](docs/computer-use-settings.md) |

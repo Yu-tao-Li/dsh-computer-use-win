@@ -289,6 +289,25 @@ export async function apply(ctx, config) {
     if (backgroundOwner !== owner) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the desktop owner exited during startup.');
     return bridgeConfig({ ...settings, failOnStartupError:true }, { ...runtime, backgroundName:owner.name });
   }
+  // A settings change starts a new bridge rather than updating the running one.
+  // cordis 4.0 (DSH Desktop 2.0) drops the promise of the restart that
+  // Fiber.update() begins, so a desktop that cannot start, such as a VM whose
+  // connection is not configured yet, rejected it unhandled, and DSH's
+  // fail-loud handler then quit the host. Awaiting the new bridge keeps the
+  // failure on this path, where it is logged and retried.
+  async function replaceBridge(options) {
+    const previous = connection;
+    connection = undefined;
+    if (previous) {
+      try { await previous.dispose(); } catch (error) { logError(error); }
+      // Unloading finishes after dispose() returns, and the bridge's server
+      // name is free only then.
+      try { await previous.await(); } catch {}
+    }
+    if (stopped) return;
+    connection = ctx.plugin(bridge, options);
+    await connection;
+  }
   let saveOverlayPatch, settingsSource = 'entry', namespaceScope, layoutId, layoutStatKey = '', layoutSaving = false, layoutRetry = { id: undefined, at: 0, delay: 0 };
   let selectionPending=0,selectionRetry={at:0,delay:0};
   atomicJson(runtime.configFile, desired);
@@ -336,8 +355,7 @@ export async function apply(ctx, config) {
       const nextBridge = await prepareBridge(nextConfig);
       if (stopped) return;
       runningSelection = runningDesktop = undefined;
-      await connection.update(nextBridge, true);
-      await connection.await();
+      await replaceBridge(nextBridge);
       if (latest.desktopTarget === 'background' && !backgroundOwner) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the desktop owner exited during reconnect.');
       runningSelection = latestSelection; runningDesktop = desktopRoute(latest);selectionRetry={at:0,delay:0};
       if (latest.desktopTarget !== 'background' && desired.desktopTarget !== 'background') await closeBackground();

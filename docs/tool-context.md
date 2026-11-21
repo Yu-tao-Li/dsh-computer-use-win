@@ -10,11 +10,11 @@ Choose Lite / All / Lazy / Custom in the outer preset selector; All is the defau
 
 `toolPreset: "lazy"` permits all 26 tools but starts with management only. Enable the tools needed for a task using a name array, or use `names: ["*"]` with enable/disable for all allowed desktop tools. Management stays loaded. The wildcard must stand alone and is rejected for list/describe/reset. Lite and Custom restrictions still apply. Reset and reconnect return Lazy to its single management entry.
 
-收益来自尚未加载的工具定义；加载后的定义仍占上下文，已有对话记录不会删除。桌面任务需要额外的加载调用。0.6.2 同口径列表为：全部 27,350、精简 13,305、懒启动 703 字符（较全部减少 97.4%；初始化说明 3,353 字符），并非 token 数。
+收益来自尚未加载的工具定义；加载后的定义仍占上下文，已有对话记录不会删除。桌面任务需要额外的加载调用。0.6.3 同口径列表为：全部 27,350、精简 13,305、懒启动 703 字符（较全部减少 97.4%；初始化说明 3,353 字符），并非 token 数。
 
 启动集合只剩管理入口、且至少允许一项桌面工具时（懒启动即属此类），服务器在 MCP `initialize` 返回 `instructions`，说明这台电脑能读取与操作真实 Windows 应用，并提示先 `enable` 再用。原因是这一状态下没有任何桌面工具名可供模型推断能力；`instructions` 会被支持它的客户端作为该服务的说明注入模型上下文，DSH 即把它发布成 `mcp:<serverName>` 系统提示词段落。其他启动集合不返回该字段：能力仍由工具名与其说明表达；若自定义清单不允许任何桌面工具，启用会被拒绝，此时不声明该能力。
 
-Savings apply to definitions not yet loaded. Loaded definitions and conversation history still use context, and desktop tasks need a loading call. Current 0.6.2 definitions are measured by `node test/measure-tool-context.mjs --write` (All: 27,350, Lite: 13,305, Lazy: 703 chars — 97.4% smaller; Lazy initialization `instructions`: 3,353 chars); see [tool-context-sizes.json](tool-context-sizes.json) for versioned sizes. These are serialized character counts, not token counts.
+Savings apply to definitions not yet loaded. Loaded definitions and conversation history still use context, and desktop tasks need a loading call. Current 0.6.3 definitions are measured by `node test/measure-tool-context.mjs --write` (All: 27,350, Lite: 13,305, Lazy: 703 chars — 97.4% smaller; Lazy initialization `instructions`: 3,353 chars); see [tool-context-sizes.json](tool-context-sizes.json) for versioned sizes. These are serialized character counts, not token counts.
 
 When the startup set is the management entry alone and at least one desktop tool is allowed — which is what Lazy startup does — the server returns MCP `initialize` `instructions` stating that this machine's Windows applications can be read and operated, and that tools must be enabled first. In that state no desktop tool name remains for a model to infer capability from. Clients that surface server instructions add them as text attributed to this server; DSH publishes them as the `mcp:<serverName>` system-prompt section. Other startup sets omit the field: the tool names and their descriptions already carry the capability, and a Custom checklist that allows no desktop tool is excluded because enabling one is refused.
 

@@ -141,16 +141,16 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 ### 每次发版
 
 1. 改 `package.json` 版本和 `CHANGELOG.md`，经 PR 合入 `main`，等 CI 通过。
-2. 给 `main` 打标签并推送（以 0.6.2 为例）。推送标签就会发布：
+2. 给 `main` 打标签并推送（以 0.6.3 为例）。推送标签就会发布：
 
    ```powershell
    git fetch origin main
-   git tag v0.6.2 origin/main
-   git push origin v0.6.2
+   git tag v0.6.3 origin/main
+   git push origin v0.6.3
    ```
 
 3. 在 Actions 的 Release 运行里确认成功。运行先跑完整 CI，大约 15–35 分钟，之后才上传。npm 会先扫描新版本，通常几分钟，有时十几分钟，之后 `npm view dsh-computer-use-win version` 才显示新版本。
-4. 创建 GitHub Release，附件用 npm 上的同一个包：`npm pack dsh-computer-use-win@0.6.2` 会下载 `dsh-computer-use-win-0.6.2.tgz`。
+4. 创建 GitHub Release，附件用 npm 上的同一个包：`npm pack dsh-computer-use-win@0.6.3` 会下载 `dsh-computer-use-win-0.6.3.tgz`。
 
 发布失败时（例如 npmjs.com 还没配好），修好后在 Actions 里重跑失败的任务，不要在本机再发布同一版本。只有 `v1.2.3` 这种正式版本标签会触发发布，`v1.2.3-rc.1` 之类的预发布标签不会。
 
