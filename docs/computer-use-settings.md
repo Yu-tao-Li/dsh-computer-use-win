@@ -1,6 +1,6 @@
 # 电脑操控设置 / Computer Use settings
 
-> 当前插件版本 `0.6.1`：设置标题显示包版本，悬停说明使用统一中英文词典，预览与已停止状态互不覆盖。
+> 当前插件版本 `0.6.2`：设置标题显示包版本，悬停说明使用统一中英文词典，预览与已停止状态互不覆盖。
 
 ## 简体中文
 
@@ -91,6 +91,12 @@ The plugin list shows a short introduction that opens the complete settings page
 DSH checks npm’s `latest` automatically at startup and repeats an old or failed check when settings open. A newer npm release shows Update left of GitHub and a navigation dot. Clicking it rechecks the npm and market targets before the market installs and verifies the package. The page shows progress and any activation step. On DSH Desktop, restart by quitting from the tray and reopening. A market release-age hold can offer Update anyway; a version mismatch between npm and the market offers a retry. Without a market or for a local install, Update opens the upgrade instructions.
 
 Report a problem exports one TXT at a time. If writing to Windows Downloads fails, Save As lets you choose another location. After saving, the plugin selects the file in File Explorer and asks the default browser to open GitHub’s new-issue page. The dialog shows the file name, full path and whether the issue page opened. The TXT contains environment details, relevant settings, a self-test, the last 30 tool calls and up to 200 plugin log lines. Tool input text is kept as its length. Log entries that cannot be reliably redacted are omitted. You can attach screenshots separately.
+
+### Local background desktop
+
+Select **Local background desktop** under **Run computer use on** and save. Wincu creates a background desktop in your current Windows session. It keeps your account, file permissions, installed apps and the environment DSH started with. Start an app's executable with `launch_app`, then find its window with `list_windows`. Supported apps can be read, typed into and captured in the background. Pass `workingDirectory` at launch to start in a local project folder.
+
+The local background desktop works only with its own windows. Full-screen screenshots, mouse drags and system key combinations need **Current desktop** or **Separate desktop (Hyper-V)**. A single-instance app already running on your desktop may refuse to open another instance. The browser runs without a window and with a separate temporary profile. To sign in by hand, switch to **Current desktop**. Ordinary settings changes and MCP reconnects keep the apps open on the background desktop. Switching the run location or quitting DSH closes the background desktop, so save your work first.
 
 ### Separate desktop (Hyper-V)
 

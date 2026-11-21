@@ -893,7 +893,7 @@ window.__ModuleLoader__.load({
     "reportAttachFile": "Open {issueLink}, describe what happened, and attach this file.",
     "reportFailed": "The diagnostics file could not be saved.",
     "reportCancelled": "Saving the diagnostics file was cancelled.",
-    "reportDescribeIssue": "You can still describe what happened on the {issueLink}.",
+    "reportDescribeIssue": "You can still describe what happened on {issueLink}.",
     "reportUnconfirmed": "The export could not be confirmed. Check your Downloads folder.",
     "reportBusy": "A diagnostics export is already running.",
     "reportOpenIssue": "Open a new issue on GitHub",

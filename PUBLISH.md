@@ -120,7 +120,7 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 
 ## npm 发布（受信任发布，不用 token）
 
-推送 `vX.Y.Z` 标签后，`.github/workflows/release.yml` 依次核对标签与 `package.json` 版本、检查构建和包内文件，都通过才执行 `npm publish`。npm 通过受信任发布（OIDC）确认上传来自本仓库的这个工作流，仓库和本机都不保存 npm token，也就没有 token 过期的问题。npm 会自动附上来源证明（provenance），包页面能看到构建它的提交和运行记录。
+推送 `vX.Y.Z` 标签后，`.github/workflows/release.yml` 先对标签所在的提交跑完整 CI（`verify` 任务调用 `ci.yml`），再依次核对标签与 `package.json` 版本、检查构建和包内文件，都通过才执行 `npm publish`。npm 通过受信任发布（OIDC）确认上传来自本仓库的这个工作流，仓库和本机都不保存 npm token，也就没有 token 过期的问题。npm 会自动附上来源证明（provenance），包页面能看到构建它的提交和运行记录。
 
 ### 一次性设置（npmjs.com）
 
@@ -141,16 +141,16 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 ### 每次发版
 
 1. 改 `package.json` 版本和 `CHANGELOG.md`，经 PR 合入 `main`，等 CI 通过。
-2. 给 `main` 打标签并推送（以 0.6.1 为例）。推送标签就会发布：
+2. 给 `main` 打标签并推送（以 0.6.2 为例）。推送标签就会发布：
 
    ```powershell
    git fetch origin main
-   git tag v0.6.1 origin/main
-   git push origin v0.6.1
+   git tag v0.6.2 origin/main
+   git push origin v0.6.2
    ```
 
-3. 在 Actions 的 Release 运行里确认成功。npm 会先扫描新版本，通常几分钟，有时十几分钟，之后 `npm view dsh-computer-use-win version` 才显示新版本。
-4. 创建 GitHub Release，附件用 npm 上的同一个包：`npm pack dsh-computer-use-win@0.6.1` 会下载 `dsh-computer-use-win-0.6.1.tgz`。
+3. 在 Actions 的 Release 运行里确认成功。运行先跑完整 CI，大约 15–35 分钟，之后才上传。npm 会先扫描新版本，通常几分钟，有时十几分钟，之后 `npm view dsh-computer-use-win version` 才显示新版本。
+4. 创建 GitHub Release，附件用 npm 上的同一个包：`npm pack dsh-computer-use-win@0.6.2` 会下载 `dsh-computer-use-win-0.6.2.tgz`。
 
 发布失败时（例如 npmjs.com 还没配好），修好后在 Actions 里重跑失败的任务，不要在本机再发布同一版本。只有 `v1.2.3` 这种正式版本标签会触发发布，`v1.2.3-rc.1` 之类的预发布标签不会。
 
@@ -158,6 +158,6 @@ dsh plugin --profile web add github:Yu-tao-Li/dsh-computer-use-win
 
 - 上架 ≠ 安全审查（列表官方免责声明）。插件在用户机器上以用户权限运行，
   README 里已写明风险边界与 failsafe。
-- GitHub token 只存在 `E:\PythonFiles\.secrets\` 与 git 凭据管理器，
+- GitHub token 只存在维护者本机的私密目录与 git 凭据管理器，
   **不在仓库内**（`.gitignore` 已排除 `.secrets/`）。
 - npm 发布不用 token，只走 Release 工作流的受信任发布；仓库和 Actions secrets 里都不要放 npm token。
