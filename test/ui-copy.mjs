@@ -8,7 +8,7 @@ for(const [locale,entries] of Object.entries(dict))for(const [key,value] of Obje
   let limit;
   if(/(?:Hint)$/.test(key))limit=locale==='zh'?45:140;
   if(/(?:Info)$/.test(key))limit=locale==='zh'?50:160;
-  if(/^(?:attachStep[12]|attachRisk[12]|signInStep\w+|signInRisk[123]|firefoxNotice)$/.test(key))limit=locale==='zh'?60:170;
+  if(/^(?:attachStep[12]|attachRisk[12]|signInStep\w+|signInRisk[123]|firefoxNotice|desktopBackgroundNote\d|hypervStep\d)$/.test(key))limit=locale==='zh'?60:170;
   if(/^(?:progressSync|previewTitle|clearShortcutTitle)$/.test(key))limit=locale==='zh'?30:100;
   if(/^(?:progressModeSource|progressModeSummary|browserApp_\w+)$/.test(key))limit=locale==='zh'?16:28;
   if(limit&&[...value].length>limit)errors.push(`${locale}.${key}: ${[...value].length}>${limit}`);

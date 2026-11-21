@@ -745,7 +745,7 @@ app.whenReady().then(async()=>{
   await evaluate("window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[]});window.root.render(React.createElement('span',null,'closed'))");
   await evaluate("window.renderPage('zh')");
   await until("!!document.querySelector('[data-wincu-update-now]')");
-  await evaluate("window.selectDesktop=value=>{const s=document.getElementById('wincu-page-desktopTarget');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(s,value);s.dispatchEvent(new Event('change',{bubbles:true}))};window.selectDesktop('hyperv')");
+  await evaluate("window.selectDesktop=value=>document.getElementById('wincu-page-desktopTarget-'+value).click();window.selectDesktop('hyperv')");
   await until("!!document.getElementById('wincu-page-hypervVm')");
   assert.equal(await evaluate("document.getElementById('wincu-page-browserAttachUser').disabled"),true,'An isolated task cannot attach to the host browser');
   await evaluate("window.setOverlayInput('hypervVm','Wincu fixture VM');window.clickButton('保存更改')");
@@ -753,6 +753,22 @@ app.whenReady().then(async()=>{
   await evaluate("window.previousFetch=window.fakeFetch;window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:200,body:{ok:true}}:window.previousFetch(call);window.clickButton('配置连接')");
   await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.includes('连接已配置')");
   assert.equal(await evaluate("window.fetchCalls.filter(call=>call.url==='/dsh-computer-use-win/api/hyperv'&&call.method==='POST').length"),1,'Credential setup starts only after the explicit action');
+  // The Hyper-V choice explains itself and lists its setup steps; a result
+  // names the step that fixes it, in its tone, with Windows' words in the tooltip.
+  assert.equal(await evaluate("document.querySelector('[data-wincu-desktop-hint]').textContent.startsWith('在 Hyper-V 虚拟机里操作')"),true);
+  assert.equal(await evaluate("document.querySelectorAll('[data-wincu-hyperv-steps] li').length"),6);
+  assert.equal(await evaluate("document.querySelector('[data-wincu-hyperv-steps] li:nth-child(2) code').textContent"),'Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)');
+  await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:500,body:{ok:false,error:'WCU_HYPERV_PERMISSION: add your Windows account to the Hyper-V Administrators group, then sign out and back in.'}}:window.previousFetch(call);window.clickButton('配置连接')");
+  await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.includes('见第 2 步')");
+  assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'error|1','The step to fix is marked');
+  assert.ok(await evaluate("document.querySelector('[data-wincu-hyperv-result]').title.startsWith('WCU_HYPERV_PERMISSION')"));
+  await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:200,body:{ok:true,missing:'WCU_HYPERV_NODE_REQUIRED'}}:window.previousFetch(call);window.clickButton('配置连接')");
+  await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.startsWith('登录信息已保存。还差第 3 步')");
+  assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'warning|2');
+  await evaluate("window.selectDesktop('current')");
+  await until("document.querySelector('[data-wincu-desktop-hint]').textContent.includes('和你共用一套鼠标键盘')&&!document.querySelector('[data-wincu-hyperv-steps]')");
+  await evaluate("window.selectDesktop('hyperv')");
+  await until("!!document.querySelector('[data-wincu-hyperv-steps]')&&!document.querySelector('[data-wincu-hyperv-result]')");
   await evaluate("window.selectDesktop('background');window.clickButton('保存更改')");
   await until("window.snapshot.value.desktopTarget==='background'&&document.body.textContent.includes('沿用本机账号')");
   assert.ok(await evaluate("['browserVisible','browserSignIn'].every(key=>{const control=document.getElementById('wincu-page-'+key);return control.disabled&&!control.checked})"),'Private desktop has no interactive browser or saved sign-in');

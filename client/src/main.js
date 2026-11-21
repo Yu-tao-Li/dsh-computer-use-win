@@ -189,6 +189,11 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] .wcu-item:has(.wcu-presets)>.wcu-item-main{flex:1}
       [data-wincu-settings] .wcu-segment.wcu-presets{display:flex;width:auto;align-self:stretch}
       [data-wincu-settings] .wcu-presets>label{flex:1;justify-content:center}
+      [data-wincu-settings] .wcu-desktops>label{flex:1 1 auto;padding:4px 8px;text-align:center}
+      [data-wincu-settings] [data-tone=warning]{color:var(--dsw-alias-state-warning-primary,#b26a00)}
+      [data-wincu-settings] .wcu-notice li[data-tone]{font-weight:600}
+      [data-wincu-settings] .wcu-notice li>.wcu-control{display:block;max-width:320px;margin:4px 0 2px}
+      [data-wincu-settings] .wcu-hyperv-action{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin:4px 0 2px}
       [data-wincu-settings] .wcu-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px 16px;padding:0 0 6px}
       [data-wincu-settings] .wcu-field{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-height:36px;font-size:13px;color:var(--wcu-muted)}
       [data-wincu-settings] .wcu-field>.wcu-item-title{font-size:13px;line-height:22px;color:var(--wcu-muted)}
@@ -276,6 +281,12 @@ window.__ModuleLoader__.load({
     // Where the DSH browser keeps its profiles (kept-edge, kept-chrome), in the
     // form File Explorer's address bar accepts.
     const KEPT_FOLDER='%LOCALAPPDATA%\\dsh-computer-use-win\\agent-browser';
+    // Hyper-V Administrators by its SID, so the line works in every Windows language.
+    const HYPERV_GROUP_COMMAND='Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)';
+    // A connection result names the setup step that fixes it: [message, step].
+    const HYPERV_ISSUES={WCU_HYPERV_UNAVAILABLE:['hypervErrUnavailable',1],WCU_HYPERV_PERMISSION:['hypervErrPermission',2],WCU_HYPERV_VM_UNAVAILABLE:['hypervErrVmState',3],WCU_HYPERV_NODE_REQUIRED:['hypervMissingNode',3],
+      WCU_HYPERV_DESKTOP_REQUIRED:['hypervMissingDesktop',4],WCU_HYPERV_VM_UNKNOWN:['hypervErrVmUnknown',5],WCU_HYPERV_VM_REQUIRED:['hypervVmRequired',5],WCU_HYPERV_SIGNIN_FAILED:['hypervErrSignIn',6]};
+    const DESKTOP_OPTIONS=[['current','desktopCurrent','desktopCurrentHint'],['background','desktopBackground','desktopBackgroundHint'],['hyperv','desktopHyperv','desktopHypervHint']];
     // Copies a folder path to paste into File Explorer. Without clipboard
     // access the path is left selected.
     function CopyButton({text,t}){
@@ -326,6 +337,14 @@ window.__ModuleLoader__.load({
       cursor:(on,id)=>drawing(h('defs',null,h('radialGradient',{id},h('stop',{offset:0,className:'a-spot0'}),h('stop',{offset:1,className:'a-spot1'}))),
         box('a-ink',14,13,42,3,1.5),box('a-ink',14,20,30,3,1.5),box('a-ink',14,27,36,3,1.5),box('a-ink',14,34,24,3,1.5),
         ...(on?[h('circle',{cx:50,cy:33,r:21,fill:`url(#${id})`})]:[]),arrow(48,25),...(on?[box('a-acc',60,44,26,11,5.5),h('text',{className:'a-tag',x:73,y:51.9,textAnchor:'middle'},'DSH')]:[])),
+      // Where DSH works: your desktop, its pointer beside yours; a hidden desktop
+      // on this PC (dashed), your pointer left alone; or the desktop inside a
+      // Hyper-V window, DSH's pointer inside it and yours outside.
+      desktop:target=>drawing(...monitor(),...(target==='hyperv'
+        ?[box('a-win',16,9,66,38,3),h('path',{className:'a-bar',d:'M16 12a3 3 0 0 1 3-3h60a3 3 0 0 1 3 3v3H16z'}),box('a-desk',20,19,58,24,2),h('text',{className:'a-cap',x:39,y:35.5,textAnchor:'middle'},'VM'),dshArrow(57,25),box('a-frame',16,9,66,38,3),arrow(87,27)]
+        :target==='background'
+          ?[box('a-win',15,12,40,27,2.5),box('a-ink',19,19,24,2.2,1.1),box('a-ink',19,24,17,2.2,1.1),box('a-frame',15,12,40,27,2.5),arrow(38,26),box('a-ghost',60,9,37,32,2.5),dshArrow(75,20)]
+          :[box('a-win',18,11,58,32,2.5),h('path',{className:'a-bar',d:'M18 13.5a2.5 2.5 0 0 1 2.5-2.5h53a2.5 2.5 0 0 1 2.5 2.5V16H18z'}),box('a-ink',23,22,30,2.2,1.1),box('a-ink',23,27,22,2.2,1.1),box('a-frame',18,11,58,32,2.5),dshArrow(50,25),arrow(64,28)])),
       // One square per tool: filled loads at startup, dashed loads on demand, faint is off.
       tools:(loaded,allowed)=>drawing(...toolGroups.flatMap(([,entries],row)=>entries.map(([name],col)=>box(loaded.has(name)?'a-acc':allowed.has(name)?'a-open':'a-ink',15.5+col*12,12.5+row*12,9,9,2.2)))),
       esc:()=>drawing(box('a-ink2',33,19,46,34,7),box('a-win',33,16,46,34,7),box('a-frame',33,16,46,34,7),h('text',{className:'a-cap',x:56,y:37.2,textAnchor:'middle'},'Esc')),
@@ -723,13 +742,18 @@ window.__ModuleLoader__.load({
         if(Object.keys(patch).length===0){setDirty(false);setMessage(t('saved'));setTone('success');return;}
         if(await run(patch,'saved'))setDirty(false);
       };
+      // The result says which setup step to look at; Windows' own words stay
+      // in the tooltip.
       const configureHyperv = async () => {
         setHypervConfiguring(true);setHypervMessage('');
         try {
           const {status,data}=await requestJson('/dsh-computer-use-win/api/hyperv',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:165000});
-          setHypervMessage(data?.ok?t('hypervReady'):data?.cancelled?t('reportCancelledConnection'):
-            t('hypervFailed')+(data?.error?' '+data.error:status===409?' '+t('hypervBusy'):''));
-        } catch {setHypervMessage(t('hypervFailed'));}
+          const detail=String(data?.error||''),issue=HYPERV_ISSUES[data?.ok?data.missing:detail.match(/^WCU_HYPERV_[A-Z_]+/)?.[0]];
+          setHypervMessage(data?.cancelled?{text:t('reportCancelledConnection')}
+            :data?.ok?(issue?{text:t(issue[0]),tone:'warning',step:issue[1]}:{text:t('hypervReady'),tone:'success'})
+            :issue?{text:t(issue[0]),tone:'error',step:issue[1],detail}
+            :{text:t('hypervFailed')+(detail?' '+detail:status===409?' '+t('hypervBusy'):''),tone:'error'});
+        } catch {setHypervMessage({text:t('hypervFailed'),tone:'error'});}
         finally {setHypervConfiguring(false);}
       };
       // The support note is a display choice. Save it at once, outside the draft,
@@ -792,14 +816,21 @@ window.__ModuleLoader__.load({
                 h('div',{className:'wcu-tool-grid'},...entries.map(([name])=>h('label',{className:'wcu-tool-item',key:name,title:'windows_computer_use_'+name},h('input',{type:'checkbox',id:idPrefix+'-tool-'+name,'data-wincu-tool':name,checked:draft.enabledTools.includes(name),disabled:customDisabled,onChange:e=>selectTools([name],e.target.checked)}),h('span',null,h('strong',null,t('tool_'+name)),h('small',null,t('toolHint_'+name)))))));})))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-desktop-title'},
           head(idPrefix+'-desktop-title','desktopTarget',null),
-          h('select',{className:'wcu-control',id:idPrefix+'-desktopTarget','aria-labelledby':idPrefix+'-desktop-title',value:draft.desktopTarget,disabled,onChange:e=>change('desktopTarget',e.target.value)},
-            h('option',{value:'current'},t('desktopCurrent')),h('option',{value:'background'},t('desktopBackground')),h('option',{value:'hyperv'},t('desktopHyperv'))),
-          draft.desktopTarget==='background'&&h('p',{className:'wcu-notice'},t('desktopBackgroundHint')),
-          draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice'},
-            h('p',null,t('hypervHint')),
-            h('label',{className:'wcu-field'},t('hypervVm'),h('input',{className:'wcu-control',id:idPrefix+'-hypervVm',type:'text',maxLength:120,value:draft.hypervVm,disabled,onChange:e=>change('hypervVm',e.target.value)})),
-            button(hypervConfiguring?'hypervConfiguring':'hypervConfigure',{className:'wcu-small',disabled:disabled||hypervConfiguring||saved.desktopTarget!=='hyperv'||!saved.hypervVm||draft.hypervVm.trim()!==saved.hypervVm,onClick:configureHyperv}),
-            hypervMessage&&h('p',{role:'status','data-wincu-hyperv-result':true},hypervMessage))),
+          // Each choice says what it does; the one chosen keeps its notes or,
+          // for Hyper-V, its setup steps in view.
+          item(picture(arts.desktop(draft.desktopTarget)),
+            h('div',{className:'wcu-segment wcu-presets wcu-desktops',role:'radiogroup','aria-labelledby':idPrefix+'-desktop-title'},...DESKTOP_OPTIONS.map(([value,label])=>h('label',{key:value},
+              h('input',{type:'radio',name:idPrefix+'-desktopTarget',id:idPrefix+'-desktopTarget-'+value,value,checked:draft.desktopTarget===value,disabled,onChange:()=>change('desktopTarget',value)}),t(label)))),
+            h('p',{className:'wcu-hint','data-wincu-desktop-hint':true},t((DESKTOP_OPTIONS.find(([value])=>value===draft.desktopTarget)??DESKTOP_OPTIONS[0])[2]))),
+          draft.desktopTarget==='background'&&h('div',{className:'wcu-notice','data-wincu-background-notes':true},h('ul',null,...[1,2,3].map(n=>h('li',{key:n},t('desktopBackgroundNote'+n))))),
+          draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
+            h('strong',null,t('hypervSetup')),
+            h('ol',null,...[1,2,3,4,5,6].map(n=>h('li',{key:n,'data-tone':hypervMessage&&hypervMessage.step===n?hypervMessage.tone:undefined},t('hypervStep'+n),
+              n===2&&h('span',{className:'wcu-address'},h('code',null,HYPERV_GROUP_COMMAND),h(CopyButton,{text:HYPERV_GROUP_COMMAND,t})),
+              n===5&&h('input',{className:'wcu-control',id:idPrefix+'-hypervVm','aria-label':t('hypervVm'),placeholder:t('hypervVm'),type:'text',maxLength:120,value:draft.hypervVm,disabled,onChange:e=>change('hypervVm',e.target.value)}),
+              n===6&&h('div',{className:'wcu-hyperv-action'},
+                button(hypervConfiguring?'hypervConfiguring':'hypervConfigure',{className:'wcu-small',disabled:disabled||hypervConfiguring||saved.desktopTarget!=='hyperv'||!saved.hypervVm||draft.hypervVm.trim()!==saved.hypervVm,onClick:configureHyperv}),
+                hypervMessage&&h('span',{role:'status','data-wincu-hyperv-result':hypervMessage.tone||'info','data-tone':hypervMessage.tone,title:hypervMessage.detail||undefined},hypervMessage.text))))))),
         h('section',{className:'wcu-section','data-wincu-browser-policy':true,'aria-labelledby':idPrefix+'-browser-title'},
           head(idPrefix+'-browser-title','browserTitle','browserInfo'),
           h('div',{className:'wcu-grid'},

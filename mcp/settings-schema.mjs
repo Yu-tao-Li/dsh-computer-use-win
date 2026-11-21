@@ -12,7 +12,7 @@ const shortcut = description => ({type:'shortcut', default:'', description});
 const command = () => integer(0, Number.MAX_SAFE_INTEGER, 0, undefined, {draft:false, command:true});
 
 export const SETTINGS_SCHEMA = Object.freeze(Object.fromEntries(Object.entries({
-  desktopTarget: choice(['current','background','hyperv'], 'current', '运行位置 / Run computer use on'),
+  desktopTarget: choice(['current','background','hyperv'], 'current', 'DSH 在哪里操作 / Where DSH works'),
   hypervVm: {type:'text',default:'',maxLength:120,allowEmpty:true,description:'Hyper-V 虚拟机名称 / Hyper-V virtual machine name'},
   browserFirst: toggle(true, '网页优先使用浏览器通道 / Prefer browser use for web pages'),
   browserVisible: toggle(true, '显示DSH浏览器窗口 / Show the DSH browser'),

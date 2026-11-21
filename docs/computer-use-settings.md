@@ -20,15 +20,24 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
 
 ### 本机后台桌面
 
-在 **电脑操控的运行位置** 选择 **本机后台桌面**，保存即可。Wincu 在当前 Windows 会话中创建一个后台桌面，沿用你的账号、文件权限、已安装软件和 DSH 启动环境。用 `launch_app` 启动应用的可执行文件，再用 `list_windows` 找到该窗口。支持的应用可以在后台读控件、输入和截取窗口。启动时可通过 `workingDirectory` 指定本机项目目录。
+在 **DSH 在哪里操作** 选 **本机后台桌面**，保存即可。Wincu 在当前 Windows 会话中创建一个后台桌面，沿用你的账号、文件权限、已安装软件和 DSH 启动环境。用 `launch_app` 启动应用的可执行文件，再用 `list_windows` 找到该窗口。支持的应用可以在后台读控件、输入和截取窗口。启动时可通过 `workingDirectory` 指定本机项目目录。
 
-本机后台桌面只操作它自己的窗口。需要整屏截图、鼠标拖拽或系统组合键时，切换到 **当前桌面** 或 **独立桌面（Hyper-V）**。已在当前桌面启动的单实例应用可能拒绝另开实例。浏览器以无窗口模式运行，使用独立的临时配置。需要手动登录时请切到 **当前桌面**。普通设置保存和 MCP 重连会保留后台已打开的桌面应用。切换运行位置或退出 DSH 会关闭后台桌面，请先保存文件。
+本机后台桌面只操作它自己的窗口。需要整屏截图、鼠标拖拽或系统组合键时，切换到 **当前桌面** 或 **Hyper-V 虚拟机**。已在当前桌面启动的单实例应用可能拒绝另开实例。浏览器以无窗口模式运行，使用独立的临时配置。需要手动登录时请切到 **当前桌面**。普通设置保存和 MCP 重连会保留后台已打开的桌面应用。切换运行位置或退出 DSH 会关闭后台桌面，请先保存文件。
 
-### 独立桌面（Hyper-V）
+### Hyper-V 虚拟机
 
-在装有 Hyper-V 和管理工具的 Windows 主机上，准备一台专用 Windows 虚拟机，在虚拟机内安装 Node.js 22 或更新版本，并用该机的 Windows 账户登录桌面。在 **电脑操控的运行位置** 选 **独立桌面（Hyper-V）**，填写虚拟机名称，保存后点 **配置连接**。这里填写虚拟机账户的凭据，Windows 会将凭据加密保存给当前主机账户使用。
+在 **DSH 在哪里操作** 选 **Hyper-V 虚拟机**，设置页会列出下面的配置步骤，只需做一次：
 
-之后浏览器、截图、鼠标和键盘操作都在选定的虚拟机内执行。截图会复制回主机。应用读写虚拟机里的文件，并使用虚拟机安装的软件和运行环境。需要处理主机文件时，先把文件复制或共享到虚拟机。Hyper-V 管理器里的预览窗口可以关闭。要取消操作，用主机 DSH 的停止按钮。连接、登录或启动失败时，本轮操作会暂停。要继续直接控制主机，手动选回 **当前桌面**。
+1. 打开 Hyper-V：在“启用或关闭 Windows 功能”里勾选 Hyper-V 并重启。Windows 家庭版没有 Hyper-V。
+2. 允许你的账户管理 Hyper-V：以管理员身份打开 PowerShell，运行 `Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)`，再注销后重新登录。DSH 没有以管理员身份运行时，Windows 只让“Hyper-V Administrators”组的成员查询和连接虚拟机；这个组用 SID 指定，任何语言的 Windows 都一样。
+3. 在 Hyper-V 管理器里新建一台 Windows 10 或 11 虚拟机，并在里面安装 Node.js 22 或更新版本。
+4. 在虚拟机里用你的 Windows 账户登录桌面，保持登录。Hyper-V 的预览窗口可以关掉。
+5. 在设置页填写虚拟机名称（与 Hyper-V 管理器里显示的一致），点 **保存更改**。
+6. 点 **配置连接**，在弹出的窗口里输入第 4 步那个账户的用户名和密码（不是 PIN）。Windows 会将凭据加密保存给当前主机账户使用。
+
+**配置连接** 先用这组凭据登录虚拟机，再检查虚拟机里是否已有这个账户登录的桌面、是否装了 Node.js 22 或更新版本。结果会指出该做哪一步：Hyper-V 没打开指向第 1 步，账户没有权限指向第 2 步，找不到虚拟机指向第 5 步，登录失败指向第 4、6 步；凭据可用但虚拟机里还差桌面登录或 Node.js 时，凭据已保存，补上那一步后再点一次 **配置连接** 检查。Windows 的原始提示放在结果的提示框里。
+
+之后浏览器、截图、鼠标和键盘操作都在选定的虚拟机内执行。截图会复制回主机。应用读写虚拟机里的文件，并使用虚拟机安装的软件和运行环境。需要处理主机文件时，先把文件复制或共享到虚拟机。Hyper-V 管理器里的预览窗口可以关闭。要取消操作，用主机 DSH 的停止按钮。连接、登录或启动失败时，本轮操作会暂停。要继续直接操作主机，手动选回 **当前桌面**。
 
 ### Agent 看不到电脑操控工具
 
@@ -92,15 +101,24 @@ DSH checks npm’s `latest` automatically at startup and repeats an old or faile
 
 Report a problem exports one TXT at a time. If writing to Windows Downloads fails, Save As lets you choose another location. After saving, the plugin selects the file in File Explorer and asks the default browser to open GitHub’s new-issue page. The dialog shows the file name, full path and whether the issue page opened. The TXT contains environment details, relevant settings, a self-test, the last 30 tool calls and up to 200 plugin log lines. Tool input text is kept as its length. Log entries that cannot be reliably redacted are omitted. You can attach screenshots separately.
 
-### Local background desktop
+### Background desktop
 
-Select **Local background desktop** under **Run computer use on** and save. Wincu creates a background desktop in your current Windows session. It keeps your account, file permissions, installed apps and the environment DSH started with. Start an app's executable with `launch_app`, then find its window with `list_windows`. Supported apps can be read, typed into and captured in the background. Pass `workingDirectory` at launch to start in a local project folder.
+Select **Background desktop** under **Where DSH works** and save. Wincu creates a background desktop in your current Windows session. It keeps your account, file permissions, installed apps and the environment DSH started with. Start an app's executable with `launch_app`, then find its window with `list_windows`. Supported apps can be read, typed into and captured in the background. Pass `workingDirectory` at launch to start in a local project folder.
 
-The local background desktop works only with its own windows. Full-screen screenshots, mouse drags and system key combinations need **Current desktop** or **Separate desktop (Hyper-V)**. A single-instance app already running on your desktop may refuse to open another instance. The browser runs without a window and with a separate temporary profile. To sign in by hand, switch to **Current desktop**. Ordinary settings changes and MCP reconnects keep the apps open on the background desktop. Switching the run location or quitting DSH closes the background desktop, so save your work first.
+The local background desktop works only with its own windows. Full-screen screenshots, mouse drags and system key combinations need **Current desktop** or **Hyper-V VM**. A single-instance app already running on your desktop may refuse to open another instance. The browser runs without a window and with a separate temporary profile. To sign in by hand, switch to **Current desktop**. Ordinary settings changes and MCP reconnects keep the apps open on the background desktop. Switching the run location or quitting DSH closes the background desktop, so save your work first.
 
-### Separate desktop (Hyper-V)
+### Hyper-V VM
 
-On a Windows host with Hyper-V and its management tools, prepare a dedicated Windows VM, install Node.js 22 or later in it, and sign in to its desktop. Select **Separate desktop (Hyper-V)** under **Run computer use on**, enter the VM name, save, then choose **Configure connection**. Use the guest Windows account. Windows encrypts the saved credential for your current host account.
+Select **Hyper-V VM** under **Where DSH works**. The settings page lists these setup steps; they are needed once:
+
+1. Turn on Hyper-V: in “Turn Windows features on or off”, select Hyper-V and restart. Windows Home does not have Hyper-V.
+2. Let your account manage Hyper-V: open PowerShell as administrator, run `Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)`, then sign out and back in. When DSH does not run as administrator, Windows lets only members of the Hyper-V Administrators group query and connect to virtual machines; the SID names that group in every Windows language.
+3. In Hyper-V Manager, create a Windows 10 or 11 virtual machine and install Node.js 22 or later in it.
+4. Sign in to the VM’s desktop with your Windows account and stay signed in. You can close the Hyper-V preview window.
+5. Enter the VM’s name on the settings page, exactly as Hyper-V Manager shows it, and choose **Save changes**.
+6. Choose **Configure connection** and enter that account’s user name and password (not a PIN) in the window that opens. Windows encrypts the saved credential for your current host account.
+
+**Configure connection** signs in to the VM with that credential, then checks that the account has a signed-in desktop there and that Node.js 22 or later is installed. The result names the step to look at: step 1 when Hyper-V is off, step 2 when your account lacks permission, step 5 when no VM has that name, steps 4 and 6 when signing in fails. When the credential works but the VM still lacks the signed-in desktop or Node.js, the credential is saved; finish that step and choose **Configure connection** again to check. Windows’ own message is in the result’s tooltip.
 
 Browser work, screenshots, mouse and keyboard actions run in the selected VM. Wincu copies screenshots back to the host, and other application files stay in the VM. You can close the Hyper-V preview window. Use DSH’s Stop button on the host to cancel a task. If the VM is unavailable, the task stops. Select **Current desktop** to resume operating the host.
 

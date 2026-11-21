@@ -607,19 +607,37 @@ window.__ModuleLoader__.load({
     "reportBusy": "诊断信息正在导出，请稍等。",
     "reportOpenIssue": "打开 GitHub 新建问题页面",
     "reportOk": "确定",
-    "desktopTarget": "电脑操控的运行位置",
+    "desktopTarget": "DSH 在哪里操作",
     "desktopCurrent": "当前桌面",
+    "desktopCurrentHint": "直接操作你正在用的桌面：会移动鼠标、打字、切换前台窗口，和你共用一套鼠标键盘。",
     "desktopBackground": "本机后台桌面",
-    "desktopBackgroundHint": "沿用本机账号、文件和软件，支持后台控件和窗口截图。切换前请保存后台应用中的文件。",
+    "desktopBackgroundHint": "在本机另开一个看不见的桌面，不占用你的鼠标键盘，沿用本机账号、文件和软件。",
+    "desktopBackgroundNote1": "做不到整屏截图、鼠标拖拽和系统组合键，需要时切回“当前桌面”。",
+    "desktopBackgroundNote2": "浏览器没有窗口，也不带保留的网站登录；要手动登录时切回“当前桌面”。",
+    "desktopBackgroundNote3": "换选项或退出 DSH 时，后台桌面里的程序会关掉，请先保存文件。",
     "backgroundBrowserHint": "本机后台桌面的浏览器无窗口，也不会加载已保留的登录状态。需要手动登录时请切到当前桌面。",
-    "desktopHyperv": "独立桌面（Hyper-V）",
-    "hypervVm": "Hyper-V 虚拟机名称",
+    "desktopHyperv": "Hyper-V 虚拟机",
+    "desktopHypervHint": "在 Hyper-V 虚拟机里操作，和本机隔开、不占你的鼠标键盘；第一次用要先配置。",
+    "hypervVm": "虚拟机名称",
     "hypervVmRequired": "请填写虚拟机名称。",
-    "hypervHint": "登录虚拟机并安装 Node.js 22+，再保存设置、配置连接。",
+    "hypervSetup": "配置步骤（只需一次）",
+    "hypervStep1": "打开 Hyper-V：在“启用或关闭 Windows 功能”里勾选 Hyper-V 并重启（家庭版没有）。",
+    "hypervStep2": "允许你的账户管理 Hyper-V：以管理员身份打开 PowerShell，运行下面这行，再注销后重新登录。",
+    "hypervStep3": "在 Hyper-V 管理器里新建一台 Windows 10 或 11 虚拟机，并在里面装 Node.js 22+。",
+    "hypervStep4": "在虚拟机里用你的 Windows 账户登录桌面，保持登录；Hyper-V 的预览窗口可以关掉。",
+    "hypervStep5": "在下面填虚拟机名称（与 Hyper-V 管理器里显示的一致），点“保存更改”。",
+    "hypervStep6": "点“配置连接”，在弹出的窗口里输入第 4 步那个账户的用户名和密码（不是 PIN）。",
     "hypervConfigure": "配置连接",
     "hypervConfiguring": "正在配置…",
-    "hypervReady": "连接已配置。可在 Hyper-V 管理器中查看独立桌面。",
-    "hypervFailed": "独立桌面的连接未配置成功。",
+    "hypervReady": "连接已配置，DSH 之后在这台虚拟机里操作。",
+    "hypervMissingNode": "登录信息已保存。还差第 3 步：在虚拟机里装 Node.js 22+，然后再点“配置连接”。",
+    "hypervMissingDesktop": "登录信息已保存。还差第 4 步：用这个账户登录虚拟机桌面，然后再点“配置连接”。",
+    "hypervFailed": "Hyper-V 虚拟机的连接没有配置成功。",
+    "hypervErrUnavailable": "这台电脑还没打开 Hyper-V，见第 1 步。",
+    "hypervErrPermission": "你的 Windows 账户还不能管理 Hyper-V，见第 2 步。",
+    "hypervErrVmState": "虚拟机现在没法启动，先在 Hyper-V 管理器里启动它。",
+    "hypervErrVmUnknown": "找不到叫这个名字的虚拟机，核对第 5 步的名称。",
+    "hypervErrSignIn": "没能登录虚拟机：确认它已进入桌面，用户名和密码正确（第 4、6 步）。",
     "hypervBusy": "另一次连接配置正在进行。",
     "reportCancelledConnection": "连接配置已取消。"
   },
@@ -910,19 +928,37 @@ window.__ModuleLoader__.load({
     "reportBusy": "A diagnostics export is already running.",
     "reportOpenIssue": "Open a new issue on GitHub",
     "reportOk": "OK",
-    "desktopTarget": "Run computer use on",
+    "desktopTarget": "Where DSH works",
     "desktopCurrent": "Current desktop",
-    "desktopBackground": "Local background desktop",
-    "desktopBackgroundHint": "Use local apps and files with background controls and window capture. Save your work in background apps before switching.",
+    "desktopCurrentHint": "Works on the desktop you are using: it moves the pointer, types and switches windows, sharing one mouse and keyboard with you.",
+    "desktopBackground": "Background desktop",
+    "desktopBackgroundHint": "Opens a hidden desktop on this PC that leaves your mouse and keyboard alone and keeps your account, files and apps.",
+    "desktopBackgroundNote1": "Full-screen screenshots, mouse drags and system key combinations need the current desktop.",
+    "desktopBackgroundNote2": "The browser has no window and no kept sign-ins; switch to the current desktop to sign in by hand.",
+    "desktopBackgroundNote3": "Choosing another option or quitting DSH closes the apps on the background desktop, so save your work first.",
     "backgroundBrowserHint": "The local background desktop runs a browser without a window or saved sign-ins. Switch to the current desktop to sign in manually.",
-    "desktopHyperv": "Separate desktop (Hyper-V)",
-    "hypervVm": "Hyper-V virtual machine name",
+    "desktopHyperv": "Hyper-V VM",
+    "desktopHypervHint": "Works inside a Hyper-V virtual machine, apart from this PC and without your mouse and keyboard. Set it up once first.",
+    "hypervVm": "Virtual machine name",
     "hypervVmRequired": "Enter the virtual machine name.",
-    "hypervHint": "Sign in to the VM with Node.js 22 or later installed, then save and configure the connection.",
+    "hypervSetup": "Set up once",
+    "hypervStep1": "Turn on Hyper-V: in “Turn Windows features on or off”, select Hyper-V and restart (Windows Home does not have it).",
+    "hypervStep2": "Let your account manage Hyper-V: open PowerShell as administrator, run the line below, then sign out and back in.",
+    "hypervStep3": "In Hyper-V Manager, create a Windows 10 or 11 virtual machine and install Node.js 22 or later in it.",
+    "hypervStep4": "Sign in to the VM’s desktop with your Windows account and stay signed in; you can close the Hyper-V preview window.",
+    "hypervStep5": "Enter the VM’s name below, exactly as Hyper-V Manager shows it, and choose Save changes.",
+    "hypervStep6": "Choose Configure connection and enter that account’s user name and password (not a PIN) in the window that opens.",
     "hypervConfigure": "Configure connection",
     "hypervConfiguring": "Configuring…",
-    "hypervReady": "Connection configured. You can view the separate desktop in Hyper-V Manager.",
-    "hypervFailed": "The separate desktop connection could not be configured.",
+    "hypervReady": "Connection configured. DSH now works in this virtual machine.",
+    "hypervMissingNode": "Sign-in saved. Step 3 is left: install Node.js 22 or later in the VM, then choose Configure connection again.",
+    "hypervMissingDesktop": "Sign-in saved. Step 4 is left: sign in to the VM’s desktop with this account, then choose Configure connection again.",
+    "hypervFailed": "The Hyper-V connection could not be configured.",
+    "hypervErrUnavailable": "Hyper-V is off on this PC; see step 1.",
+    "hypervErrPermission": "Your Windows account cannot manage Hyper-V yet; see step 2.",
+    "hypervErrVmState": "The virtual machine cannot start now; start it in Hyper-V Manager first.",
+    "hypervErrVmUnknown": "No virtual machine has this name; check the name in step 5.",
+    "hypervErrSignIn": "Could not sign in to the VM: check that it has reached the desktop and that the user name and password are right (steps 4 and 6).",
     "hypervBusy": "Another connection is being configured.",
     "reportCancelledConnection": "Connection setup was cancelled."
   }
@@ -1108,6 +1144,11 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] .wcu-item:has(.wcu-presets)>.wcu-item-main{flex:1}
       [data-wincu-settings] .wcu-segment.wcu-presets{display:flex;width:auto;align-self:stretch}
       [data-wincu-settings] .wcu-presets>label{flex:1;justify-content:center}
+      [data-wincu-settings] .wcu-desktops>label{flex:1 1 auto;padding:4px 8px;text-align:center}
+      [data-wincu-settings] [data-tone=warning]{color:var(--dsw-alias-state-warning-primary,#b26a00)}
+      [data-wincu-settings] .wcu-notice li[data-tone]{font-weight:600}
+      [data-wincu-settings] .wcu-notice li>.wcu-control{display:block;max-width:320px;margin:4px 0 2px}
+      [data-wincu-settings] .wcu-hyperv-action{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin:4px 0 2px}
       [data-wincu-settings] .wcu-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px 16px;padding:0 0 6px}
       [data-wincu-settings] .wcu-field{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-height:36px;font-size:13px;color:var(--wcu-muted)}
       [data-wincu-settings] .wcu-field>.wcu-item-title{font-size:13px;line-height:22px;color:var(--wcu-muted)}
@@ -1195,6 +1236,12 @@ window.__ModuleLoader__.load({
     // Where the DSH browser keeps its profiles (kept-edge, kept-chrome), in the
     // form File Explorer's address bar accepts.
     const KEPT_FOLDER='%LOCALAPPDATA%\\dsh-computer-use-win\\agent-browser';
+    // Hyper-V Administrators by its SID, so the line works in every Windows language.
+    const HYPERV_GROUP_COMMAND='Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)';
+    // A connection result names the setup step that fixes it: [message, step].
+    const HYPERV_ISSUES={WCU_HYPERV_UNAVAILABLE:['hypervErrUnavailable',1],WCU_HYPERV_PERMISSION:['hypervErrPermission',2],WCU_HYPERV_VM_UNAVAILABLE:['hypervErrVmState',3],WCU_HYPERV_NODE_REQUIRED:['hypervMissingNode',3],
+      WCU_HYPERV_DESKTOP_REQUIRED:['hypervMissingDesktop',4],WCU_HYPERV_VM_UNKNOWN:['hypervErrVmUnknown',5],WCU_HYPERV_VM_REQUIRED:['hypervVmRequired',5],WCU_HYPERV_SIGNIN_FAILED:['hypervErrSignIn',6]};
+    const DESKTOP_OPTIONS=[['current','desktopCurrent','desktopCurrentHint'],['background','desktopBackground','desktopBackgroundHint'],['hyperv','desktopHyperv','desktopHypervHint']];
     // Copies a folder path to paste into File Explorer. Without clipboard
     // access the path is left selected.
     function CopyButton({text,t}){
@@ -1245,6 +1292,14 @@ window.__ModuleLoader__.load({
       cursor:(on,id)=>drawing(h('defs',null,h('radialGradient',{id},h('stop',{offset:0,className:'a-spot0'}),h('stop',{offset:1,className:'a-spot1'}))),
         box('a-ink',14,13,42,3,1.5),box('a-ink',14,20,30,3,1.5),box('a-ink',14,27,36,3,1.5),box('a-ink',14,34,24,3,1.5),
         ...(on?[h('circle',{cx:50,cy:33,r:21,fill:`url(#${id})`})]:[]),arrow(48,25),...(on?[box('a-acc',60,44,26,11,5.5),h('text',{className:'a-tag',x:73,y:51.9,textAnchor:'middle'},'DSH')]:[])),
+      // Where DSH works: your desktop, its pointer beside yours; a hidden desktop
+      // on this PC (dashed), your pointer left alone; or the desktop inside a
+      // Hyper-V window, DSH's pointer inside it and yours outside.
+      desktop:target=>drawing(...monitor(),...(target==='hyperv'
+        ?[box('a-win',16,9,66,38,3),h('path',{className:'a-bar',d:'M16 12a3 3 0 0 1 3-3h60a3 3 0 0 1 3 3v3H16z'}),box('a-desk',20,19,58,24,2),h('text',{className:'a-cap',x:39,y:35.5,textAnchor:'middle'},'VM'),dshArrow(57,25),box('a-frame',16,9,66,38,3),arrow(87,27)]
+        :target==='background'
+          ?[box('a-win',15,12,40,27,2.5),box('a-ink',19,19,24,2.2,1.1),box('a-ink',19,24,17,2.2,1.1),box('a-frame',15,12,40,27,2.5),arrow(38,26),box('a-ghost',60,9,37,32,2.5),dshArrow(75,20)]
+          :[box('a-win',18,11,58,32,2.5),h('path',{className:'a-bar',d:'M18 13.5a2.5 2.5 0 0 1 2.5-2.5h53a2.5 2.5 0 0 1 2.5 2.5V16H18z'}),box('a-ink',23,22,30,2.2,1.1),box('a-ink',23,27,22,2.2,1.1),box('a-frame',18,11,58,32,2.5),dshArrow(50,25),arrow(64,28)])),
       // One square per tool: filled loads at startup, dashed loads on demand, faint is off.
       tools:(loaded,allowed)=>drawing(...toolGroups.flatMap(([,entries],row)=>entries.map(([name],col)=>box(loaded.has(name)?'a-acc':allowed.has(name)?'a-open':'a-ink',15.5+col*12,12.5+row*12,9,9,2.2)))),
       esc:()=>drawing(box('a-ink2',33,19,46,34,7),box('a-win',33,16,46,34,7),box('a-frame',33,16,46,34,7),h('text',{className:'a-cap',x:56,y:37.2,textAnchor:'middle'},'Esc')),
@@ -1642,13 +1697,18 @@ window.__ModuleLoader__.load({
         if(Object.keys(patch).length===0){setDirty(false);setMessage(t('saved'));setTone('success');return;}
         if(await run(patch,'saved'))setDirty(false);
       };
+      // The result says which setup step to look at; Windows' own words stay
+      // in the tooltip.
       const configureHyperv = async () => {
         setHypervConfiguring(true);setHypervMessage('');
         try {
           const {status,data}=await requestJson('/dsh-computer-use-win/api/hyperv',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:165000});
-          setHypervMessage(data?.ok?t('hypervReady'):data?.cancelled?t('reportCancelledConnection'):
-            t('hypervFailed')+(data?.error?' '+data.error:status===409?' '+t('hypervBusy'):''));
-        } catch {setHypervMessage(t('hypervFailed'));}
+          const detail=String(data?.error||''),issue=HYPERV_ISSUES[data?.ok?data.missing:detail.match(/^WCU_HYPERV_[A-Z_]+/)?.[0]];
+          setHypervMessage(data?.cancelled?{text:t('reportCancelledConnection')}
+            :data?.ok?(issue?{text:t(issue[0]),tone:'warning',step:issue[1]}:{text:t('hypervReady'),tone:'success'})
+            :issue?{text:t(issue[0]),tone:'error',step:issue[1],detail}
+            :{text:t('hypervFailed')+(detail?' '+detail:status===409?' '+t('hypervBusy'):''),tone:'error'});
+        } catch {setHypervMessage({text:t('hypervFailed'),tone:'error'});}
         finally {setHypervConfiguring(false);}
       };
       // The support note is a display choice. Save it at once, outside the draft,
@@ -1711,14 +1771,21 @@ window.__ModuleLoader__.load({
                 h('div',{className:'wcu-tool-grid'},...entries.map(([name])=>h('label',{className:'wcu-tool-item',key:name,title:'windows_computer_use_'+name},h('input',{type:'checkbox',id:idPrefix+'-tool-'+name,'data-wincu-tool':name,checked:draft.enabledTools.includes(name),disabled:customDisabled,onChange:e=>selectTools([name],e.target.checked)}),h('span',null,h('strong',null,t('tool_'+name)),h('small',null,t('toolHint_'+name)))))));})))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-desktop-title'},
           head(idPrefix+'-desktop-title','desktopTarget',null),
-          h('select',{className:'wcu-control',id:idPrefix+'-desktopTarget','aria-labelledby':idPrefix+'-desktop-title',value:draft.desktopTarget,disabled,onChange:e=>change('desktopTarget',e.target.value)},
-            h('option',{value:'current'},t('desktopCurrent')),h('option',{value:'background'},t('desktopBackground')),h('option',{value:'hyperv'},t('desktopHyperv'))),
-          draft.desktopTarget==='background'&&h('p',{className:'wcu-notice'},t('desktopBackgroundHint')),
-          draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice'},
-            h('p',null,t('hypervHint')),
-            h('label',{className:'wcu-field'},t('hypervVm'),h('input',{className:'wcu-control',id:idPrefix+'-hypervVm',type:'text',maxLength:120,value:draft.hypervVm,disabled,onChange:e=>change('hypervVm',e.target.value)})),
-            button(hypervConfiguring?'hypervConfiguring':'hypervConfigure',{className:'wcu-small',disabled:disabled||hypervConfiguring||saved.desktopTarget!=='hyperv'||!saved.hypervVm||draft.hypervVm.trim()!==saved.hypervVm,onClick:configureHyperv}),
-            hypervMessage&&h('p',{role:'status','data-wincu-hyperv-result':true},hypervMessage))),
+          // Each choice says what it does; the one chosen keeps its notes or,
+          // for Hyper-V, its setup steps in view.
+          item(picture(arts.desktop(draft.desktopTarget)),
+            h('div',{className:'wcu-segment wcu-presets wcu-desktops',role:'radiogroup','aria-labelledby':idPrefix+'-desktop-title'},...DESKTOP_OPTIONS.map(([value,label])=>h('label',{key:value},
+              h('input',{type:'radio',name:idPrefix+'-desktopTarget',id:idPrefix+'-desktopTarget-'+value,value,checked:draft.desktopTarget===value,disabled,onChange:()=>change('desktopTarget',value)}),t(label)))),
+            h('p',{className:'wcu-hint','data-wincu-desktop-hint':true},t((DESKTOP_OPTIONS.find(([value])=>value===draft.desktopTarget)??DESKTOP_OPTIONS[0])[2]))),
+          draft.desktopTarget==='background'&&h('div',{className:'wcu-notice','data-wincu-background-notes':true},h('ul',null,...[1,2,3].map(n=>h('li',{key:n},t('desktopBackgroundNote'+n))))),
+          draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
+            h('strong',null,t('hypervSetup')),
+            h('ol',null,...[1,2,3,4,5,6].map(n=>h('li',{key:n,'data-tone':hypervMessage&&hypervMessage.step===n?hypervMessage.tone:undefined},t('hypervStep'+n),
+              n===2&&h('span',{className:'wcu-address'},h('code',null,HYPERV_GROUP_COMMAND),h(CopyButton,{text:HYPERV_GROUP_COMMAND,t})),
+              n===5&&h('input',{className:'wcu-control',id:idPrefix+'-hypervVm','aria-label':t('hypervVm'),placeholder:t('hypervVm'),type:'text',maxLength:120,value:draft.hypervVm,disabled,onChange:e=>change('hypervVm',e.target.value)}),
+              n===6&&h('div',{className:'wcu-hyperv-action'},
+                button(hypervConfiguring?'hypervConfiguring':'hypervConfigure',{className:'wcu-small',disabled:disabled||hypervConfiguring||saved.desktopTarget!=='hyperv'||!saved.hypervVm||draft.hypervVm.trim()!==saved.hypervVm,onClick:configureHyperv}),
+                hypervMessage&&h('span',{role:'status','data-wincu-hyperv-result':hypervMessage.tone||'info','data-tone':hypervMessage.tone,title:hypervMessage.detail||undefined},hypervMessage.text))))))),
         h('section',{className:'wcu-section','data-wincu-browser-policy':true,'aria-labelledby':idPrefix+'-browser-title'},
           head(idPrefix+'-browser-title','browserTitle','browserInfo'),
           h('div',{className:'wcu-grid'},
