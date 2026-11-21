@@ -1,9 +1,10 @@
 // "Restart now" after an update on DSH Desktop. The plugin market restarts
 // only a host nothing supervises, and DSH Desktop supervises its host, so the
-// settings page asks the plugin instead: a helper started through WMI (outside
-// DSH's process tree) quits DSH Desktop the way its installer does and opens it
-// again (scripts/restart-dsh.ps1). Hosts that are not DSH Desktop report no
-// support, and the page then says how to restart by hand.
+// settings page asks the plugin instead: a helper that Explorer starts (outside
+// DSH's process tree, on the user's desktop) quits DSH Desktop the way its
+// installer does and opens it again (scripts/restart-dsh.ps1). Hosts that are
+// not DSH Desktop report no support, and the page then says how to restart by
+// hand.
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,17 +20,23 @@ export function desktopExecutable(execPath = process.execPath, platform = proces
   return platform === 'win32' && path.win32.basename(execPath).toLowerCase() === 'dsh desktop.exe' ? execPath : null;
 }
 
-// Win32_Process.Create makes the helper a child of the WMI provider in this
-// user's interactive session, so quitting DSH does not end it with DSH's tree.
-export function restartCommand(executable) {
-  return `"${DEFAULT_POWERSHELL}" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${script}" -Executable "${executable}"`;
+// Explorer's desktop folder view runs the helper, as launch_app does (#55): it
+// becomes Explorer's child on the user's desktop, so quitting DSH does not end
+// it, and the second DSH Desktop instance it starts finds the running one. (A
+// process that WMI creates is not on that desktop, and its quit request never
+// reached DSH.)
+export function restartArguments(executable) {
+  return `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${script}" -Executable "${executable}"`;
 }
 export function startRestart(executable, spawnProcess = spawn) {
   return new Promise((resolve, reject) => {
     const child = spawnProcess(DEFAULT_POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command',
-      '$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }; ' +
-      '$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:WCU_RESTART_COMMAND; ProcessStartupInformation = $startup }; ' +
-      'exit [int]$result.ReturnValue'], { windowsHide: true, stdio: 'ignore', env: { ...process.env, WCU_RESTART_COMMAND: restartCommand(executable) } });
+      "$windows = [Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]'9BA05972-F6A8-11CF-A442-00A0C90A8F39')); " +
+      '$location = 0; $root = $null; $hwnd = 0; ' +
+      '$desktop = $windows.FindWindowSW([ref]$location, [ref]$root, 8, [ref]$hwnd, 1); ' +
+      'if ($null -eq $desktop) { exit 3 }; ' +
+      "$desktop.Document.Application.ShellExecute($env:WCU_RESTART_FILE, $env:WCU_RESTART_ARGUMENTS, '', 'open', 0); exit 0"],
+      { windowsHide: true, stdio: 'ignore', env: { ...process.env, WCU_RESTART_FILE: DEFAULT_POWERSHELL, WCU_RESTART_ARGUMENTS: restartArguments(executable) } });
     child.once('error', reject);
     child.once('close', code => code === 0 ? resolve() : reject(new Error(`Windows did not start the restart helper (${code}).`)));
   });

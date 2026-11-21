@@ -1,17 +1,18 @@
 // "Restart now" on DSH Desktop: the route answers only the settings page,
 // reports support only inside DSH Desktop, starts the helper once, and the
-// helper is started through WMI with the fixed script and the executable.
+// helper is started through Explorer with the fixed script and the executable.
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
-import { createRestartHandler, desktopExecutable, restartCommand, startRestart, RESTART_ROUTE } from '../mcp/restart.mjs';
+import { createRestartHandler, desktopExecutable, restartArguments, startRestart, RESTART_ROUTE } from '../mcp/restart.mjs';
+import { DEFAULT_POWERSHELL } from '../mcp/takeover.mjs';
 
 assert.equal(RESTART_ROUTE, '/dsh-computer-use-win/api/restart');
 const desktop = 'C:\\Users\\me\\AppData\\Local\\Programs\\DSH Desktop\\DSH Desktop.exe';
 assert.equal(desktopExecutable(desktop, 'win32'), desktop);
 assert.equal(desktopExecutable('C:\\Program Files\\nodejs\\node.exe', 'win32'), null, 'a dsh CLI or web host runs on node');
 assert.equal(desktopExecutable(desktop, 'linux'), null);
-const command = restartCommand(desktop);
+const command = restartArguments(desktop);
 assert.match(command, /-File "[^"]+[\\/]scripts[\\/]restart-dsh\.ps1" -Executable "C:\\Users\\me\\AppData\\Local\\Programs\\DSH Desktop\\DSH Desktop\.exe"$/);
 assert.ok(command.includes('-NonInteractive') && command.includes('-WindowStyle Hidden'));
 
@@ -45,7 +46,7 @@ const failed = await ask(failing, trusted('POST'));
 assert.equal(failed.status, 500);
 assert.match(failed.body.error, /restart helper/);
 
-// The WMI call: Win32_Process.Create with the helper command in the environment.
+// Explorer's desktop folder view starts the helper; its command line travels in the environment.
 let spawned;
 const fakeSpawn = (file, args, options) => {
   spawned = { file, args, options };
@@ -55,10 +56,11 @@ const fakeSpawn = (file, args, options) => {
 };
 await startRestart(desktop, fakeSpawn);
 assert.match(path.basename(spawned.file).toLowerCase(), /^powershell\.exe$/);
-assert.ok(spawned.args.at(-1).includes('Invoke-CimMethod -ClassName Win32_Process -MethodName Create'));
-assert.equal(spawned.options.env.WCU_RESTART_COMMAND, command);
+assert.ok(spawned.args.at(-1).includes('FindWindowSW') && spawned.args.at(-1).includes('ShellExecute($env:WCU_RESTART_FILE, $env:WCU_RESTART_ARGUMENTS'));
+assert.equal(spawned.options.env.WCU_RESTART_FILE, DEFAULT_POWERSHELL);
+assert.equal(spawned.options.env.WCU_RESTART_ARGUMENTS, command);
 assert.equal(spawned.options.windowsHide, true);
 const failSpawn = () => { const child = new EventEmitter(); setImmediate(() => child.emit('close', 9)); return child; };
 await assert.rejects(startRestart(desktop, failSpawn), /restart helper \(9\)/);
 
-console.log(JSON.stringify({ passed: true, trustedOnly: true, desktopOnly: true, oneRestart: true, wmiLaunch: true }));
+console.log(JSON.stringify({ passed: true, trustedOnly: true, desktopOnly: true, oneRestart: true, explorerLaunch: true }));

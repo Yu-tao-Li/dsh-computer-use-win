@@ -1,7 +1,7 @@
 # Restart DSH Desktop after a plugin update the plugin market cannot restart
 # itself (its restart API refuses a host that DSH Desktop supervises). Started
-# by mcp/restart.mjs through WMI, so it runs outside DSH's process tree and
-# survives DSH quitting. Asks the running DSH Desktop to quit the way DSH's own
+# by mcp/restart.mjs through Explorer, so it runs outside DSH's process tree, on
+# the user's desktop, and survives DSH quitting. Asks the running DSH Desktop to quit the way DSH's own
 # installer does, waits until no DSH Desktop process is left, then opens DSH
 # Desktop again through Explorer, as a shortcut would.
 param(
