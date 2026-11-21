@@ -1,15 +1,15 @@
 // Public MCP calls with a deterministic worker: no UIA or physical input.
 import assert from 'node:assert/strict';
-import {mkdir,mkdtemp,readFile,writeFile,access} from 'node:fs/promises';
+import {cp,mkdir,mkdtemp,readFile,writeFile,access} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {McpTestClient} from './mcp-test-client.mjs';
 const root=await mkdtemp(path.join(os.tmpdir(),'wcu-observation-contract-'));
 await mkdir(path.join(root,'mcp'));await mkdir(path.join(root,'scripts'));
+await cp(new URL('../mcp',import.meta.url),path.join(root,'mcp'),{recursive:true});
 let server=await readFile(new URL('../mcp/server.mjs',import.meta.url),'utf8');
 server=server.replace('function runBackend(action, args = {}, timeoutMs = 30000, request) {','function runBackend(action, args = {}, timeoutMs = 30000, request) { timeoutMs = Math.min(timeoutMs, 1400);');
 await writeFile(path.join(root,'mcp/server.mjs'),server);
-for(const file of ['settings-schema.mjs','settings.mjs','takeover.mjs','overlay-strings.mjs','browser.mjs','browser-frames.mjs','browser-pipe.mjs','policy.mjs','page-values.mjs','catalog.mjs','protocol.mjs'])await writeFile(path.join(root,'mcp',file),await readFile(new URL('../mcp/'+file,import.meta.url)));
 const marker=path.join(root,'started.txt').replaceAll("'","''");
 await writeFile(path.join(root,'scripts/windows-uia.ps1'),`param([switch]$Persistent)
 [IO.File]::AppendAllText('${marker}', 'worker' + [Environment]::NewLine)

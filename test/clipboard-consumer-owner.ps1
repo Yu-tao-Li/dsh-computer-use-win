@@ -13,6 +13,7 @@ try{
   if(-not $SnapshotOnly){
     [Windows.Forms.Clipboard]::SetText('WCU_OLD_CLIPBOARD_FIXTURE')
     $lease=New-Object WcuClipboardLease($text,$true,$TargetProcessId)
+    $lease.MarkPasteSent([IntPtr]::Zero)
   }
   [Console]::WriteLine((@{kind='ready';text=$text}|ConvertTo-Json -Compress))
   if([Console]::ReadLine() -ne 'pasted'){throw 'Expected the consumer result'}

@@ -72,7 +72,7 @@ export function makeRedactor({ user = safeUserName(), host = os.hostname(), home
     for (const secret of hidden) text = text.split(secret).join('<secret>');
     text = text.replace(QUOTED_CREDENTIAL, '$1"<secret>"').replace(RAW_CREDENTIAL, '$1<secret>');
     if (text.split('\n').some(omitSensitiveLine)) return '<redacted diagnostic entry>';
-    text = text.replace(/\b(?:https?|wss?):\/\/[^\s"'<>]+/gi, '<url>');
+    text = text.replace(/\b(?:https?|wss?|file):\/\/[^\s"'<>]+/gi, '<url>');
     text = text.replace(WINDOWS_PATH, '<path>');
     if (homePath) text = text.replace(homePath, '<path>');
     text = text.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '<email>');
@@ -229,7 +229,12 @@ export function pluginLogLines(dirs, { limit = LOG_LINE_LIMIT, markers = PLUGIN_
   const lines = [], seen = new Set();
   for (const dir of dirs) {
     let names = [];
-    try { names = readdirSync(dir).filter(name => name.endsWith('.log')).map(name => ({ name, at: statSync(path.join(dir, name)).mtimeMs })).sort((a, b) => b.at - a.at).slice(0, 2).map(item => item.name).reverse(); } catch { continue; }
+    try {
+      names = readdirSync(dir).filter(name => name.endsWith('.log')).flatMap(name => {
+        try { return [{name,at:statSync(path.join(dir,name)).mtimeMs}]; }
+        catch { return []; }
+      }).sort((a,b)=>b.at-a.at).slice(0,2).map(item=>item.name).reverse();
+    } catch { continue; }
     for (const name of names) {
       const file = path.join(dir, name);
       let text = '';
@@ -309,7 +314,7 @@ const stamp = (at = new Date()) => {
 function diagnosticSettings(settings) {
   const result = {};
   for (const [key, field] of Object.entries(SETTINGS_SCHEMA)) {
-    if (field.command || key === 'communityNote') continue;
+    if (field.command || key === 'communityNote' || key === 'hypervVm') continue;
     const value = settings[key];
     if (field.type === 'text' && typeof value === 'string') result[key] = `<${[...value].length} chars>`;
     if (field.type === 'boolean' && typeof value === 'boolean') result[key] = value;
@@ -323,7 +328,7 @@ function diagnosticSettings(settings) {
 
 // Collects, writes and returns { file, fileName }. Settings keep their shape;
 // the banner text the user wrote is kept as its length.
-export async function exportDiagnostics({ version, settings = {}, calls = [], host, mcpClient, bridge, dshLocale, installSpec, serverPath, defaultBrowser, env = process.env, secrets = [], at = new Date(), outDir, selfTest, facts: given } = {}) {
+export async function exportDiagnostics({ version, settings = {}, calls = [], host, mcpClient, bridge, dshLocale, installSpec, serverPath, defaultBrowser, env = process.env, secrets = [], at = new Date(), outDir, selfTest, facts: given, saveAs = saveDiagnosticsAs } = {}) {
   const redact = makeRedactor({ secrets: [...secrets, env.WCU_APPROVAL_SECRET] });
   const [system,health] = await Promise.all([
     given?.system ?? systemFacts(),
@@ -344,12 +349,91 @@ export async function exportDiagnostics({ version, settings = {}, calls = [], ho
   const text = diagnosticsText(redactDiagnosticValue(facts, redact), {
     calls: redactDiagnosticValue(calls, redact), logs, at,
   }).replace(/\r?\n/g, '\r\n');
-  const folder = path.resolve(outDir ?? (system.downloads || path.join(os.homedir(), 'Downloads')));
-  mkdirSync(folder, { recursive: true });
   const fileName = `wincu-diagnostics-${stamp(at)}.txt`;
-  const file = path.join(folder, fileName);
-  writeFileSync(file, '\ufeff' + text, { encoding: 'utf8', flag: 'wx' });
-  return { file, fileName };
+  const contents = '\ufeff' + text;
+  try {
+    const folder = path.resolve(outDir ?? (system.downloads || path.join(os.homedir(), 'Downloads')));
+    mkdirSync(folder, { recursive: true });
+    for (let index = 1; ; index++) {
+      const name = index === 1 ? fileName : fileName.slice(0, -4) + '-' + index + '.txt';
+      const file = path.join(folder, name);
+      try { writeFileSync(file, contents, { encoding: 'utf8', flag: 'wx' }); }
+      catch (error) { if (error.code === 'EEXIST' && index < 100) continue; throw error; }
+      return { file, fileName: name };
+    }
+  } catch (error) {
+    if (!saveAs) throw error;
+    const file = await saveAs({ fileName, contents, dshLocale });
+    return file === null ? { cancelled: true } : { file, fileName: path.basename(file) };
+  }
+}
+
+const saveDialogScript = String.raw`
+$ErrorActionPreference = 'Stop'
+[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+Add-Type -AssemblyName System.Windows.Forms
+$owner = [Windows.Forms.Form]::new()
+$owner.ShowInTaskbar = $false
+$owner.FormBorderStyle = 'FixedToolWindow'
+$owner.StartPosition = 'CenterScreen'
+$owner.Opacity = 0
+$owner.TopMost = $true
+$dialog = [Windows.Forms.SaveFileDialog]::new()
+try {
+  $owner.Show()
+  $dialog.Title = $request.title
+  $dialog.FileName = $request.fileName
+  $dialog.Filter = 'TXT (*.txt)|*.txt'
+  $dialog.DefaultExt = 'txt'
+  $dialog.AddExtension = $true
+  $dialog.RestoreDirectory = $true
+  while ($dialog.ShowDialog($owner) -eq [Windows.Forms.DialogResult]::OK) {
+    try {
+      [IO.File]::WriteAllText($dialog.FileName, $request.contents, [Text.UTF8Encoding]::new($false))
+      [Console]::WriteLine((@{file=$dialog.FileName} | ConvertTo-Json -Compress))
+      exit 0
+    } catch {
+      [void][Windows.Forms.MessageBox]::Show($owner, $request.writeError, $request.title)
+    }
+  }
+  [Console]::WriteLine('null')
+} finally { $dialog.Dispose(); $owner.Dispose() }
+`;
+
+export function saveDiagnosticsAs({ fileName, contents, dshLocale }) {
+  if (process.platform !== 'win32') throw new Error('Windows Save As is unavailable in this host');
+  const zh = /^zh\b/i.test(dshLocale ?? '');
+  const command = Buffer.from(saveDialogScript, 'utf16le').toString('base64');
+  return new Promise((resolve, reject) => {
+    const child = spawn(powershellPath(), ['-NoProfile', '-STA', '-EncodedCommand', command], {
+      windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('Diagnostics Save As timed out'));
+    }, 90_000);
+    let output = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', chunk => { if (output.length < 128 * 1024) output += chunk; });
+    child.stdin.on('error', () => {});
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('close', code => {
+      clearTimeout(timer);
+      try {
+        if (code !== 0) throw new Error('Windows Save As failed');
+        const result = JSON.parse(output);
+        if (result !== null && (typeof result?.file !== 'string' || !path.isAbsolute(result.file))) throw new Error('Windows Save As returned no file');
+        resolve(result === null ? null : result.file);
+      } catch (error) { reject(error); }
+    });
+    child.stdin.end(JSON.stringify({
+      fileName, contents,
+      title: zh ? '另存诊断文件' : 'Save diagnostics as',
+      writeError: zh ? '无法保存到此位置，请选择其他位置。' : 'This location is not writable. Choose a different location.',
+    }), 'utf8');
+  });
 }
 
 async function launch(command, args, { waitForExit = false } = {}) {
@@ -393,7 +477,11 @@ export function trustedRequest(request) {
   if (headers['x-wcu-request'] !== '1') return false;
   const origin = headers.origin;
   if (origin === undefined) return true;
-  try { return new URL(origin).host === host; } catch { return false; }
+  if (host === undefined) return false;
+  try {
+    const page = new URL(origin);
+    return ['http:','https:'].includes(page.protocol) && page.host === new URL(page.protocol+'//'+host).host;
+  } catch { return false; }
 }
 
 const sendJson = (response, status, body) => {
@@ -413,6 +501,7 @@ export function createDiagnosticsHandler({ collect, open = revealAndOpen, logger
       let result;
       try { result = await collect(); }
       catch (error) { logger?.warn?.('dsh-computer-use-win: diagnostics export failed: %s', error?.message ?? error); }
+      if (result?.cancelled) { sendJson(response, 200, { ok: false, cancelled: true }); return; }
       let opened;
       try { opened = await open(result ?? {}); }
       catch (error) { logger?.warn?.('dsh-computer-use-win: could not open the diagnostics: %s', error?.message ?? error); }

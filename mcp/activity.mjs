@@ -107,7 +107,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
   // turn finishes, a final reply longer than that is shown from its start.
   const replyStarts=new WeakMap();
   const summaries=createProgressSummarizer(ctx,{...summaryOptions,getSettings,getLocale:locale,onChange:()=>{if(!closed)publish();}});
-  const expireIdle=()=>{if(owner&&owner.pending===0&&Date.now()-owner.lastActive>=idleMs)owner=undefined;};
+  const expireIdle=()=>{if(owner&&owner.pending===0&&!owner.otherPending&&Date.now()-owner.lastActive>=idleMs)owner=undefined;};
   let lastPublishWarning=0;
   const publish=()=>{try{
     needsPublish=true;expireIdle();
@@ -150,15 +150,14 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
       progress.status='acting';needsPublish=true;if(getSettings().progressOverlayEnabled!==false)publish();
       try{const result=await next();action.state=result?.isError?'error':'done';return result;}
       catch(error){action.state='error';throw error;}
-      finally{current.otherPending=Math.max(0,(current.otherPending??1)-1);current.lastActive=Date.now();if(current.pending===0&&current.otherPending===0&&progress.action===label){progress.status='waiting';progress.action='';}if(owner===current&&getSettings().progressOverlayEnabled!==false)publish();needsPublish=true;}
+      finally{current.otherPending=Math.max(0,(current.otherPending??1)-1);current.lastActive=Date.now();if(owner===current&&current.pending===0&&current.otherPending===0&&progress.action===label){progress.status='waiting';progress.action='';}if(owner===current&&getSettings().progressOverlayEnabled!==false)publish();needsPublish=true;}
     }
     if(exec.signal?.aborted)return readableAbort(exec,await next());
     if(session&&turn!==undefined){
       expireIdle();
       if(owner&&owner.id!==session.id)throw Error('COMPUTER_USE_BUSY: Another conversation is using the desktop. Wait for that operation series to finish or stop it before retrying.');
-      if(!owner){owner={id:session.id,session,turn,pending:0,lastActive:Date.now(),desktop:false,progress:startOwner(session,turn)};lingering=undefined;}
+      if(!owner||owner.turn!==turn){owner={id:session.id,session,turn,pending:0,lastActive:Date.now(),desktop:false,progress:startOwner(session,turn)};lingering=undefined;}
       const current=owner;
-      if(current.turn!==turn){current.turn=turn;current.desktop=false;current.progress=startOwner(session,turn);}
       // Browser-lane calls run in the background, and listing windows or waiting
       // touches nothing: they keep the series and its turn, but only a desktop
       // call turns on the screen indicator.
@@ -168,7 +167,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
       current.pending++;current.progress.status='acting';current.progress.tool=tool;publish();
       try{const result=readableAbort(exec,await next());action.state=result?.isError?'error':'done';current.progress.lastAction={tool,status:result?.isError?'error':'returned'};return result;}
       catch(error){action.state='error';current.progress.lastAction={tool,status:'error'};throw error;}
-      finally{current.pending--;current.lastActive=Date.now();if(current.pending===0&&!current.otherPending){current.progress.status='waiting';current.progress.tool='';current.progress.action='';}if(owner===current)publish();}
+      finally{current.pending--;current.lastActive=Date.now();if(owner===current&&current.pending===0&&!current.otherPending){current.progress.status='waiting';current.progress.tool='';current.progress.action='';}if(owner===current)publish();}
     }
     return readableAbort(exec,await next());
   },{global:true});

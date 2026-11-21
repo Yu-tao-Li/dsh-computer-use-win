@@ -37,11 +37,37 @@ public static class ClipboardRequesterProbe {
       var window=consumer.Handle;int pid=System.Diagnostics.Process.GetCurrentProcess().Id;
       System.Windows.Forms.Clipboard.SetText("old fixture");
       using(var lease=new WcuClipboardLease("new fixture",true,pid)){
+       lease.MarkPasteSent(System.IntPtr.Zero);
        System.Threading.Thread.Sleep(150);
        if(Read(window)!="new fixture")throw new System.Exception("Slow reader received old content");
        if(!lease.Complete(2000)||!lease.Restored)throw new System.Exception("Confirmed target did not restore clipboard");
        if(lease.RequestWindow!=window.ToInt64()||lease.RequestProcessId!=(uint)pid)throw new System.Exception("WM_RENDERFORMAT requester identity mismatch");
        if(System.Windows.Forms.Clipboard.GetText()!="old fixture")throw new System.Exception("Previous content not restored");
+      }
+      foreach(bool restore in new[]{true,false}){
+       System.Windows.Forms.Clipboard.SetText("original before cancellation");
+       using(var lease=new WcuClipboardLease("cancelled text",restore,pid)){
+        lease.Dispose();
+        lease.Complete(1500);
+        var actual=System.Windows.Forms.Clipboard.GetText();
+        if(!lease.IsCompleted||!lease.Restored||actual!="original before cancellation")
+         throw new System.Exception("Cancellation before dispatch did not preserve the clipboard (restore="+restore+", completed="+lease.IsCompleted+", restored="+lease.Restored+", actual="+actual+")");
+       }
+      }
+      System.Windows.Forms.Clipboard.SetText("original before monitor");
+      using(var lease=new WcuClipboardLease("monitored text",true,pid)){
+       if(Read(System.IntPtr.Zero)!="monitored text")throw new System.Exception("Monitor did not read delayed text");
+       lease.Dispose();
+       lease.Complete(1500);
+       if(!lease.Restored||System.Windows.Forms.Clipboard.GetText()!="original before monitor")
+        throw new System.Exception("Monitor access was mistaken for dispatched paste");
+      }
+      System.Windows.Forms.Clipboard.Clear();
+      using(var lease=new WcuClipboardLease("cancelled on empty clipboard",true,pid)){
+       lease.Dispose();
+       lease.Complete(1500);
+       if(!lease.IsCompleted||System.Windows.Forms.Clipboard.ContainsText())
+        throw new System.Exception("Cancellation populated an empty clipboard");
       }
       // A remote clipboard monitor can consume delayed text before Ctrl+V.
       // No second WM_RENDERFORMAT occurs when the edit subsequently pastes.
@@ -72,6 +98,7 @@ public static class ClipboardRequesterProbe {
       using(var lease=new WcuClipboardLease("new unsupported fixture",true,pid)){
        Read(System.IntPtr.Zero);
        if(lease.TryPasteNative(window))throw new System.Exception("A custom window must retain the keyboard paste path");
+       lease.MarkPasteSent(window);
        lease.Dispose();lease.Complete(1000);
        if(lease.Restored||System.Windows.Forms.Clipboard.GetText()!="new unsupported fixture")throw new System.Exception("Unconfirmed paste must remain available for a slow consumer");
       }

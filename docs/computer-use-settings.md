@@ -16,15 +16,27 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
 
 ### 反馈问题
 
-标题右侧的“反馈问题”调用本机 DSH 的 `POST /dsh-computer-use-win/api/diagnostics`，每次只导出一份。插件把 TXT 保存到 Windows 的下载文件夹，在资源管理器中选中文件，并请求默认浏览器打开 GitHub 新建问题页。对话框显示文件名、完整路径和反馈链接。TXT 包含运行环境、相关设置、自检、最近 30 次工具调用和最多 200 行插件日志。工具输入文字只保留长度，无法可靠脱敏的日志条目会被省略，截图可由用户另行附上。
+标题右侧的“反馈问题”每次导出一份 TXT。下载文件夹写入失败时，Windows 会弹出“另存诊断文件”，可选择其他位置。保存后，插件在资源管理器中选中文件，并请求默认浏览器打开 GitHub 新建问题页。对话框显示文件名、完整路径，以及反馈页是否已打开。TXT 包含运行环境、相关设置、自检、最近 30 次工具调用和最多 200 行插件日志。工具输入文字只保留长度，无法可靠脱敏的日志条目会被省略，截图可由用户另行附上。
+
+### 本机后台桌面
+
+在 **电脑操控的运行位置** 选择 **本机后台桌面**，保存即可。Wincu 在当前 Windows 会话中创建一个后台桌面，沿用你的账号、文件权限、已安装软件和 DSH 启动环境。用 `launch_app` 启动应用的可执行文件，再用 `list_windows` 找到该窗口。支持的应用可以在后台读控件、输入和截取窗口。启动时可通过 `workingDirectory` 指定本机项目目录。
+
+本机后台桌面只操作它自己的窗口。需要整屏截图、鼠标拖拽或系统组合键时，切换到 **当前桌面** 或 **独立桌面（Hyper-V）**。已在当前桌面启动的单实例应用可能拒绝另开实例。浏览器以无窗口模式运行，使用独立的临时配置。需要手动登录时请切到 **当前桌面**。普通设置保存和 MCP 重连会保留后台已打开的桌面应用。切换运行位置或退出 DSH 会关闭后台桌面，请先保存文件。
+
+### 独立桌面（Hyper-V）
+
+在装有 Hyper-V 和管理工具的 Windows 主机上，准备一台专用 Windows 虚拟机，在虚拟机内安装 Node.js 22 或更新版本，并用该机的 Windows 账户登录桌面。在 **电脑操控的运行位置** 选 **独立桌面（Hyper-V）**，填写虚拟机名称，保存后点 **配置连接**。这里填写虚拟机账户的凭据，Windows 会将凭据加密保存给当前主机账户使用。
+
+之后浏览器、截图、鼠标和键盘操作都在选定的虚拟机内执行。截图会复制回主机。应用读写虚拟机里的文件，并使用虚拟机安装的软件和运行环境。需要处理主机文件时，先把文件复制或共享到虚拟机。Hyper-V 管理器里的预览窗口可以关闭。要取消操作，用主机 DSH 的停止按钮。连接、登录或启动失败时，本轮操作会暂停。要继续直接控制主机，手动选回 **当前桌面**。
 
 ### Agent 看不到电脑操控工具
 
-先在诊断 TXT 中找“宿主 MCP 注册”。`configuredToolCount` 是设置允许的工具数，`registeredToolCount` 是宿主全局注册表里的工具数。桥接版本提供状态接口时，还会显示连接状态、桥接注册数和连接错误。懒启动最初只注册管理工具。这些信息来自正在运行的 DSH，独立自检只检查插件后端。
+先在诊断 TXT 中找“宿主 MCP 注册”。`configuredToolCount` 是设置允许的工具数，`registeredToolCount` 是宿主全局注册表里的工具数，`liveAdapterCount` 是同一宿主进程中运行的 Wincu 实例数。`firstBridgeStartupMs` 记录首次等待 MCP 桥接启动和工具注册的总耗时。桥接版本提供状态接口时，还会显示连接状态、桥接注册数和连接错误。懒启动最初只注册管理工具。这些信息来自正在运行的 DSH，独立自检只检查插件后端。
 
 宿主注册了工具、当前 Agent 仍看不到时，查看该 Agent 的工具列表。该会话如果有 Cordis 检查工具，先通过 `cordis_inspect_list` 确认 `Tool` provider，再用 `cordis_inspect_query` 查询 `{"platform":"host","provider":"Tool","method":"listTools","input":{}}`。DSH 按 Agent 作用域决定全局工具是否可见，自定义 preset 的筛选也可能影响结果。0.2.2-rc.3 自带 preset 使用 `@deepseek-ai/dsh-agent-preset` 的 `config.plugins` 条目列表，例如 `@deepseek-ai/dsh-web-app/presets/minimal.patch.yml`。插件的 `mcp-dsh-computer-use-win` 是宿主 Loader 条目的 ID，标准安装已挂载该条目。
 
-如果报告里的 `peerMismatches` 列出了不同版本，用该 DSH 安装随附的桥接包复测。相同版本的 DSH 与 `dsh-mcp-client` 0.2.2-rc.3、0.2.2-rc.5 均验证了工具注册。
+如果报告里的 `peerMismatches` 列出了不同版本，用该 DSH 安装随附的桥接包复测。工具注册已在 0.2.2-rc.3 和 rc.5 同版本组合，以及 rc.3 宿主搭配 rc.5 桥接的组合中验证。
 
 ### 浏览器操控（Browser Use）
 
@@ -32,7 +44,7 @@ DSH 浏览器按需启动。首次用 `set_value` 时只传 `elementId: "new-tab
 
 默认打开“优先使用网页控件”和“显示 DSH 浏览器窗口”。DSH 专用浏览器单独启动，用哪个浏览器由“浏览器类型”决定：默认跟随 Windows 的默认浏览器，默认浏览器不是 Edge 或 Chrome 时用已安装的 Chrome 或 Edge。默认使用临时的空白配置，不加载扩展，不带你的登录、Cookie 和浏览记录（打开“保留网站登录”后改用保留的配置，见下段）；退出 DSH 后关闭；无头模式空闲 10 分钟、可见窗口空闲 2 小时后自动关闭，页面活动也延长计时。窗口请求在后台创建，普通网页操作不移动系统鼠标；Chrome 的 JavaScript 模态弹窗实测可能短暂来到前台，不能保证可见浏览器始终不影响焦点；你可以自己切换标签页观看。提示参照 Codex 的浏览器操控，不遮挡网页内容：专用浏览器的窗口框是 DSH 蓝，和你自己的浏览器一眼能分开；DSH 正在操作的标签页，图标换成蓝色箭头，这一轮结束后换回网页自己的图标；网页上一个带光晕的小箭头停在 DSH 点的位置，鼠标点击会穿过它，截图里也没有它。关掉“显示 DSH 浏览器窗口”后，浏览器在后台运行，没有窗口。JavaScript 模态弹窗会暂停页面脚本，标签页图标在弹窗关闭后同步。
 
-多个 DSH 会话使用同一个保留配置时，通过 Windows 私有命名管道共用浏览器。插件按配置目录协调启动、退出和崩溃恢复。结束最早启动它的会话不会关闭其他会话正在用的标签页；最后一个会话退出后正常关闭并保存 Cookie。所有服务意外结束时，独立清理进程会在确认没有活跃会话后关闭浏览器。不同会话的“显示 DSH 浏览器窗口”设置不一致时会明确报冲突，先结束旧会话或统一设置再重试。
+多个 DSH 会话使用同一个保留配置时，通过 Windows 私有命名管道共用浏览器。各任务应使用自己打开的标签页 ID。插件按配置目录协调启动、退出和崩溃恢复。结束最早启动它的会话不会关闭其他会话正在用的标签页；最后一个会话退出后正常关闭并保存 Cookie。所有服务意外结束时，独立清理进程会在确认没有活跃会话后关闭浏览器。不同会话的“显示 DSH 浏览器窗口”设置不一致时会明确报冲突，先结束旧会话或统一设置再重试。
 
 “保留网站登录”默认关闭。打开后，DSH 专用浏览器给每个浏览器保留一个配置（`%LOCALAPPDATA%\dsh-computer-use-win\agent-browser` 下的 `kept-edge`、`kept-chrome`），不再每次用临时配置：你在它的窗口里登录过的网站，之后的任务里还是登录状态，会话 Cookie 也保留。第一次用到要登录的网站时，agent 会请你在这个窗口里登录一次，密码和验证码由你自己输入；“显示 DSH 浏览器窗口”关着时要先打开它。使用 DSH 专用浏览器时不用设置你自己的浏览器，也不弹允许提示。另选“连接现有浏览器”时按下面的实验选项说明操作。用 Edge 时，Edge 会自动用 Windows 上的微软账户登录这个配置，微软自家的网站直接是登录状态（实测 Edge 156 没有开关能关掉）；不想这样就选 Chrome。关掉开关后登录仍然保留，要全部清除，退出 DSH 后删除这个文件夹。打开这个开关时，设置页会说明这些，并列出风险：DSH 会以你的身份操作你在这里登录过的网站；网页上的文字可能诱导 agent；不使用本地调试端口，但登录保存在本地配置文件夹中，同账户下的本机其他程序也能读取使用。更改这两项会在当前动作结束后重连插件服务，并关闭已打开的 DSH 浏览器。
 
@@ -78,7 +90,13 @@ The plugin list shows a short introduction that opens the complete settings page
 
 DSH checks npm’s `latest` automatically at startup and repeats an old or failed check when settings open. A newer npm release shows Update left of GitHub and a navigation dot. Clicking it rechecks the npm and market targets before the market installs and verifies the package. The page shows progress and any activation step. On DSH Desktop, restart by quitting from the tray and reopening. A market release-age hold can offer Update anyway; a version mismatch between npm and the market offers a retry. Without a market or for a local install, Update opens the upgrade instructions.
 
-Report a problem calls the local DSH route `POST /dsh-computer-use-win/api/diagnostics`, with one export at a time. The plugin writes a TXT to Windows Downloads, selects it in File Explorer and asks the default browser to open GitHub’s new-issue page. The dialog shows the file name, full path and issue link. The TXT contains environment details, relevant settings, a self-test, the last 30 tool calls and up to 200 plugin log lines. Tool input text is kept as its length. Log entries that cannot be reliably redacted are omitted. You can attach screenshots separately.
+Report a problem exports one TXT at a time. If writing to Windows Downloads fails, Save As lets you choose another location. After saving, the plugin selects the file in File Explorer and asks the default browser to open GitHub’s new-issue page. The dialog shows the file name, full path and whether the issue page opened. The TXT contains environment details, relevant settings, a self-test, the last 30 tool calls and up to 200 plugin log lines. Tool input text is kept as its length. Log entries that cannot be reliably redacted are omitted. You can attach screenshots separately.
+
+### Separate desktop (Hyper-V)
+
+On a Windows host with Hyper-V and its management tools, prepare a dedicated Windows VM, install Node.js 22 or later in it, and sign in to its desktop. Select **Separate desktop (Hyper-V)** under **Run computer use on**, enter the VM name, save, then choose **Configure connection**. Use the guest Windows account. Windows encrypts the saved credential for your current host account.
+
+Browser work, screenshots, mouse and keyboard actions run in the selected VM. Wincu copies screenshots back to the host, and other application files stay in the VM. You can close the Hyper-V preview window. Use DSH’s Stop button on the host to cancel a task. If the VM is unavailable, the task stops. Select **Current desktop** to resume operating the host.
 
 ### Computer Use tools are missing from an Agent
 
@@ -86,7 +104,7 @@ Find “Host MCP registration” in the diagnostics TXT. `configuredToolCount` i
 
 If the global registry has tools but the current Agent cannot see them, check the Agent's own tool list. If Cordis inspection is available in that session, confirm the `Tool` provider with `cordis_inspect_list`, then pass `{"platform":"host","provider":"Tool","method":"listTools","input":{}}` to `cordis_inspect_query`. DSH applies the Agent's scope when exposing global tools, so a custom preset can affect visibility. The shipped 0.2.2-rc.3 presets use the `@deepseek-ai/dsh-agent-preset` declaration's `config.plugins` entry list. See `@deepseek-ai/dsh-web-app/presets/minimal.patch.yml` for an example. A standard install mounts the plugin's Host Loader entry, `mcp-dsh-computer-use-win`.
 
-If `peerMismatches` lists different DSH package versions, retest with the bridge shipped with that DSH installation. Tool registration was verified with matched DSH and `dsh-mcp-client` versions 0.2.2-rc.3 and 0.2.2-rc.5.
+If `peerMismatches` lists different DSH package versions, retest with the bridge shipped with that DSH installation. Tool registration was verified with matched 0.2.2-rc.3 and rc.5 packages and with a rc.3 host paired with a rc.5 bridge.
 
 The DSH browser starts on demand. To open its first tab, call `set_value` with only `elementId: "new-tab"` and the URL as `value`. Use `opened.id` to read the tab. The `browserLane.agent` field in `list_windows` and `health` reports Chromium's startup state and any available exit reason. To read the intended visible Windows window after a failed launch, call `snapshot` with its `nativeWindowHandle` from `list_windows`. Omit `browserTab` or set it to `"desktop"`. Use desktop IDs and coordinates from the new observation.
 

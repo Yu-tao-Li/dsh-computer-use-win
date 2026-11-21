@@ -10,3 +10,16 @@ try{
  await control.resumeOperation();await control.begin();assert.equal((await control.command('status')).cancelled,false,'Replacement helper must reset an event still held by another process');await control.end();
  const report={passed:true,oldEventKeptAlive:true,replacementResetsCancellation:true,physicalInputSent:false,root};await writeFile(path.join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 }finally{holder?.stdin.end('\n');await control.close();}
+
+// A series that wanted the indicator can exist before the helper acknowledged
+// arming. That bookkeeping must not authorize a desktop action.
+const guarded=new TakeoverControl({configFile:null,stateFile:null,activityFile:null});
+guarded.disabledForTest=false;
+guarded.seriesHeld=guarded.seriesIndicator=true;
+guarded.child={stdin:{write(){}}};
+guarded.command=async()=>{throw new Error('fixture arming rejected');};
+await assert.rejects(guarded.begin(),/COMPUTER_USE_PAUSED.*fixture arming rejected/);
+assert.equal(guarded.active,0);
+assert.equal(guarded.armedChild,null);
+guarded.child=null;
+await guarded.close();

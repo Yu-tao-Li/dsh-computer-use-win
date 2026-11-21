@@ -7,6 +7,7 @@ import {DEFAULT_SETTINGS,TOOL_NAMES,normalizeSettings} from '../mcp/settings.mjs
 
 export async function runSettingsMatrix({settings,namespace,liveFile,documentPath,until,root}){
   const cases={
+    desktopTarget:['background','hyperv','current'],hypervVm:['Wincu test VM',''],
     browserFirst:[false,true],browserVisible:[false,true],browserApp:['chrome','edge','firefox','default'],browserSignIn:[true,false],browserAttachUser:[true,false],
     progressOverlayEnabled:[false,true],progressOverlayMode:['summary','source'],progressOverlayOpacity:[20,100,60],progressOverlayWidth:[240,1600,360],progressOverlayHeight:[160,1600,240],
     progressOverlayPosition:['top-left','bottom-left','bottom-right','custom','top-right'],progressOverlayX:[-500,500,80],progressOverlayY:[-500,500,80],progressOverlayLocked:[false,true],progressLockShortcut:['Ctrl+Alt+P',''],progressPreviewToken:[1,0],
@@ -22,7 +23,7 @@ export async function runSettingsMatrix({settings,namespace,liveFile,documentPat
     assert.deepEqual(JSON.parse(await readFile(documentPath,'utf8'))[key],value,'Persisted '+key);
     results.push({key,value,status:'pass'});
   }
-  const invalid={indicatorText:['','a\nb','x'.repeat(121)],indicatorIdleMs:[199,3001,1.5],progressOverlayOpacity:[19,101],progressOverlayWidth:[239,1601],progressOverlayHeight:[159,1601],progressOverlayX:[-32769,32768],progressOverlayY:[-32769,32768],stopShortcut:['Esc','Ctrl+Ctrl+K','F25'],progressLockShortcut:['Esc'],resumeToken:[-1,0.5],previewToken:[-1,0.5],progressPreviewToken:[-1,0.5]};
+  const invalid={hypervVm:['a\nb','x'.repeat(121)],indicatorText:['','a\nb','x'.repeat(121)],indicatorIdleMs:[199,3001,1.5],progressOverlayOpacity:[19,101],progressOverlayWidth:[239,1601],progressOverlayHeight:[159,1601],progressOverlayX:[-32769,32768],progressOverlayY:[-32769,32768],stopShortcut:['Esc','Ctrl+Ctrl+K','F25'],progressLockShortcut:['Esc'],resumeToken:[-1,0.5],previewToken:[-1,0.5],progressPreviewToken:[-1,0.5]};
   for(const [key,values]of Object.entries(invalid))for(const value of values){
     const previous=await readFile(documentPath,'utf8');
     await assert.rejects(settings.update(namespace,{[key]:value}));

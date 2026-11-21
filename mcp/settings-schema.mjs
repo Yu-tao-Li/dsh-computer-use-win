@@ -12,6 +12,8 @@ const shortcut = description => ({type:'shortcut', default:'', description});
 const command = () => integer(0, Number.MAX_SAFE_INTEGER, 0, undefined, {draft:false, command:true});
 
 export const SETTINGS_SCHEMA = Object.freeze(Object.fromEntries(Object.entries({
+  desktopTarget: choice(['current','background','hyperv'], 'current', '运行位置 / Run computer use on'),
+  hypervVm: {type:'text',default:'',maxLength:120,allowEmpty:true,description:'Hyper-V 虚拟机名称 / Hyper-V virtual machine name'},
   browserFirst: toggle(true, '网页优先使用浏览器通道 / Prefer browser use for web pages'),
   browserVisible: toggle(true, '显示DSH浏览器窗口 / Show the DSH browser'),
   browserApp: choice(BROWSER_APPS, 'default', '使用的浏览器 / Browser'),
@@ -73,5 +75,5 @@ export function validateSetting(key, value) {
   if(field.type==='boolean'&&typeof value!=='boolean')throw new Error(`${key} must be boolean`);
   if(field.type==='enum'&&!field.values.includes(value))throw new Error(`${key} must be ${field.values.join(', ')}`);
   if(field.type==='integer'&&(!Number.isSafeInteger(value)||value<field.min||value>field.max))throw new Error(`${key} must be an integer between ${field.min} and ${field.max}`);
-  if(field.type==='text'&&(typeof value!=='string'||!value.trim()||value.length>field.maxLength||/[\r\n\x00-\x1f]/.test(value)))throw new Error(`${key} must be one line of 1–${field.maxLength} characters`);
+  if(field.type==='text'&&(typeof value!=='string'||(!field.allowEmpty&&!value.trim())||value.length>field.maxLength||/[\r\n\x00-\x1f]/.test(value)))throw new Error(`${key} must be one line of ${field.allowEmpty?0:1}–${field.maxLength} characters`);
 }

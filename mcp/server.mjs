@@ -2,7 +2,7 @@
 import {RpcFramer,validateRpcEnvelope,negotiateProtocolVersion,BACKEND_PROTOCOL_VERSION} from './protocol.mjs';
 import { spawn } from "node:child_process";
 import { readFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { TakeoverControl, STOPPED, IN_WSL, linuxPath, windowsEnv, windowsScript, DEFAULT_POWERSHELL } from './takeover.mjs';
 import { TOOL_NAMES,LITE_TOOL_NAMES,normalizeEnabledTools,browserRoutingInstructions } from './settings.mjs';
 import { BrowserLane } from './browser.mjs';
-import { isBrowserCall,isQuietCall,NEW_TAB,BACKGROUND_FIRST,INTERRUPTIBLE_ACTIONS,INPUT_ACTIONS,toolAnnotations } from './catalog.mjs';
+import { isBrowserCall,isQuietCall,NEW_TAB,USER_CONNECT,ELEMENT_ID,BACKGROUND_FIRST,INTERRUPTIBLE_ACTIONS,INPUT_ACTIONS,toolAnnotations } from './catalog.mjs';
 import { assertOperation, collectApprovalRequirements, consumeGrant } from './policy.mjs';
 const usedApprovalGrants = new Map();
 const SESSION_INPUT_MARKER = '0x' + (((randomBytes(4).readUInt32BE(0) & 0x7fffffff) || 0x44534857) >>> 0).toString(16);
@@ -18,6 +18,7 @@ process.env.WCU_INPUT_MARKER ||= SESSION_INPUT_MARKER;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(__dirname, "..");
+const backgroundDesktop = process.env.WCU_BACKGROUND_DESKTOP === '1';
 // Advertised over MCP serverInfo; derived from package.json so the two
 // cannot drift apart between releases.
 const SERVER_VERSION = (() => {
@@ -67,7 +68,7 @@ const wikiResources = [
     mimeType: "text/markdown",
     file: path.join(pluginRoot, "docs", "wiki", "safety.md")
   }
-];
+].filter(resource=>existsSync(resource.file));
 
 
 const windowTargetProperties = {
@@ -745,6 +746,7 @@ async function screenshotOutput(screenshot, includeImage = true) {
   if (IN_WSL && metadata.path) metadata.path = linuxPath(metadata.path);
   if (process.env.WCU_IMAGE_MODE === 'file') {
     if (includeImage && !metadata.path) {
+      if (!base64) return { metadata, content: [] };
       // Desktop capture already saves a PNG. Browser captures need a file too.
       if (!browserShotDirReady) { await mkdir(BROWSER_SHOT_DIR, { recursive: true }); browserShotDirReady = true; }
       const cutoff = Date.now() - 30 * 60 * 1000;
@@ -782,12 +784,22 @@ const pendingToolCalls = new Map(); // MCP request id -> {proc}
 const retiringBackends = new WeakSet();
 const interruptibleActions = INTERRUPTIBLE_ACTIONS;
 const takeover = new TakeoverControl({ powershell, config: process.env.WCU_SETTINGS_JSON ? JSON.parse(process.env.WCU_SETTINGS_JSON) : {}, onStop(error) {
-  for (const request of pendingToolCalls.values()) { request.takeoverError = error.message; request.stoppedByUser = error.message === STOPPED; cancelBackendRequest(request); }
+  const stoppedByUser = error.message === STOPPED;
+  for (const request of pendingToolCalls.values()) {
+    if (!stoppedByUser && !request.requiresInput) continue;
+    request.takeoverError = error.message; request.stoppedByUser = stoppedByUser; cancelBackendRequest(request);
+  }
 } });
 
-const browserLane = new BrowserLane();
+const browserEnv = backgroundDesktop ? {
+  ...process.env, WCU_BROWSER_ATTACH_USER: '0', WCU_BROWSER_CDP_URL: undefined, WCU_BROWSER_BIDI_URL: undefined,
+  WCU_BROWSER_PROFILE: path.join(process.env.WCU_BROWSER_PROFILE ||
+    path.join(process.env.LOCALAPPDATA || os.homedir(), 'dsh-computer-use-win', 'agent-browser'), 'background-desktop'),
+} : process.env;
+const browserLane = new BrowserLane({ env: browserEnv });
 // A tab DSH works in keeps its badge until the host ends the operation series.
-browserLane.seriesActive = () => takeover.seriesHeld && !takeover.paused;
+const userStopped = () => takeover.paused && takeover.pauseMessage === STOPPED;
+browserLane.seriesActive = () => takeover.seriesHeld && !userStopped();
 
 // Browser-lane calls work inside the page in the background; the user keeps
 // the pointer, the keyboard and the foreground. They take a quiet lease: it
@@ -883,7 +895,6 @@ function backendEnv(env) {
 }
 
 function spawnBackend() {
-  let backendBuf = "";
   const proc = backendProc = spawn(
     powershell,
     [
@@ -899,7 +910,7 @@ function spawnBackend() {
     {
       cwd: pluginRoot,
       // Under WSL the backend reads the WCU_ variables only when WSLENV names them (#79).
-      env: backendEnv({ ...process.env, WCU_CANCEL_EVENT: takeover.disabledForTest ? '' : takeover.eventName, WCU_READY_EVENT: takeover.disabledForTest ? '' : takeover.eventName+'-ready' }),
+      env: backendEnv({ ...process.env, WCU_CANCEL_EVENT: takeover.helperDisabled ? '' : takeover.eventName, WCU_READY_EVENT: takeover.helperDisabled ? '' : takeover.eventName+'-ready' }),
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     }
@@ -907,7 +918,6 @@ function spawnBackend() {
   proc.wcuReady=false;
   const readyTimeout=Math.min(30000,Math.max(100,Number(process.env.WCU_BACKEND_READY_TIMEOUT_MS)||30000));
   proc.wcuReadyTimer=setTimeout(()=>killBackend(new Error('WCU_BACKEND_PROTOCOL_ERROR: backend did not become ready within '+readyTimeout+'ms; no action was sent.'),proc),readyTimeout);
-  proc.stdout.setEncoding("utf8");
   proc.stderr.setEncoding("utf8");
   let stderrTail = "";
   // Forward backend diagnostics (parse errors, P/Invoke failures, backend
@@ -917,35 +927,31 @@ function spawnBackend() {
     process.stderr.write(`[wcu-backend] ${chunk}`);
     stderrTail = (stderrTail + chunk).slice(-4000);
   });
-  proc.stdout.on("data", (chunk) => {
-    backendBuf += chunk;
-    let idx;
-    while ((idx = backendBuf.indexOf("\n")) >= 0) {
-      const line = backendBuf.slice(0, idx).trim();
-      backendBuf = backendBuf.slice(idx + 1);
-      if (!line) continue;
-      let resp;
-      try {
-        resp = JSON.parse(line);
-      } catch (error) {
-        process.stderr.write('WCU_BACKEND_PROTOCOL_ERROR: invalid JSON response\n');
-        killBackend(new Error('WCU_BACKEND_PROTOCOL_ERROR: backend returned invalid JSON'), proc);
-        continue;
-      }
+  let invalid = false;
+  const failProtocol = error => {
+    if (invalid) return;
+    invalid = true;
+    killBackend(error, proc);
+  };
+  const output = new RpcFramer({
+    allowHeaders: false, maxBytes: 64*1024*1024,
+    onError: error => failProtocol(new Error('WCU_BACKEND_PROTOCOL_ERROR: ' + error.message)),
+    onMessage(resp) {
+      if (invalid || backendProc !== proc) return;
       if(!resp||typeof resp!=='object'||Array.isArray(resp)){
-        killBackend(new Error('WCU_BACKEND_PROTOCOL_ERROR: invalid response shape'),proc);continue;
+        failProtocol(new Error('WCU_BACKEND_PROTOCOL_ERROR: invalid response shape'));return;
       }
       if(resp.type==='ready'){
         if(proc.wcuReady||resp.protocol!==BACKEND_PROTOCOL_VERSION||!Number.isSafeInteger(resp.pid)||resp.pid<=0){
-          killBackend(new Error('WCU_BACKEND_PROTOCOL_MISMATCH: invalid ready handshake; no action was sent.'),proc);continue;
+          failProtocol(new Error('WCU_BACKEND_PROTOCOL_MISMATCH: invalid ready handshake; no action was sent.'));return;
         }
-        proc.wcuReady=true;clearTimeout(proc.wcuReadyTimer);dispatchNextBackend(proc);continue;
+        proc.wcuReady=true;clearTimeout(proc.wcuReadyTimer);dispatchNextBackend(proc);return;
       }
       if(!proc.wcuReady||!Number.isSafeInteger(resp.id)||typeof resp.ok!=='boolean'){
-        killBackend(new Error('WCU_BACKEND_PROTOCOL_ERROR: response arrived without a valid ready handshake or result shape'),proc);continue;
+        failProtocol(new Error('WCU_BACKEND_PROTOCOL_ERROR: response arrived without a valid ready handshake or result shape'));return;
       }
       const w = backendWaiters.get(resp.id);
-      if (!w || w.proc !== proc) continue;
+      if (!w || w.proc !== proc) return;
       backendWaiters.delete(resp.id);
       clearTimeout(w.timer);
       if (resp.ok === false) {
@@ -957,6 +963,7 @@ function spawnBackend() {
       else dispatchNextBackend(proc);
     }
   });
+  proc.stdout.on('data', chunk => { if (!invalid) output.push(chunk); });
   proc.stdin.on("error", () => { /* EPIPE when the backend dies; the exit handler fails waiters */ });
   const onDeath = (err) => {
     clearTimeout(proc.wcuReadyTimer);
@@ -1008,6 +1015,21 @@ let takeoverSetup = Promise.resolve();
 // (WCU_NEEDS_INPUT) and runs again with both.
 async function runBackend(action, args = {}, timeoutMs = 30000, request) {
   const quiet = isQuietCall(action, args);
+  if (backgroundDesktop) {
+    if (args.activate || args.scope === 'desktop' || (!quiet && !['launch_app','close_window','move_window'].includes(action))) {
+      throw new Error('WCU_BACKGROUND_DESKTOP_LIMIT: Use a window or UI Automation control. Foreground input and full-screen capture require Current desktop or Hyper-V.');
+    }
+    const targeted = args.nativeWindowHandle || args.processId || args.windowTitle;
+    if (['tree','find','snapshot','screenshot','ocr','element_info','wait_for','close_window','move_window'].includes(action) && !targeted) {
+      throw new Error('WCU_BACKGROUND_DESKTOP_TARGET_REQUIRED: list_windows can find a window on this desktop. Pass its nativeWindowHandle.');
+    }
+    const backgroundArgs = action==='ocr' ? { ...args, resolveControl:false } : args;
+    try { return await runBackendOnce(action, { ...backgroundArgs, _wcuQuiet: true }, timeoutMs, request, true); }
+    catch (error) {
+      if (!/^WCU_NEEDS_INPUT\b/.test(error.message)) throw error;
+      throw new Error('WCU_BACKGROUND_DESKTOP_LIMIT: The target did not accept the background operation. Choose Current desktop or Hyper-V for foreground input.');
+    }
+  }
   const mayUpgrade = BACKGROUND_FIRST.has(action) || (action === 'click' && (args.dispatch ?? 'auto') === 'auto' && args.elementId != null);
   if (quiet && mayUpgrade) {
     try { return await runBackendOnce(action, { ...args, _wcuQuiet: true }, timeoutMs, request, true); }
@@ -1019,15 +1041,17 @@ async function runBackend(action, args = {}, timeoutMs = 30000, request) {
 
 async function runBackendOnce(action, args, timeoutMs, request, quiet) {
   const changesDesktop = action!=='health';
+  if (request) request.requiresInput = !quiet;
   let acquired = false, capturing = false;
   // Reserve preparation in arrival order. Otherwise awaiting the native
   // indicator can let a later observation reach the backend before its input.
   const prepared = takeoverSetup.then(async () => {
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
-    if(takeover.child && (['screenshot','ocr'].includes(action) || (action==='snapshot' && args.includeScreenshot!==false) || (action==='wait_for' && args.condition==='text'))) {
-      await takeover.command('capture_begin');capturing=true;
-    }
     if (changesDesktop) { await takeover.begin({ quiet }); acquired = true; }
+    if(takeover.child && (['screenshot','ocr'].includes(action) || (action==='snapshot' && args.includeScreenshot!==false) || (action==='wait_for' && args.condition==='text'))) {
+      try { await takeover.command('capture_begin');capturing=true; }
+      catch (error) { takeover.presentationError(error); }
+    }
   });
   takeoverSetup = prepared.catch(() => {});
   try {
@@ -1035,10 +1059,11 @@ async function runBackendOnce(action, args, timeoutMs, request, quiet) {
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
     // The series lets typing without a window target follow the window the
     // series last gave input to, after the user got the foreground back.
-    return await dispatchBackend(action, { ...args, _wcuImageData: process.env.WCU_IMAGE_MODE !== 'file', _wcuCornerFailsafe: false, _wcuTakeoverPid: takeover.helperProcessId, _wcuSeries: takeover.seriesKey ?? null }, timeoutMs, request);
+    return await dispatchBackend(action, { ...args, _wcuImageData: args._wcuImageData ?? (process.env.WCU_IMAGE_MODE !== 'file'), _wcuCornerFailsafe: false, _wcuTakeoverPid: takeover.helperProcessId, _wcuSeries: takeover.seriesKey ?? null }, timeoutMs, request);
   } finally {
     if(capturing&&takeover.child)await takeover.command('capture_end').catch(error=>takeover.presentationError(error));
     if (acquired) await takeover.end({ quiet });
+    if (request) request.requiresInput = false;
   }
 }
 
@@ -1107,6 +1132,7 @@ function validateTargetArgs(args) {
 }
 
 async function callTool(name, args, request) {
+  if (typeof name !== 'string') throw new Error('INVALID_ARGUMENTS: tool name must be a string');
   if (batchOwner && batchOwner !== request) throw new Error('COMPUTER_USE_BUSY: A batch is in progress; wait for its result.');
   if (!allowedTools.has(name) && TOOL_NAMES.includes(name.slice(prefix.length))) throw new Error('TOOL_DISABLED_IN_SETTINGS: This tool is disabled by the user in Settings > Computer Use (设置 > 电脑操控 in the Chinese interface).');
   if (name === discoveryName) return manageTools(args);
@@ -1287,7 +1313,7 @@ const batchPrevalidated = new WeakSet();
 const withoutUnsavedMark = title => String(title ?? '').replace(/^\s*[*●•]+\s*|\s*[*●•]+\s*$/g, '').replace(/\s[*●•](?=\s)/g, '');
 const textData = result => { try { return JSON.parse(result.content?.find(part => part.type === 'text')?.text); } catch { return null; } };
 async function runBatch(args, request) {
-  if (batchOwner) throw new Error('COMPUTER_USE_BUSY: Another batch is running.');
+  if (batchOwner || pendingToolCalls.size > 1) throw new Error('COMPUTER_USE_BUSY: Wait for the active computer-use call before starting a batch.');
   const target = Object.fromEntries(['browserTab','windowTitle','processId','nativeWindowHandle','activate'].filter(key => args[key] !== undefined).map(key => [key,args[key]]));
   if (!target.browserTab && !target.windowTitle && !target.processId && !target.nativeWindowHandle) throw new Error('INVALID_ARGUMENTS: batch needs one explicit window target or browserTab.');
   if (target.browserTab && ['windowTitle','processId','nativeWindowHandle'].some(key => target[key] !== undefined)) throw new Error('INVALID_ARGUMENTS: do not mix desktop and page targets.');
@@ -1300,13 +1326,16 @@ async function runBatch(args, request) {
       const stepTarget = key === 'browserTab' && step.arguments[key] === 'desktop' && !target.browserTab ? undefined : step.arguments[key];
       if (stepTarget !== undefined && stepTarget !== target[key]) throw new Error('INVALID_ARGUMENTS: all batch steps must keep the same target.');
     }
-    if (/^(?:new-tab|b[0-9a-z]+:(?:new-tab|connect))$/.test(step.arguments.elementId ?? '')) throw new Error('INVALID_ARGUMENTS: open or connect a browser before batching.');
-    if (target.browserTab && step.arguments.elementId && !step.arguments.elementId.startsWith(target.browserTab + ':')) throw new Error('INVALID_ARGUMENTS: batch element belongs to another tab.');
+    const elementId=step.arguments.elementId ?? '';
+    if (NEW_TAB.test(elementId) || USER_CONNECT.test(elementId)) throw new Error('INVALID_ARGUMENTS: open or connect a browser before batching.');
+    if (target.browserTab && elementId && ELEMENT_ID.exec(elementId)?.[1] !== target.browserTab) throw new Error('INVALID_ARGUMENTS: batch element belongs to another tab.');
     if (!target.browserTab && isBrowserCall(step.arguments)) throw new Error('INVALID_ARGUMENTS: a desktop batch cannot contain page elements.');
     const definition = toolByName.get(name);
     // wait has no target properties, and never borrows the foreground.
     const inherited = Object.fromEntries(Object.entries(target).filter(([key]) => Object.hasOwn(definition.inputSchema.properties,key)));
     const combined = step.action === 'wait' ? { ...step.arguments } : { ...inherited, ...step.arguments };
+    if (args.observationToken !== undefined && combined.observationToken === undefined &&
+        Object.hasOwn(definition.inputSchema.properties,'observationToken')) combined.observationToken=args.observationToken;
     if (target.browserTab && !Object.hasOwn(definition.inputSchema.properties,'browserTab')) delete combined.browserTab;
     if (target.browserTab && step.action !== 'wait' && !isBrowserCall(combined)) throw new Error('INVALID_ARGUMENTS: this browser batch action needs a page element ID; page coordinates cannot become desktop input.');
     const validated = validateTargetArgs(validateArguments(definition.inputSchema, combined));
@@ -1326,7 +1355,17 @@ async function runBatch(args, request) {
     // twin must not make the target ambiguous or count as a new window.
     const listed = await runBackend('list_windows', { maxWindows: 200, includeMinimized: false }, 10000, request);
     const windows = listed.windows ?? [];
-    const matches = windows.filter(window => nativeHandle ? String(window.nativeWindowHandle) === nativeHandle : target.nativeWindowHandle ? String(window.nativeWindowHandle) === String(target.nativeWindowHandle) : target.processId ? window.processId === target.processId : String(window.name ?? window.title ?? '').toLowerCase().includes(target.windowTitle.toLowerCase()));
+    let matches = windows.filter(window =>
+      (!nativeHandle || String(window.nativeWindowHandle) === nativeHandle) &&
+      (!target.nativeWindowHandle || String(window.nativeWindowHandle) === String(target.nativeWindowHandle)) &&
+      (!target.processId || window.processId === target.processId));
+    if (!nativeHandle && target.windowTitle) {
+      const query=target.windowTitle.toLowerCase();
+      const title=window=>String(window.name ?? window.title ?? '').toLowerCase();
+      const exact=matches.filter(window=>title(window)===query);
+      const start=matches.filter(window=>title(window).startsWith(query));
+      matches=exact.length ? exact : start.length ? start : matches.filter(window=>title(window).includes(query));
+    }
     // Once resolved the target is pinned to its HWND, so no match means it closed.
     if (nativeHandle && matches.length === 0) return { closed: true };
     if (matches.length !== 1) throw new Error('BATCH_TARGET_UNAVAILABLE: target is missing or ambiguous; specify its nativeWindowHandle.');
@@ -1341,7 +1380,7 @@ async function runBatch(args, request) {
     if (before.dialog) stopReason = 'dialog';
     for (const [index,step] of plan.entries()) {
       if (stopReason !== 'completed') break;
-      if (request.cancelled || takeover.paused) { stopReason = 'cancelled'; break; }
+      if (request.cancelled || userStopped()) { stopReason = 'cancelled'; break; }
       if (Date.now() >= Math.min(deadline, batchDeadline)) { stopReason = 'deadline'; break; }
       // Native actions stay pinned to the originally resolved HWND.
       if (!target.browserTab && step.action !== 'wait') step.args.nativeWindowHandle = Number(nativeHandle);
@@ -1354,7 +1393,7 @@ async function runBatch(args, request) {
       if (result.isError) { summary.error = result.content?.[0]?.text; stopReason = 'error'; }
       steps.push(summary);
       if (result.isError) break;
-      if (request.cancelled || takeover.paused) { stopReason = 'cancelled'; break; }
+      if (request.cancelled || userStopped()) { stopReason = 'cancelled'; break; }
       if (data?.verification === 'unconfirmed' || data?.verified === false) { stopReason = 'unconfirmed'; break; }
       // What the action changed. Before another action this stops the plan; a
       // change caused by the last action (a submit that navigates, a confirm
@@ -1379,7 +1418,7 @@ async function runBatch(args, request) {
     const closed = stopReason === 'targetClosed' || afterLastStep === 'targetClosed';
     if (closed) content.push({ type: 'text', text: 'Final observation skipped: the target closed.' });
     else if (batchDeadline - Date.now() < 8000) content.push({ type: 'text', text: 'Final observation skipped: batch wall-clock budget reached.' });
-    else if (before && !request.cancelled && !takeover.paused) {
+    else if (before && !request.cancelled && !userStopped()) {
       const observer = allowedTools.has(prefix + 'accessibility_tree') ? 'accessibility_tree' : allowedTools.has(prefix + 'screenshot') ? 'screenshot' : null;
       if (observer) {
         const previousDeadline = request.deadlineMs;
@@ -1418,6 +1457,7 @@ async function handleRequest(message) {
   const { id, method, params } = message;
   // Notifications are never tool calls and must never get a response.
   if(!Object.hasOwn(message,'id')&&!['notifications/initialized','notifications/cancelled'].includes(method))return null;
+  if(Object.hasOwn(message,'id')&&method.startsWith('notifications/'))return rpcError(id,-32601,'Notifications do not take a request id.');
   if(Object.hasOwn(message,'id')&&params!==undefined&&(!params||typeof params!=='object'||Array.isArray(params)))return rpcError(id,-32602,'params must be an object');
   if (method === "notifications/initialized") return null;
   if (method === "notifications/cancelled") {
@@ -1530,11 +1570,11 @@ function dispatch(message) {
 
 async function selfTest() {
   const health = await runBackend("health", {});
-  const snapshot = await runBackend(
-    "snapshot",
-    { scope: "active_window", includeScreenshot: true, maxDepth: 0, maxNodes: 1 },
-    45000
-  );
+  let snapshot, captureError;
+  try {
+    snapshot = await runBackend("snapshot",
+      { scope: "active_window", includeScreenshot: true, maxDepth: 0, maxNodes: 1, _wcuImageData:true },45000);
+  } catch (error) { captureError=error.message; }
   const toolsOk = tools.length >= 10;
   const screenshotBytes = snapshot?.screenshot?.base64 ? Buffer.byteLength(snapshot.screenshot.base64, "base64") : 0;
   const screenshotOk = screenshotBytes > 1000 && snapshot?.screenshot?.mimeType === "image/png";
@@ -1548,6 +1588,7 @@ async function selfTest() {
     backend: health,
     screenshot: {
       ok: screenshotOk,
+      ...(captureError ? {error:captureError} : {}),
       mimeType: snapshot?.screenshot?.mimeType,
       bytes: screenshotBytes,
       bounds: snapshot?.screenshot?.bounds,
@@ -1557,30 +1598,28 @@ async function selfTest() {
 }
 
 if (process.argv.includes("--self-test")) {
+  installShutdown();
   selfTest()
     .then((result) => {
       console.log(JSON.stringify(result, null, 2));
-      killBackend();
-      process.exit(result.ok ? 0 : 1);
+      return shutdown(result.ok ? 0 : 1);
     })
     .catch((error) => {
       console.error(error instanceof Error ? error.stack : String(error));
-      killBackend();
-      process.exit(1);
+      return shutdown(1);
     });
 } else if (process.argv[2] === "--backend") {
+  installShutdown();
   const action = process.argv[3] || "health";
   parseBackendCliArgs()
     .then((args) => runBackend(action, args))
     .then((result) => {
       console.log(JSON.stringify(result, null, 2));
-      killBackend();
-      process.exit(0);
+      return shutdown(0);
     })
     .catch((error) => {
       console.error(error instanceof Error ? error.stack : String(error));
-      killBackend();
-      process.exit(1);
+      return shutdown(1);
     });
 } else if ((() => {
   try {
@@ -1589,7 +1628,7 @@ if (process.argv.includes("--self-test")) {
     return process.platform === 'win32' ? actual.toLowerCase() === own.toLowerCase() : actual === own;
   } catch { return false; }
 })()) {
-  process.on("exit", () => { killBackend(); browserLane.close(); takeover.child?.stdin.end(); });
+  installShutdown();
   process.stdin.on("data", (chunk) => {
     try {
       ingest(chunk);
@@ -1606,11 +1645,27 @@ if (process.argv.includes("--self-test")) {
 
 let pendingRequests = 0;
 let stdinEnded = false;
+let shuttingDown;
+
+function installShutdown() {
+  process.once('SIGINT', () => { void shutdown(130); });
+  process.once('SIGTERM', () => { void shutdown(143); });
+  process.on('exit', () => { killBackend(); browserLane.close(); takeover.child?.kill(); });
+}
+
+function shutdown(code) {
+  if (!shuttingDown) {
+    process.stdin.pause();
+    killBackend();
+    shuttingDown = Promise.allSettled([takeover.close(), browserLane.shutdown()]).then(() => process.exit(code));
+  }
+  return shuttingDown;
+}
 
 function maybeExitAfterStdinEnd() {
   if (stdinEnded && pendingRequests === 0) {
     // A kept-profile DSH browser closes itself first, saving its last cookies.
-    Promise.allSettled([takeover.close(), browserLane.shutdown()]).finally(() => process.exit(0));
+    void shutdown(0);
   }
 }
 

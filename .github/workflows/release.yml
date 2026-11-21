@@ -1,7 +1,7 @@
 name: Release
 
-# On a version tag (v1.2.3): check that the tag matches package.json, check the
-# build and the package contents, then publish to npm. npm accepts the upload
+# On a version tag (v1.2.3): run CI on the tagged commit, check that the tag
+# matches package.json, check the package, then publish to npm. npm accepts the upload
 # through trusted publishing: npmjs.com trusts this workflow file in this
 # repository and checks a short-lived identity token that GitHub issues to the
 # run, so no npm token is stored anywhere. npm adds provenance on its own.
@@ -14,10 +14,16 @@ on:
 
 permissions:
   contents: read
-  id-token: write # trusted publishing: the identity token npm checks
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: verify
+    permissions:
+      contents: read
+      id-token: write # trusted publishing: the identity token npm checks
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

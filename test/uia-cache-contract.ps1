@@ -45,7 +45,7 @@ namespace Fixture.Automation {
     public class Info {
       public string Name="Fixture node", AutomationId="fixture", ClassName="Fixture", LocalizedControlType="button", FrameworkId="Fixture";
       public ControlType ControlType=new ControlType(); public int ProcessId=4242, NativeWindowHandle=42;
-      public bool IsEnabled=true, IsOffscreen=false, HasKeyboardFocus=false;
+      public bool IsEnabled=true, IsOffscreen=false, HasKeyboardFocus=false, IsPassword=false;
       public Fixture.Rect BoundingRectangle=new Fixture.Rect {X=1,Y=2,Width=30,Height=40};
     }
     public static int CurrentReads, RuntimeCalls, FindCalls, CacheBuilds, FirstCalls, SiblingCalls, DelayMs, FailAtNavigation;
@@ -58,6 +58,7 @@ namespace Fixture.Automation {
     public void Add(AutomationElement child) {child.Parent=this; Children.Add(child);}
     public int[] GetRuntimeId() {RuntimeCalls++; return new[] {42,Key};}
     public object GetCachedPropertyValue(AutomationProperty p) {return new[] {42,Key};}
+    public static AutomationProperty IsPasswordProperty=new AutomationProperty("IsPassword");
     public AutomationElement GetUpdatedCache(CacheRequest request) {
       CacheBuilds++; if (FailCache) throw new Exception("provider unavailable"); Request=request; return this;
     }
@@ -100,7 +101,7 @@ public static class WindowsComputerUseNative {
   public static uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId) {processId=4242; return 1;}
 }
 '@
-$names = @('Get-Prop','Get-ViewMode','Get-DetailLevel','Get-ViewCondition','Invoke-Safe','Convert-Rect','Get-ControlTypeName','Get-Patterns','Get-ValueText','New-ElementCacheRequest','Register-ObservedElement','Convert-ElementInfo','Test-TreeBudget','Get-Children','Convert-Tree','Element-Matches','Search-Tree','Initialize-ChromiumPages','Get-TreeResult','Invoke-Action')
+$names = @('Get-Prop','Get-ViewMode','Get-DetailLevel','Get-ViewCondition','Invoke-Safe','Convert-Rect','Get-ControlTypeName','Get-Patterns','Get-ValueText','New-ElementCacheRequest','Register-ObservedElement','Convert-ElementInfo','Test-TreeBudget','Test-RectOverlap','Get-Children','Convert-Tree','Element-Matches','Search-Tree','Initialize-ChromiumPages','Get-TreeResult','Invoke-Action')
 foreach ($name in $names) {
   $definition = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name}, $true)
   if ($null -ne $definition) { . ([scriptblock]::Create($definition.Extent.Text.Replace('System.Windows','Fixture'))) }
@@ -161,6 +162,30 @@ Assert-Equal $result.tree.value 'cached value' 'Full cached value'
 Assert-Equal ($result.tree.patterns -join ',') 'Invoke,Value' 'Full supported cached patterns'
 Assert-Equal $script:Root.Request.Patterns.Count 6 'Full batches patterns'
 Assert-Equal ([Fixture.Automation.AutomationElement]::CurrentReads) 0 'Full has no live reads'
+$script:Root.Cached.IsPassword=$true
+$result=Get-TreeResult active_window 0 100 ([pscustomobject]@{detailLevel='full'})
+Assert-Equal $result.tree.value $null 'Even a password provider with a cached value is redacted'
+Assert-Equal ([Fixture.Automation.AutomationElement]::CurrentReads) 0 'Password check also uses the cache'
+Reset-Fixture
+$script:Root.Cached.ControlType.ProgrammaticName='ControlType.Document'
+$script:Root.Cached.IsOffscreen=$true
+$inside=New-Object Fixture.Automation.AutomationElement 21
+$inside.Cached.IsOffscreen=$true
+$outside=New-Object Fixture.Automation.AutomationElement 22
+$outside.Cached.IsOffscreen=$true
+$outside.Cached.BoundingRectangle=[Fixture.Rect]@{X=32;Y=42;Width=30;Height=40}
+$script:Root.Add($inside);$script:Root.Add($outside)
+$owner=@{className='MozillaWindowClass';isOffscreen=$false;boundingBox=@{x=1;y=2;width=30;height=40};nativeWindowHandle=42;processId=4242}
+$traversal=@{watch=[Diagnostics.Stopwatch]::StartNew();budgetMs=5000;cache=(New-ElementCacheRequest 'compact');walker=[Fixture.Automation.TreeWalker]::RawViewWalker;pruneGeckoOffscreen=$true;browserLayout=$true}
+$nodes=0
+$gecko=Convert-Tree -Element $script:Root -Path active -Depth 0 -MaxDepth 3 -Count ([ref]$nodes) -MaxNodes 10 -Traversal $traversal -Owner $owner
+Assert-Equal $gecko.children.Count 1 'Firefox provider may mark the whole document offscreen'
+Assert-Equal $gecko.children[0].id 'uia:rt:42-21' 'Keep in-viewport controls only'
+Assert-Equal $gecko.children[0].isOffscreen $true 'Preserve the provider offscreen value'
+$owner.isOffscreen=$true
+$nodes=0
+$gecko=Convert-Tree -Element $script:Root -Path active -Depth 0 -MaxDepth 3 -Count ([ref]$nodes) -MaxNodes 10 -Traversal $traversal -Owner $owner
+Assert-Equal $gecko.children.Count 0 'Do not recover controls from a hidden window'
 Reset-Fixture
 $script:Root.Add((New-Object Fixture.Automation.AutomationElement 2))
 [Fixture.Automation.AutomationElement]::DelayMs=150

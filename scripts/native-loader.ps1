@@ -9,22 +9,26 @@ function Get-NativeSourceHash {
 $script:CachedNativeManifestKey = $null
 $script:CachedNativeManifest = $null
 function Import-PackagedHelper {
-  param([string]$Name, [string]$Source, [string]$Root = $PSScriptRoot)
-  if ($PSVersionTable.PSEdition -eq 'Core' -or $env:WCU_DISABLE_PRECOMPILED -eq '1') { return $false }
+  param([string]$Name, [string]$Source, [string]$Root = $PSScriptRoot, [switch]$IgnoreDisable)
+  if ($PSVersionTable.PSEdition -eq 'Core' -or (-not $IgnoreDisable -and $env:WCU_DISABLE_PRECOMPILED -eq '1')) { return $false }
   try {
     $manifestPath = Join-Path $Root 'native/manifest.json'
     if (-not [IO.File]::Exists($manifestPath)) { return $false }
+    foreach ($item in @((Join-Path $Root 'native'),$manifestPath)) {
+      if ([IO.File]::GetAttributes($item) -band [IO.FileAttributes]::ReparsePoint) { throw 'Native helper path is a reparse point.' }
+    }
     $manifestKey = "$manifestPath|$(([IO.File]::GetLastWriteTimeUtc($manifestPath)).Ticks)"
     if ($script:CachedNativeManifestKey -cne $manifestKey -or $null -eq $script:CachedNativeManifest) {
       $script:CachedNativeManifest = [IO.File]::ReadAllText($manifestPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
       $script:CachedNativeManifestKey = $manifestKey
     }
     $manifest = $script:CachedNativeManifest
-    if ($manifest.runtime -ne 'netfx-clr4') { throw 'Unsupported native runtime.' }
+    if ($manifest.schemaVersion -ne 1 -or $manifest.runtime -ne 'netfx-clr4') { throw 'Unsupported native manifest or runtime.' }
     $entry = $manifest.helpers.$Name
     if ($null -eq $entry -or $entry.sourceHash -cne (Get-NativeSourceHash $Source)) { throw 'Helper source changed; rebuild native artifacts.' }
-    if ($entry.file -cnotmatch '^wcu-(native|ocr|clipboard|takeover)-netfx\.dll$') { throw 'Invalid helper filename.' }
+    if ($Name -cnotmatch '^(native|ocr|clipboard|takeover)$' -or $entry.file -cne "wcu-$Name-netfx.dll") { throw 'Invalid helper filename.' }
     $file = Join-Path (Join-Path $Root 'native') $entry.file
+    if ([IO.File]::GetAttributes($file) -band [IO.FileAttributes]::ReparsePoint) { throw 'Native helper DLL is a reparse point.' }
     $bytes = [IO.File]::ReadAllBytes($file)
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $actual = ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() }

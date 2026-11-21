@@ -16,7 +16,7 @@ foreach($name in @('Get-Prop','Invoke-Safe','Test-TargetMatch','Select-TargetWin
 Add-Type -TypeDefinition @'
 using System; using System.Collections.Generic; using System.Text;
 public static class WindowsComputerUseNative {
- public sealed class ProcessIdentity { public bool Gone; public string ImagePath; public uint? Integrity; }
+ public sealed class ProcessIdentity { public bool Gone,TokenAccessDenied; public string ImagePath; public uint? Integrity; }
  public static ProcessIdentity Target=new ProcessIdentity{ImagePath=@"C:\fixture\app.exe",Integrity=8192};
  public static uint? CurrentIntegrity=8192;
  public static ProcessIdentity ReadInputProcess(uint pid,bool checkImage){return Target;}
@@ -101,6 +101,9 @@ Expect-Error {Assert-InputProcess 2} 'HOST_INPUT_DENIED:.+host executable'
 $identity.ImagePath='C:\fixture\app.exe'
 $identity.Integrity=$null
 Expect-Error {Assert-InputProcess 2} 'INPUT_TARGET_ACCESS_UNCONFIRMED:.+integrity.+No input was sent'
+$identity.TokenAccessDenied=$true
+Expect-Error {Assert-InputProcess 2} 'INPUT_TARGET_ACCESS_UNCONFIRMED:.+administrator.+No input was sent'
+$identity.TokenAccessDenied=$false
 $identity.Integrity=8192
 [WindowsComputerUseNative]::CurrentIntegrity=$null
 Expect-Error {Assert-InputProcess 2} 'INPUT_TARGET_ACCESS_UNCONFIRMED'
@@ -167,7 +170,9 @@ Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) 'changed'
 $native::EditBefore='abXYZ'
 Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) 'incomplete'
 $native::Focus=191
-Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) $null
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) 'incomplete'
+$native::EditBefore='abXYZcd'
+Assert-Equal (Wait-SendInputEdit ([IntPtr]200) ([IntPtr]190) $edit 3) 'observed'
 $native::Focus=190
 # A control without readback: at least 150 ms, and until its queue is drained.
 $clock.Restart()

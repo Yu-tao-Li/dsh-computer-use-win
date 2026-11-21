@@ -19,9 +19,10 @@ export class BrowserPipe {
       if(end<0)return;
       const text=Buffer.concat(this.parts,this.bytes).toString('utf8');this.parts=[];this.bytes=0;
       if(text)this.onmessage?.(text);
+      if(this.closed)return;
       start=end+1;if(start===chunk.length)return;
     }
   }
   send(text){if(this.closed)throw new Error('BROWSER_DISCONNECTED: DevTools pipe closed');this.writer.write(text+'\0','utf8');}
-  close(){if(this.closed)return;this.closed=true;this.writer.destroy();this.reader.destroy();this.parts=[];this.onclose?.();}
+  close(){if(this.closed)return;this.closed=true;this.writer.destroy();this.reader.destroy();this.parts=[];this.bytes=0;this.onclose?.();}
 }

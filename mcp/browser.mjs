@@ -3,14 +3,15 @@ export {isBrowserElementId,isBrowserCall,isQuietCall,BACKGROUND_FIRST} from './c
 import {readSafeValue} from './page-values.mjs';
 import {BrowserFrames,sameFrameNode} from './browser-frames.mjs';
 import {BrowserPipe} from './browser-pipe.mjs';
-import { assertBrowserUrl, assertUpload, canonicalizeBrowserUrl, isBlockedRuntimeRequestUrl } from './policy.mjs';
+import {profileLock} from './browser-profile-lock.mjs';
+import { assertBrowserUrl, assertUpload, canonicalizeBrowserUrl, canonicalFileUrl, isBlockedRuntimeRequestUrl, browserChildEnv as browserEnv } from './policy.mjs';
 // Browser lane: Chromium pages over the Chrome DevTools Protocol (CDP).
 // A page is read as an accessibility outline whose element ids act inside the
 // page itself, so a tab can be read and operated in the background: no desktop
 // pointer, no keyboard focus, no clipboard and no window activation.
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import tls from 'node:tls';
 import os from 'node:os';
@@ -47,72 +48,7 @@ const LEASE_PREFIX = 'dsh-client-';
 // the switch keeps Edge from relaunching for a layer applied any other way
 // (Playwright passes the same switch); other browsers ignore it.
 const NO_COMPAT_RELAUNCH = '--edge-skip-compat-layer-relaunch';
-export function browserEnv(env = process.env) {
-  const clean = { ...env };
-  for (const key of Object.keys(clean)) if (key.toUpperCase() === '__COMPAT_LAYER') delete clean[key];
-  return clean;
-}
-
-function removeEmptyProfileLock(directory) {
-  // Windows can report EPERM for a nonempty directory.
-  try { rmdirSync(directory); }
-  catch (error) { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST', 'EPERM', 'ENOTDIR'].includes(error.code)) throw error; }
-}
-
-function reapProfileLock(lock) {
-  try {
-    const entry = lstatSync(lock);
-    if (entry.isFile()) {
-      // Compatibility with the PID-file lock written by older packages.
-      // Unlink never removes a replacement directory.
-      const owner = Number(readFileSync(lock, 'utf8'));
-      if (Number.isSafeInteger(owner) && owner > 0 && !processAlive(owner)) rmSync(lock, { force: true });
-      return;
-    }
-    if (!entry.isDirectory()) return;
-    const entries = readdirSync(lock);
-    if (entries.length === 1) {
-      const owner = /^owner-(\d+)-[a-f0-9]{16}$/.exec(entries[0]);
-      if (!owner || processAlive(Number(owner[1]))) return;
-      rmSync(path.join(lock, entries[0]), { force: true });
-    }
-    if (entries.length <= 1) removeEmptyProfileLock(lock);
-  } catch (error) {
-    if (!['ENOENT', 'ENOTDIR', 'EISDIR', 'ERR_FS_EISDIR', 'EPERM'].includes(error.code)) throw error;
-  }
-}
-
-// Atomically publish a nonempty directory. A delayed stale-lock cleanup can
-// remove only the old owner's unique marker and an empty directory.
-async function profileLock(profile, action) {
-  const lock = `${profile}.dsh-lock`, started = Date.now();
-  const marker = `owner-${process.pid}-${randomBytes(8).toString('hex')}`;
-  const directory = path.dirname(lock), pendingPrefix = path.basename(lock) + '.pending-';
-  const pending = mkdtempSync(path.join(directory, pendingPrefix + process.pid + '-'));
-  let acquired = false;
-  try {
-    writeFileSync(path.join(pending, marker), '', { flag: 'wx' });
-    for (;;) {
-      try { renameSync(pending, lock); acquired = true; break; }
-      catch (error) {
-        if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES', 'ENOTDIR', 'EISDIR'].includes(error.code)) throw error;
-        reapProfileLock(lock);
-        if (Date.now() - started > 30000) fail('BROWSER_PROFILE_BUSY', 'Another DSH server is starting or closing this browser; try again.');
-        await sleep(100);
-      }
-    }
-    for (const entry of readdirSync(directory)) {
-      if (!entry.startsWith(pendingPrefix)) continue;
-      const owner = /^(\d+)-[A-Za-z0-9]{6}$/.exec(entry.slice(pendingPrefix.length));
-      if (owner && !processAlive(Number(owner[1]))) reapProfileLock(path.join(directory, entry));
-    }
-    return await action();
-  } finally {
-    const ownedDirectory = acquired ? lock : pending;
-    rmSync(path.join(ownedDirectory, marker), { force: true });
-    removeEmptyProfileLock(ownedDirectory);
-  }
-}
+export { browserEnv };
 
 function otherClients(browser, activeAfter = -Infinity) {
   if (!browser.kept) return [];
@@ -1273,7 +1209,7 @@ export class BrowserLane {
         readyFile,
       });
       const host = spawn(process.execPath, [fileURLToPath(import.meta.url), '--host-kept-profile', configFile], {
-        env: { ...this.env, ELECTRON_RUN_AS_NODE: '1' },
+        env: { ...browserEnv(this.env), ELECTRON_RUN_AS_NODE: '1' },
         stdio: 'ignore',
         windowsHide: true,
         detached: true,
@@ -1319,13 +1255,13 @@ export class BrowserLane {
       if (Number.isInteger(ready.hostPid) && ready.hostPid > 0) browser.hostPid = ready.hostPid;
       writeFileSync(path.join(profile, OWNER_FILE), String(process.pid));
       joinProfile(browser);
-      const watcher = spawn(process.execPath, [fileURLToPath(import.meta.url), '--watch-profile', profile, url, String(browser.pid)], { env: { ...this.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'ignore', windowsHide: true, detached: true });
+      const watcher = spawn(process.execPath, [fileURLToPath(import.meta.url), '--watch-profile', profile, url, String(browser.pid)], { env: { ...browserEnv(this.env), ELECTRON_RUN_AS_NODE: '1' }, stdio: 'ignore', windowsHide: true, detached: true });
       watcher.on('error', () => { }); watcher.unref();
       return this.prepareAgent(browser);
     }
     const child = this.agentChild = spawn(executable.path, launchArgs, {
       stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'],
-      env: browserEnv(),
+      env: browserEnv(this.env),
       windowsHide: true,
       detached: false,
     });
@@ -1541,7 +1477,12 @@ export class BrowserLane {
       this.updateIndicator(tab).catch(() => {});
     } else if (method === 'Page.frameNavigated') {
       this.frames.invalidate(tab,params.frame);
-      if(!params.frame.parentId){tab.document = params.frame.loaderId; tab.navigatingTo = null; tab.crashed = false; tab.statusContextId = null;}
+      if(!params.frame.parentId){
+        tab.document = params.frame.loaderId; tab.navigatingTo = null; tab.crashed = false; tab.statusContextId = null;
+        if (tab.approvedFileUrl && (!/^file:/i.test(params.frame.url ?? '') || canonicalFileUrl(params.frame.url)!==tab.approvedFileUrl)) {
+          tab.approvedFileUrl=undefined;
+        }
+      }
     }
     else if(method==='Page.frameDetached')tab.frames?.delete(params.frameId);
     else if (method === 'Inspector.targetCrashed') tab.crashed = true;
@@ -1733,11 +1674,7 @@ export class BrowserLane {
     let blocked = false;
     let reason = '';
     try {
-      let allowLocalFile = Boolean(this.env.WCU_ALLOWED_FILE_ROOTS);
-      if (!allowLocalFile && tab.approvedFileUrl && /^file:/i.test(reqUrl)) {
-        allowLocalFile = canonicalizeBrowserUrl(reqUrl).url.href === canonicalizeBrowserUrl(tab.approvedFileUrl).url.href;
-      }
-      ({ blocked, reason } = isBlockedRuntimeRequestUrl(reqUrl, this.env, { isNavigation, allowLocalFile }));
+      ({ blocked, reason } = isBlockedRuntimeRequestUrl(reqUrl, this.env, { isNavigation, approvedFileUrl:tab.approvedFileUrl, checkFileRoots:true }));
     } catch {
       blocked = true;
       reason = 'WCU_POLICY_DENIED: invalid request URL.';
@@ -2205,7 +2142,7 @@ export class BrowserLane {
     const firstVisibleWindow = browser.source === 'agent' && !browser.headless && ![...this.tabs.values()].some(tab => tab.browser === browser && !tab.closed);
     const { targetId } = await browser.cdp.send('Target.createTarget', { url: 'about:blank', background: true, ...(firstVisibleWindow ? { newWindow: true } : {}), ...(browser.contextId ? { browserContextId: browser.contextId } : {}) });
     const tab = this.tabFor(browser, { targetId, title: '', url: 'about:blank' });
-    tab.approvedFileUrl = /^file:/i.test(url) ? canonicalizeBrowserUrl(url).url.href : undefined;
+    tab.approvedFileUrl = /^file:/i.test(url) ? canonicalFileUrl(url) : undefined;
     tab.opened = true;
     await this.session(tab);
     if (call) await this.working(tab, call);
@@ -2405,7 +2342,7 @@ export class BrowserLane {
         case 'set_value': {
           if (address) {
             const url = this.normalizeUrl(args.value, request);
-            tab.approvedFileUrl = /^file:/i.test(url) ? canonicalizeBrowserUrl(url).url.href : undefined;
+            tab.approvedFileUrl = /^file:/i.test(url) ? canonicalFileUrl(url) : undefined;
             await this.navigate(tab, url);
             break;
           }
@@ -2639,13 +2576,21 @@ export class BrowserLane {
   // request in about 50 ms, before any second one is sent. Nothing is activated
   // or restored, so the user's windows stay as they are.
   async capture(tab, params) {
-    let answer = null, failure = null, wake = () => { };
-    const ask = () => this.send(tab, 'Page.captureScreenshot', params, 15000)
-      .then(value => { answer ??= value; }, error => { failure ??= error; }).finally(() => wake());
+    let answer = null, failure = null, inFlight = 0, wake = () => { };
+    const ask = () => {
+      inFlight++;
+      void this.send(tab, 'Page.captureScreenshot', params, 15000)
+        .then(value => { answer ??= value; }, error => { failure ??= error; })
+        .finally(() => { inFlight--; wake(); });
+    };
     ask();
     for (let asked = 1; !answer && !(failure && !/BROWSER_TIMEOUT/.test(failure.message)); asked++) {
       const settled = new Promise(resolve => { wake = resolve; });
-      if (asked > 8) { await settled; if (failure && /BROWSER_TIMEOUT/.test(failure.message)) break; continue; }
+      if (asked > 8 || failure) {
+        if (!inFlight) break;
+        await settled;
+        continue;
+      }
       await Promise.race([settled, sleep(500)]);
       if (!answer && !failure) ask();
     }

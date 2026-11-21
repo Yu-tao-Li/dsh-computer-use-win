@@ -2,11 +2,13 @@
 
 ## 发版前检查清单
 
-推送 `vX.Y.Z` 标签就会发布到 npm（见下文“npm 发布”），推送前先完成下面的检查。任何外部发布都由维护者确认后执行。
+推送 `vX.Y.Z` 标签会启动发布工作流。工作流对标签对应的提交运行完整 CI，通过后才发布到 npm。推送前先完成下面的检查，任何外部发布都由维护者确认后执行。
 
 验证入口：`node scripts/check-build.mjs --pack`；`node test/run-tests.mjs`；`node test/browser-bidi.mjs --live`；向宿主 `node_modules` 目录运行 `test/host-policy.mjs`、`test/host-settings-integration.mjs`、`test/host-settings-legacy.mjs`；`WCU_SETTINGS_TEST_API=legacy` 运行 `test/client-settings-contract.mjs`。
 
 运行 `node test/measure-tool-context.mjs --write` 更新工具大小，核对 package / lock / 设置页版本一致；`npm pack --dry-run --json --ignore-scripts` 确认仅包含显式白名单内的运行时文件、策略与剪贴板模块，无测试产物、调试文档、凭据或本地路径泄露。
+
+用实际打包的 TGZ 在隔离 DSH 配置中从 npm 稳定版升级并重启，检查工具注册、已保存的设置和项目说明的折叠态。复核反馈 TXT 的文件名、保存路径、另存为和 GitHub 反馈入口。
 
 
 

@@ -11,7 +11,7 @@ foreach($name in @('Get-Prop','Invoke-Safe','Convert-Rect','Get-WindowProcessId'
 Add-Type -TypeDefinition @'
 using System; using System.Collections.Generic;
 public static class WindowsComputerUseNative {
- public sealed class ProcessIdentity { public bool Gone; public string ImagePath=@"C:\fixture\app.exe";public uint Integrity=8192; }
+ public sealed class ProcessIdentity { public bool Gone,TokenAccessDenied; public string ImagePath=@"C:\fixture\app.exe";public uint Integrity=8192; }
  public static ProcessIdentity ReadInputProcess(uint pid,bool checkImage){return new ProcessIdentity();}
  public static uint ReadCurrentIntegrity(){return 8192;}
  public struct POINT {public int x,y;}
@@ -29,6 +29,9 @@ public static class WindowsComputerUseNative {
  public static bool IsWindow(IntPtr h){return Pids.ContainsKey(h.ToInt64());}
  public static bool IsWindowVisible(IntPtr h){return Pids.ContainsKey(h.ToInt64());}
  public static bool InMenuMode(IntPtr h){return Menu;}
+ public static int PaintPolls;
+ public static bool RequestPaint(IntPtr h){return true;}
+ public static bool PaintPending(IntPtr h){return PaintPolls++ < 4;}
  public static long[] VisiblePopups(uint pid){return Popups.ToArray();}
  public static bool GiveForeground(IntPtr h){Gives++;if(RefuseGive)return false;Front=h.ToInt64();return true;}
  public static IntPtr SendMessageTimeout(IntPtr h,uint m,UIntPtr w,IntPtr l,uint f,uint t,out UIntPtr r){r=UIntPtr.Zero;return new IntPtr(1);}
@@ -52,7 +55,9 @@ Scene
 $state=Start-Input -InputObject $target -Hwnd 200
 Assert-Equal $N::Front 200 'target in front for the input'
 $N::CursorX=40;$N::CursorY=50;$state.moved=@{x=40;y=50}
+$state.drain=$true;$N::PaintPolls=0
 $result=[ordered]@{};Complete-Input $state $result
+Assert-Equal ($N::PaintPolls -ge 5) $true 'foreground release waits while the repaint is pending'
 Assert-Equal $result.foreground 'returned' 'foreground'; Assert-Equal $N::Front 100 'user window back in front'
 Assert-Equal $result.pointer 'returned' 'pointer'; Assert-Equal "$($N::CursorX),$($N::CursorY)" '500,600' 'pointer back where the user left it'
 Assert-Equal $script:InputWindow.hwnd 200 'input window remembered'; $checks+='borrow and give back'

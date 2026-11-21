@@ -2,12 +2,14 @@
 // No desktop input. Retains test-created caches and JSON evidence for inspection.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdir,mkdtemp,writeFile,readdir} from 'node:fs/promises';
+import {mkdir,mkdtemp,writeFile,readdir,readFile} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import {makePrivateTemp} from './private-temp.mjs';
 const powershell=process.env.WINDOWS_CU_POWERSHELL||'powershell.exe';
 const other=process.env.WCU_TEST_OTHER_POWERSHELL;
 const root=await mkdtemp(path.join(os.tmpdir(),'wcu-helper-concurrency-'));
+makePrivateTemp(root);
 const source=path.resolve(import.meta.dirname,'../scripts/windows-uia.ps1');
 const results=[];
 let saving=Promise.resolve();
@@ -34,6 +36,10 @@ assert.equal(files.filter(name=>/\.(?:\d+\.)?[0-9a-f]{32}\.dll$|\.\d+\.dll$/.tes
 console.log('PASS six simultaneous cold native helper compiles and atomic cache publication');
 await health(powershell,race,'warm-cache');
 console.log('PASS later process loads the published helper');
+const dll=path.join(race,files.find(name=>/^wcu-native-.*\.dll$/.test(name)));
+await writeFile(dll,'corrupt fixture helper');
+await health(powershell,race,'repairs-corrupt-cache');
+assert.equal((await readFile(dll)).subarray(0,2).toString(),'MZ');
 if(other) {
   await health(other,race,'other-runtime-reuses-cache');
   const reverse=path.join(root,'reverse');

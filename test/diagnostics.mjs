@@ -110,6 +110,16 @@ try {
   assert.match(saved, /Host MCP registration[\s\S]+"state": "reconnecting"[\s\S]+"registeredToolCount": 0[\s\S]+"dsh-tools"[\s\S]+Self-test/);
   assert.ok(!saved.includes('unknownField') && !saved.includes('x.tgz'));
 
+  const concurrent = await Promise.all([1, 2].map(() => exportDiagnostics({
+    outDir: out, at: new Date(2026, 10, 18, 2, 3, 4),
+    facts: { system: {}, browsers: {}, logs: [] },
+    saveAs: () => assert.fail('An existing file should not open Save As'),
+  })));
+  assert.deepEqual(concurrent.map(report => report.fileName).sort(), [
+    'wincu-diagnostics-20261118-020304-2.txt', 'wincu-diagnostics-20261118-020304-3.txt',
+  ]);
+  assert.equal(await readFile(result.file, 'utf8'), saved);
+
   // Explorer selects the TXT. The browser launcher reports ShellExecute's
   // result rather than treating the helper process starting as success.
   const runs = [];
@@ -148,6 +158,26 @@ try {
   assert.ok(!/Token|enabledTools/.test(secondText), 'Tokens and an unused tool list stay out');
   const custom = await exportDiagnostics({ version: '0.6.1', settings: { toolPreset: 'custom', enabledTools: ['click'] }, env, outDir: out, at: new Date(2026, 10, 18, 2, 3, 6), selfTest: { ok: true }, facts: { system: {}, browsers: {}, logs: [] } });
   assert.ok((await readFile(custom.file, 'utf8')).includes('"enabledTools"'), 'A custom tool list is kept');
+
+  // A file where a directory should be makes automatic saving fail without
+  // depending on the test runner's permissions or touching its Downloads.
+  const rejectedFolder = path.join(root, 'blocked');
+  const chosenFile = path.join(root, '用户选择.txt');
+  await writeFile(rejectedFolder, 'unchanged');
+  const fallbackOptions = { version: '0.6.1', dshLocale: 'zh-CN', outDir: rejectedFolder, facts: { system: {}, browsers: {}, logs: [] } };
+  let shownSaveAs = 0;
+  const savedAs = await exportDiagnostics({ ...fallbackOptions, saveAs: async ({ fileName, contents, dshLocale }) => {
+    shownSaveAs++;
+    assert.match(fileName, /^wincu-diagnostics-.*\.txt$/);
+    assert.equal(dshLocale, 'zh-CN');
+    await writeFile(chosenFile, contents, 'utf8');
+    return chosenFile;
+  } });
+  assert.deepEqual(savedAs, { file: chosenFile, fileName: '用户选择.txt' });
+  assert.equal(shownSaveAs, 1);
+  assert.equal(await readFile(rejectedFolder, 'utf8'), 'unchanged');
+  assert.equal((await readFile(chosenFile, 'utf8')).charCodeAt(0), 0xfeff);
+  assert.deepEqual(await exportDiagnostics({ ...fallbackOptions, saveAs: () => null }), { cancelled: true });
 } finally {
   await rm(root, { recursive: true, force: true });
 }
@@ -160,6 +190,8 @@ assert.equal(trustedRequest({ headers: { ...page, 'sec-fetch-site': 'cross-site'
 assert.equal(trustedRequest({ headers: { ...page, origin: 'https://evil.example' } }), false);
 assert.equal(trustedRequest({ headers: { ...page, host: 'evil.example' } }), false, 'DNS rebinding');
 assert.equal(trustedRequest({ headers: { 'x-wcu-request': '1' } }), true, 'A proxy that strips Host and Origin');
+assert.equal(trustedRequest({ headers: { host:'LOCALHOST:80',origin:'http://localhost','x-wcu-request':'1' } }), true);
+assert.equal(trustedRequest({ headers: { origin:'http://localhost','x-wcu-request':'1' } }), false);
 
 const response = () => { const r = { status: 0, headers: {}, body: '' }; r.writeHead = (status, headers) => { r.status = status; r.headers = headers ?? {}; }; r.end = body => { r.body = body ?? ''; }; return r; };
 let collected = 0, opened = [];
@@ -175,6 +207,9 @@ assert.deepEqual(opened, ['wincu.txt']);
 const failing = createDiagnosticsHandler({ collect: async () => { throw new Error('disk full at C:\\Users\\Alice'); }, open: ({ file }) => { assert.equal(file, undefined); return { folderOpened: false, issueOpened: true }; } });
 r = response(); await failing({ method: 'POST', headers: page }, r);
 assert.equal(r.status, 500); assert.deepEqual(JSON.parse(r.body), { ok: false, folderOpened: false, issueOpened: true });
+const cancelled = createDiagnosticsHandler({ collect: () => ({ cancelled: true }), open: () => assert.fail('Cancelling Save As must not open the browser') });
+r = response(); await cancelled({ method: 'POST', headers: page }, r);
+assert.equal(r.status, 200); assert.deepEqual(JSON.parse(r.body), { ok: false, cancelled: true });
 const notWindows = createDiagnosticsHandler({ collect: async () => ({ fileName: 'f.txt' }), open: () => ({ folderOpened: false, issueOpened: false }) });
 r = response(); await notWindows({ method: 'POST', headers: page }, r);
 assert.equal(JSON.parse(r.body).issueOpened, false, 'The page can offer the issue link when the plugin could not open it');

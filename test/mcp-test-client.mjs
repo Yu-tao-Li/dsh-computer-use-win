@@ -3,6 +3,8 @@ export class McpTestClient {
   constructor(command,args=[],options={}) {
     this.child=spawn(command,args,{windowsHide:true,stdio:['pipe','pipe','pipe'],...options});
     this.next=1; this.pending=new Map(); this.stderr=''; this.buffer=''; this.transcript=[]; this.notifications=[];
+    this.child.stdout.setEncoding('utf8');
+    this.child.stderr.setEncoding('utf8');
     this.child.stderr.on('data',data=>{this.stderr+=data});
     this.child.stdout.on('data',data=>{
       this.buffer+=data;

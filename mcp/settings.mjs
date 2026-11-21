@@ -51,7 +51,8 @@ export function normalizeSettings(input = {}) {
   for(const key of Object.keys(SETTINGS_SCHEMA))validateSetting(key,value[key]);
   value.enabledTools=normalizeEnabledTools(value.enabledTools);
   if(value.toolPreset==='auto')value.toolPreset=value.enabledTools.length===TOOL_NAMES.length?'full':'custom';
-  if(value.browserApp==='firefox')value.browserAttachUser=false;
+  if(value.browserApp==='firefox'||value.desktopTarget!=='current')value.browserAttachUser=false;
+  value.hypervVm=value.hypervVm.trim();
   value.stopShortcut=normalizeStopShortcut(value.stopShortcut);
   value.progressLockShortcut=normalizeStopShortcut(value.progressLockShortcut);
   if(value.progressLockShortcut&&value.progressLockShortcut===value.stopShortcut)throw new Error('progressLockShortcut must differ from the stop shortcut');
@@ -66,7 +67,7 @@ export function enabledToolsForSettings(input = {}) {
 // Both permission and startup state matter when deciding whether to reconnect.
 export function toolSelectionKey(input = {}) {
   const settings=normalizeSettings(input);
-  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser});
+  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser,desktopTarget:settings.desktopTarget,hypervVm:settings.desktopTarget==='hyperv'?settings.hypervVm:''});
 }
 
 export function browserRoutingInstructions(settings = {}, allowed = enabledToolsForSettings(settings)) {

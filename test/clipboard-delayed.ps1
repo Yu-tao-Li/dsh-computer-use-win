@@ -35,6 +35,7 @@ try {
   $before.SetData('FixtureData',$false,'preserve custom format')
   [System.Windows.Forms.Clipboard]::SetDataObject($before,$true)
   $lease=New-Object WcuClipboardLease('new text', $true, $readerProcess)
+  $lease.MarkPasteSent([IntPtr]::Zero)
   Start-Sleep -Milliseconds 150
   Assert-Equal ([ClipboardReader]::Read($consumerHandle,150)) 'new text'
   $confirmed = $lease.Complete(2300)
@@ -50,6 +51,7 @@ try {
   }
   $lease.Dispose()
   $lease=New-Object WcuClipboardLease('timeout text', $true, $readerProcess)
+  $lease.MarkPasteSent([IntPtr]::Zero)
   Assert-Equal ($lease.Complete(2600)) $false
   Assert-Equal ([System.Windows.Forms.Clipboard]::GetText()) 'timeout text'
   Assert-Equal $lease.Restored $false

@@ -16,7 +16,7 @@ $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]
 if ($parseErrors.Count) { throw 'Backend source did not parse.' }
 $helper = $ast.Find({param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$script:WcuOcrCs'}, $true)
 Invoke-Expression $helper.Extent.Text
-foreach ($name in @('Get-CsHash', 'Get-HelperCacheDir', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Get-OcrHelper', 'Invoke-Ocr')) {
+foreach ($name in @('Get-CsHash', 'Get-HelperCacheDir', 'Assert-PrivateHelperPath', 'Get-HelperDigest', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Get-OcrHelper', 'Invoke-Ocr')) {
   $function = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name}, $true)
   Invoke-Expression $function.Extent.Text
 }

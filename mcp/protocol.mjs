@@ -16,42 +16,111 @@ export function validateRpcEnvelope(message) {
 const MAX_HEADER_BYTES = 8192;
 
 export class RpcFramer {
-  constructor({onMessage,onError,maxBytes=16*1024*1024}) {
+  constructor({onMessage,onError,maxBytes=16*1024*1024,allowHeaders=true}) {
     this.onMessage=onMessage;this.onError=onError;this.maxBytes=maxBytes;
-    this.buffer=Buffer.alloc(0);this.mode='line';
+    this.allowHeaders=allowHeaders;
+    this.mode='line';
+    this.parts=[];
+    this.size=0;
+    this.headers=null;
+    this.headerSize=0;
+    this.headerPrefix=0;
+    this.remaining=0;
+    this.discardLine=false;
     this.decoder=new TextDecoder('utf-8',{fatal:true});
   }
   parse(body) {
     try { this.onMessage(JSON.parse(this.decoder.decode(body))); }
     catch(error) { this.onError(error); }
   }
-  push(chunk) {
-    this.buffer=Buffer.concat([this.buffer,chunk]);
-    while(this.buffer.length){
-      if(this.buffer.length>this.maxBytes){this.buffer=Buffer.alloc(0);this.onError(Error('MCP message exceeds the size limit'));return;}
-      const head=this.buffer.subarray(0,Math.min(this.buffer.length,MAX_HEADER_BYTES)).toString('latin1');
-      if(/^[A-Za-z][A-Za-z0-9-]*:/.test(head)){
-        this.mode='headers';
-        const end=this.buffer.indexOf('\r\n\r\n');
-        if(end<0){
-          if(this.buffer.length>MAX_HEADER_BYTES){this.buffer=Buffer.alloc(0);this.onError(Error('MCP headers exceed the size limit'));}
-          return;
-        }
-        if(end>MAX_HEADER_BYTES){this.buffer=Buffer.alloc(0);this.onError(Error('MCP headers exceed the size limit'));return;}
-        const header=this.buffer.subarray(0,end).toString('ascii');
-        const match=/^Content-Length:\s*(\d+)\s*$/im.exec(header);
-        const length=match?Number(match[1]):NaN;
-        if(!Number.isSafeInteger(length)||length<1||length>this.maxBytes){
-          this.buffer=Buffer.alloc(0);this.onError(Error('Invalid MCP Content-Length'));return;
-        }
-        const start=end+4;if(this.buffer.length<start+length)return;
-        const body=this.buffer.subarray(start,start+length);
-        this.buffer=this.buffer.subarray(start+length);this.parse(body);continue;
+  append(part) {
+    if (part.length) { this.parts.push(part); this.size += part.length; }
+  }
+  take() {
+    const body=this.parts.length===1 ? this.parts[0] : Buffer.concat(this.parts,this.size);
+    this.parts=[];
+    this.size=0;
+    return body;
+  }
+  finishLine() {
+    const line=this.take();
+    if (this.headers!==null) {
+      if (line.length===1 && line[0]===13) {
+        const header=this.headers.join('\n');
+        this.headers=null;
+        this.headerSize=0;
+        const lengths=[...header.matchAll(/^Content-Length:[ \t]*(\d+)[ \t]*\r$/gim)];
+        const length=lengths.length===1 ? Number(lengths[0][1]) : NaN;
+        if (!Number.isSafeInteger(length)||length<1||length>this.maxBytes) {
+          this.onError(Error('Invalid MCP Content-Length'));
+        } else { this.remaining=length; }
+        return;
       }
-      const newline=this.buffer.indexOf(10);if(newline<0)return;
-      const body=this.buffer.subarray(0,newline);
-      this.buffer=this.buffer.subarray(newline+1);
-      if(body.toString('ascii').trim())this.parse(body);
+      this.headerSize+=line.length+1;
+      if (this.headerSize>MAX_HEADER_BYTES+2 || line.at(-1)!==13) {
+        this.headers=null;
+        this.headerSize=0;
+        this.onError(Error('Invalid or oversized MCP headers'));
+      } else { this.headers.push(line.toString('latin1')); }
+      return;
+    }
+    if (line.length>this.maxBytes) {
+      this.onError(Error('MCP message exceeds the size limit'));
+      return;
+    }
+    this.mode='line';
+    if (line.some(byte=>byte!==9 && byte!==13 && byte!==32)) this.parse(line);
+  }
+  push(chunk) {
+    for (let offset=0;offset<chunk.length;) {
+      if (this.remaining) {
+        const count=Math.min(this.remaining,chunk.length-offset);
+        this.append(chunk.subarray(offset,offset+count));
+        offset+=count;
+        this.remaining-=count;
+        if (!this.remaining) this.parse(this.take());
+        continue;
+      }
+      const newline=chunk.indexOf(10,offset);
+      const end=newline===-1 ? chunk.length : newline;
+      if (!this.discardLine) {
+        if (this.allowHeaders && this.headers===null && this.headerPrefix>=0) {
+          for(let index=offset;index<end;index++) {
+            const byte=chunk[index];
+            const letter=byte>=65&&byte<=90 || byte>=97&&byte<=122;
+            if (letter || (this.headerPrefix>0 && (byte>=48&&byte<=57 || byte===45))) {
+              this.headerPrefix++;
+              continue;
+            }
+            if (byte===58 && this.headerPrefix>0) {
+              this.headers=[];
+              this.mode='headers';
+            }
+            this.headerPrefix=-1;
+            break;
+          }
+        }
+        const limit=this.headers!==null ? MAX_HEADER_BYTES+2-this.headerSize :
+          this.allowHeaders && this.headerPrefix>=0 ? Math.max(this.maxBytes,MAX_HEADER_BYTES) : this.maxBytes;
+        if (this.size+end-offset>limit) {
+          const wasHeader=this.headers!==null;
+          this.take();
+          this.headers=null;
+          this.headerSize=0;
+          this.headerPrefix=0;
+          if (wasHeader) {
+            this.onError(Error('MCP headers exceed the size limit'));
+            return;
+          }
+          this.discardLine=true;
+          this.onError(Error('MCP message or headers exceed the size limit'));
+        } else { this.append(chunk.subarray(offset,end)); }
+      }
+      if (newline===-1) break;
+      offset=newline+1;
+      if (this.discardLine) this.discardLine=false;
+      else this.finishLine();
+      if (this.headers===null) this.headerPrefix=0;
     }
   }
 }
