@@ -696,18 +696,27 @@ public static class WcuInputHold {
     public readonly System.Collections.Generic.HashSet<int> PreHeld = new System.Collections.Generic.HashSet<int>();
     public readonly System.Collections.Generic.HashSet<int> Keys = new System.Collections.Generic.HashSet<int>();
     public readonly System.Collections.Generic.HashSet<int> Buttons = new System.Collections.Generic.HashSet<int>();
+    // Keys whose replayed press Windows has taken and whose replayed release
+    // it has not: they read as down without being held by the user.
+    public readonly System.Collections.Generic.HashSet<int> Replaying = new System.Collections.Generic.HashSet<int>();
     public int X, Y, KeyCount, MouseCount;
     public bool Moved;
-    public void Reset(int x, int y) { Queue.Clear(); PreHeld.Clear(); Keys.Clear(); Buttons.Clear(); X = x; Y = y; Moved = false; KeyCount = 0; MouseCount = 0; }
+    public void Reset(int x, int y) { Queue.Clear(); PreHeld.Clear(); Keys.Clear(); Buttons.Clear(); Replaying.Clear(); X = x; Y = y; Moved = false; KeyCount = 0; MouseCount = 0; }
     static bool Ours(bool injected, bool lowerIntegrity, ulong extra) {
       return injected && ((!lowerIntegrity && extra == (ulong)WindowsComputerUseNative.InputMarker) || extra == (ulong)ReplayMarker);
     }
     // A key (LLKHF flags: 0x01 extended, 0x02 injected at a lower integrity,
-    // 0x10 injected). repeat: the key was down already (auto-repeat). In
+    // 0x10 injected). down: Windows reads the key as down already. In
     // Guarding, dshInFront: a window DSH worked in is in front and the user's
     // window is there to go back to. True: swallow the key.
-    public bool Key(int vk, int scan, int flags, ulong extra, bool up, bool repeat, bool dshInFront, bool overdue) {
-      if (Ours((flags & 0x10) != 0, (flags & 0x02) != 0, extra)) return false;
+    public bool Key(int vk, int scan, int flags, ulong extra, bool up, bool down, bool dshInFront, bool overdue) {
+      bool injected = (flags & 0x10) != 0;
+      if (injected && extra == (ulong)ReplayMarker) { if (up) Replaying.Remove(vk); else Replaying.Add(vk); return false; }
+      if (Ours(injected, (flags & 0x02) != 0, extra)) return false;
+      // Auto-repeat of a key the user pressed before the hold. A key whose
+      // replay is under way also reads as down, and a typed character
+      // (VK_PACKET, all characters on one code) never repeats.
+      bool repeat = down && vk != 0xE7 && !Replaying.Contains(vk);
       if (State == Holding) {
         if (overdue || vk == 0x1B) return false;
         if (up) {
@@ -859,7 +868,7 @@ public static class WcuInputHold {
       Request(UninstallMessage, true);
       return false;
     }
-    for (int key = 0x08; key <= 0xFE; key++) if ((GetAsyncKeyState(key) & 0x8000) != 0) lock (gate) Decisions.PreHeld.Add(key);
+    for (int key = 0x08; key <= 0xFE; key++) if (key != 0xE7 && (GetAsyncKeyState(key) & 0x8000) != 0) lock (gate) Decisions.PreHeld.Add(key);
     return true;
   }
 
@@ -1086,7 +1095,7 @@ public static class WcuInputHold {
       Seen((data.flags & 0x10) != 0, data.extra.ToUInt64());
       int kind = wParam.ToInt32();
       bool up = kind == 0x101 || kind == 0x105, swallow, returning, ended;
-      bool repeat = !up && (GetAsyncKeyState((int)data.vk) & 0x8000) != 0;
+      bool down = !up && (GetAsyncKeyState((int)data.vk) & 0x8000) != 0;
       lock (gate) {
         int was = Decisions.State;
         bool dshInFront = false;
@@ -1097,7 +1106,7 @@ public static class WcuInputHold {
             dshInFront = front != user && Present(user) && IsDsh(front);
           }
         }
-        swallow = Decisions.Key((int)data.vk, (int)data.scan, (int)data.flags, data.extra.ToUInt64(), up, repeat, dshInFront, was == Holding && Overdue());
+        swallow = Decisions.Key((int)data.vk, (int)data.scan, (int)data.flags, data.extra.ToUInt64(), up, down, dshInFront, was == Holding && Overdue());
         returning = was == Guarding && Decisions.State == Returning;
         ended = was == Guarding && Decisions.State == Idle;
       }

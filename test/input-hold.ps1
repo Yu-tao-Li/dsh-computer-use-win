@@ -26,6 +26,19 @@ Check ($core.Queue.Count -eq 2 -and $core.KeyCount -eq 1) 'Two held key events, 
 Check ($core.Key(0xA0,0x2A,0,0,$false,$true,$false,$false)) 'A repeat of a key pressed before the hold is swallowed'
 Check ($core.Queue.Count -eq 2) 'and not replayed'
 Check (-not $core.Key(0xA0,0x2A,0,0,$true,$false,$false,$false)) 'Its release passes'
+# A key whose replay is under way reads as down: the user pressing it again
+# meanwhile is a new press, not a repeat (found on CI: a character was lost).
+$core.Reset(100,200); $core.State=[WcuInputHold]::Holding
+Check (-not $core.Key(0x52,0x13,0x10,$replay,$false,$false,$false,$false)) 'A replayed press passes'
+Check ($core.Key(0x52,0x13,0,0,$false,$true,$false,$false)) 'The user pressing the same key during its replay is held'
+Check ($core.Queue.Count -eq 1) 'and kept for replay, not dropped as a repeat'
+Check (-not $core.Key(0x52,0x13,0x10,$replay,$true,$false,$false,$false)) 'The replayed release passes'
+Check ($core.Key(0x52,0x13,0,0,$true,$false,$false,$false)) 'The user''s release is held'
+# Typed characters (VK_PACKET) share one code and never repeat.
+Check ($core.Key(0xE7,0x72,0x10,0,$false,$true,$false,$false)) 'A typed character that reads as down is still held'
+Check ($core.Key(0xE7,0x72,0x10,0,$true,$false,$false,$false)) 'and its release'
+Check ($core.Queue.Count -eq 4 -and $core.KeyCount -eq 2) 'Both presses kept for replay'
+$core.Reset(100,200); $core.State=[WcuInputHold]::Holding
 # Remote control types without DSH's marker: those keys are the user's too.
 Check ($core.Key(0x42,0x30,0x10,0,$false,$false,$false,$false)) 'A remote-control key is held'
 Check ($core.Key(0x42,0x30,0x10,0,$true,$false,$false,$false)) 'and its release'
