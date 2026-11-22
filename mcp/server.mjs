@@ -571,7 +571,7 @@ const conciseDescriptions = {
   launch_app: 'Launch an executable, shortcut (.lnk), or installed app (persists after exit); Low disruption opens executables on a hidden desktop. Args and shortcuts need approval.',
   health: 'Check Windows backend and browser lane status.',
   snapshot: 'Screenshot and bounded UIA tree (use OCR if UIA is sparse). browserTab: page outline and viewport.',
-  accessibility_tree: 'Read bounded UIA tree (partial tree does not prove absence). browserTab: page outline with element IDs.',
+  accessibility_tree: 'Read bounded UIA tree (partial tree does not prove absence). browserTab: page outline with element IDs. Check changes with find or wait_for instead of rereading.',
   list_windows: 'List native top-level windows (HWND/PID/responsiveness; minimized ones marked minimized:true) and browserLane tabs.',
   find: 'Find UIA controls; sparse misses fall back to OCR (OCR hits use SCREEN x/y, not elementId).',
   element_info: 'Inspect a UIA elementId, page elementId, or SCREEN x/y.',
@@ -615,7 +615,10 @@ function compactSchema(schema, key) {
   const result = {};
   for (const [field, value] of Object.entries(schema)) {
     if (field === 'description') {
-      if (concisePropertyDescriptions[key]) result.description = concisePropertyDescriptions[key];
+      const description = concisePropertyDescriptions[key];
+      if (key === 'detailLevel' && schema.enum?.includes('summary')) {
+        result.description = description + ' summary keeps only IDs, types, names and states.';
+      } else if (description) result.description = description;
     } else if (field === 'properties') {
       result.properties = Object.fromEntries(Object.entries(value).map(([name, child]) => [name, compactSchema(child, name)]));
     } else if (field === 'items') result.items = compactSchema(value);

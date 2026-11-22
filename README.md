@@ -42,11 +42,13 @@
 
 #### 1.2 升级
 
-DSH 每次启动时会按 npm 的 `latest` 自动检查。**设置 → 电脑操控** 标题右侧 GitHub 左边有一个按钮：没有新版时是“检查更新”，点一下马上再查；有新版时变成“更新”。点“更新”后，DSH 插件市场安装新版本，标题下方显示当前步骤和进度条；市场开始替换插件文件之前，随时可以点“停止更新”，插件保持原来的版本。新版本刚发布、插件市场还没同步时，页面会等它同步好再装。按钮更新不成功时，也可以在插件市场的“已安装”里更新，页面上有直达的链接（市场收录新版本比 npm 晚一些）。下载线路跟随插件市场的“下载区域”设置：“全球”直接从 npm 下载，“中国大陆”走镜像。页面提示需要重启时，按第 2 步从托盘完全退出，再重新打开 DSH Desktop。
+DSH 启动时按 npm 的 `latest` 自动检查。**设置 → 电脑操控** 标题右侧显示 **检查更新**，发现新版后变成 **更新**。点 **更新** 后，插件市场下载安装，标题下方显示当前步骤和进度。市场开始替换插件文件前，可以点 **停止更新** 保留现有版本。刚发布的版本可能需要等市场同步。按钮更新失败时，可以从页面直达插件市场的 **已安装** 再试。下载跟随插件市场的 **下载区域** 设置。
 
-也可以运行同一条安装命令，然后同样完全退出、再重新打开 DSH Desktop。没有插件市场，或者插件是从本地文件装的时，“更新”会打开这段升级说明。
+**从 0.6.3 起**，安装完成后会弹出确认。点 **立即重启**，DSH Desktop 会正常退出并自动重新打开。点 **稍后**，标题旁会保留 **重启以完成更新**，可以随时重新打开确认。
 
-命令里的 `desktop` 是 DSH Desktop 使用的配置（profile）。如果装到了别的 profile，正在用的 DSH 不会有任何变化。
+**从 0.6.1 或 0.6.2 升到 0.6.3** 时，由旧版页面执行更新。先右键任务栏托盘里的 DSH 图标，选 **退出**，再打开 DSH Desktop。先别用电脑操控，直接在 **设置 → 电脑操控** 点 **更新**。如果看到 **仍要更新**，点它继续。装好后设置页会立即换成新版，后台仍运行旧版。这一次没有重启确认。请再次从托盘 **退出** 并打开 DSH Desktop，重启前先别改电脑操控设置。如果提示插件被移除，退出并打开 DSH Desktop 后可从插件市场重新安装，原来的设置会保留。
+
+也可以运行上面的安装命令，再从托盘退出并重新打开 DSH Desktop。没有插件市场或从本地文件安装时，**更新** 会打开这段说明。命令里的 `desktop` 指 DSH Desktop 使用的配置（profile）。
 
 #### 1.3 其他安装方式
 
@@ -110,14 +112,20 @@ DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示�
 
 #### 2.4 设置页
 
-设置在左侧的“电脑操控”（鼠标图标）里，标题旁显示插件版本号。最上面是“网页与浏览器”：优先使用网页控件、显示 DSH 浏览器窗口、浏览器类型、保留网站登录，以及默认关闭的“连接现有浏览器（实验）”。下面选工具加载方案：全部、精简、懒启动或自定义，默认是“全部”（26 个工具）。再往下是接管提示、思考与操作浮窗和停止操作。每项左边的小图跟着设置变化，说明收在 ⓘ 图标里。顶部的 Star 和 Issue 说明可以折叠，折叠后标题右边只留一个 GitHub 链接和展开箭头，下图就是折叠后的样子；之后一直保持折叠，升级也不会改回来，点箭头就能展开。
+在左侧打开带鼠标图标的 **电脑操控**。标题旁显示插件版本，右侧有 **检查更新** 或 **更新**，以及 **反馈问题**。**工作方式** 可以选 **少打扰**（默认）、**前台操作** 或 **虚拟机**。少打扰会尽量在后台操作，详细说明默认折叠在 **更多说明** 里。前台操作直接使用鼠标和键盘。虚拟机模式在配置好的 Hyper-V 虚拟机里操作。
 
-![电脑操控设置页：左侧是带鼠标图标的电脑操控选项卡；顶部是可以折叠的 Star 和 Issue 提示；标题“电脑操控”旁是版本号 v0.6.1，右边是“反馈问题”按钮；下面先是工具分组，显示已启用 26 / 26，可以选全部、精简、懒启动、自定义四种加载方案；再下面是网页与浏览器分组，有优先使用网页控件、显示 DSH 浏览器窗口、浏览器类型、保留网站登录等开关，每项左边有小示意图](assets/desktop-settings-overview-hd.png)
+页面上还能调整工具加载方案、网页与浏览器、接管提示、思考与操作浮窗和停止快捷键。顶部的 Star 和 Issue 说明可以折叠，折叠后只留 GitHub 链接和展开箭头，升级后也会保持这个选择。
+
+*下图取自 v0.6.1。当时的设置页尚未显示工作方式和更新按钮。*
+
+![v0.6.1 的电脑操控设置页，显示展开的项目说明、反馈问题按钮、工具与网页设置](assets/desktop-settings-overview-hd.png)
 
 #### 2.5 更多截图
 
 <details>
 <summary>任务总结、自定义工具、浮窗设置、接管提示、停止设置</summary>
+
+*下面的自定义工具、浮窗、接管提示和停止设置截图取自 v0.6.0。*
 
 **任务总结。** 一轮操作结束后，agent 会说明自己做了什么、在结果页里确认了什么。图中的文字由这次任务用的模型生成。
 
@@ -299,6 +307,15 @@ Electron 程序、Chrome 和 Edge 都用 Chromium 内核。这类程序要等有
 
 Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定 frame 与文档，导航或卸载后失效。传入 browserTab 时，坐标使用当前页面截图的 CSS 视口像素，可操作 canvas；不会移动桌面鼠标。显示浏览器窗口时，Chrome 自己的 JavaScript 弹窗（alert、confirm 这类）有时会短暂切到前台。Ctrl+L、Ctrl+T 这类快捷键属于浏览器窗口，网页内部收不到，请改用 `address`、`new-tab` 和 `close_window`。环境变量和返回格式见 [MCP 工具文档](docs/wiki/mcp-tools.md#browser-lane)。
 
+#### 7.5 少读一点，省上下文
+
+- **精简树。** Windows 界面上的 `accessibility_tree` 和 `snapshot` 支持 `detailLevel:"summary"`，每个节点只保留 ID、控件类型、名称和状态。
+- **给树设字节预算。** 这两个工具的 `maxBytes` 最小为 2,000，限制返回的 UTF-8 JSON 大小，截图另算。超出时先转为精简树，再只留可操作控件和它们的祖先，最后按层截断。截断时从 `budget.fullResultPath` 读取完整结果。如果剩余内容仍放不下，结果会给出文件路径。
+- **重读时只要变化。** 用 `accessibility_tree` 传 `treeDeltaBase:"start"` 取得树和 `treeId`。重读同一目标时，把这个 ID 传给 `treeDeltaBase`，就会收到新增、删除和变化的控件，以及新的 `treeId`。要比较控件的值，用 `detailLevel:"full"`。找不到基准、窗口或视图参数变了、任一树被截断，或变化超过 40% 时，会退回树结果并说明 `delta.fallback` 的原因。增量本身超出 `maxBytes` 也会回退，再按预算缩减。预算缩减后的树不能作为增量基准。
+- **给 OCR 设预算。** `ocr` 的 `maxBytes` 同样从 2,000 起。超出时先省掉逐词坐标，再省掉与逐行结果重复的合并文本，最后从末尾截行。截断或仅返回文件时，`budget.fullResultPath` 指向完整结果。
+
+只想确认某个控件有没有变化，用 `find` 定点查找，或用 `wait_for` 等待目标状态。参数与返回值见 [MCP 工具说明](docs/wiki/mcp-tools.md#accessibility_tree)。
+
 ### 8. 常见问题
 
 #### 8.1 装好了，却看不到工具或设置页，或者还是旧版本？
@@ -396,11 +413,13 @@ You need a Windows computer with DSH Desktop installed. The plugin uses Windows 
 
 #### 1.2 Upgrade
 
-DSH checks npm’s `latest` at every start. A button sits to the left of GitHub at the top of **Settings → Computer Use**: Check for updates checks again at once, and it turns into Update when a newer version exists. Click Update to let the DSH plugin market install it; the current step and a progress bar appear below the title, and until the market starts replacing the plugin's files, Stop update leaves the plugin as it was. Right after a release, the page waits until the market has picked up the new version. When the button cannot update, the page links to the Installed tab of the plugin market, where you can update too (the market lists new versions some time after npm). The download follows the market’s Download region setting: Global downloads straight from npm, China mainland uses a mirror. If the page asks you to restart, quit from the tray and reopen DSH Desktop as in step 2.
+DSH checks npm’s `latest` at startup. The top right of **Settings → Computer Use** shows **Check for updates** and switches to **Update** when there’s a newer version. Click **Update** to have the plugin market install it. The current step and progress appear below the title. **Stop update** keeps your installed version if you click it before the market starts replacing files. A new release may take time to reach the market. If updating from settings fails, the page links to the market’s **Installed** tab so you can try there. Downloads follow the market’s **Download region** setting.
 
-You can also run the same install command, then fully quit and reopen DSH Desktop the same way. Without the plugin market, or when the plugin was installed from a local file, Update opens these upgrade steps.
+**Starting with 0.6.3**, a confirmation appears when installation finishes. **Restart now** quits DSH Desktop normally and opens it again. Choose **Later** to keep working. **Restart to finish** stays beside the title and lets you reopen the confirmation any time.
 
-The `desktop` in the command is the profile that DSH Desktop uses. If you install into another profile, the DSH you are using does not change.
+**Upgrading from 0.6.1 or 0.6.2 to 0.6.3** uses the old settings page. Right-click the DSH icon in the taskbar tray, choose **Quit**, and open DSH Desktop again. Go straight to **Settings → Computer Use** and click **Update** before using computer use. If offered **Update anyway**, click it to continue. After installation, the settings page switches to the new version immediately, while DSH still runs the old version in the background. This upgrade has no restart confirmation. Choose **Quit** from the tray again, reopen DSH Desktop, and leave the Computer Use settings alone until it restarts. If the plugin is reported as removed, quit and reopen DSH Desktop, then reinstall it from the plugin market. Your previous settings are kept.
+
+You can also run the install command above, then quit from the tray and reopen DSH Desktop. Without the plugin market or with a local-file install, **Update** opens these instructions. `desktop` in the command is the profile DSH Desktop uses.
 
 #### 1.3 Other ways to install
 
@@ -464,14 +483,20 @@ The overlay is locked by default, so the mouse passes through it and it never bl
 
 #### 2.4 Settings page
 
-The settings are under Computer Use, the tab with the mouse icon on the left (电脑操控 in the Chinese interface); the plugin version shows next to the title. Web and browser comes first: Prefer web page controls, Show the DSH browser window, Browser type, Keep website sign-ins, and the off-by-default Connect browser (experimental). Below it, pick how tools are loaded: All, Lite, Lazy or Custom. All (26 tools) is the default. Further down are the takeover indicator, the reasoning and progress overlay, and stopping. The small picture to the left of each item follows its setting, and the explanations sit behind ⓘ icons. The Star and Issue note at the top can be folded: only a GitHub link and an expand arrow then stay to the right of the title, as in the screenshot. It stays folded, also across upgrades, until you expand it with the arrow.
+Open **Computer Use**, the mouse-icon tab on the left (电脑操控 in the Chinese interface). The plugin version is beside the title, with **Check for updates** or **Update** and **Report a problem** on the right. **Work mode** offers **Low disruption** (the default), **Foreground**, and **Virtual machine**. Low disruption works in the background where possible. Its **More details** section starts collapsed. Foreground uses the mouse and keyboard directly. Virtual machine mode works inside a configured Hyper-V VM.
 
-![The settings page: the mouse-icon tab on the left (电脑操控 in the Chinese interface); the foldable Star and Issue note at the top; the title with the version v0.6.1 and, on the right, the Report a problem button; then the Tools group showing 26 of 26 enabled with the All, Lite, Lazy and Custom presets; below it the Web and browser group with Prefer web page controls, Show the DSH browser window, Browser type and Keep website sign-ins, each with a small picture on its left](assets/desktop-settings-overview-hd.png)
+The page also lets you choose which tools load and adjust browser options, the takeover indicator, the reasoning and progress overlay, and the stop shortcut. Folding the Star and Issue note leaves a GitHub link and an expand arrow. Your choice survives upgrades.
+
+*The screenshot below is from v0.6.1, before the settings page showed Work mode and the update button.*
+
+![Computer Use settings in v0.6.1, showing the expanded project note, Report a problem button, and tools and browser settings](assets/desktop-settings-overview-hd.png)
 
 #### 2.5 More screenshots
 
 <details>
 <summary>Task summary, custom tools, overlay settings, control indicators, stop settings</summary>
+
+*The Custom tools, overlay, control indicator and stop settings screenshots below are from v0.6.0.*
 
 **Task summary.** When a turn ends, the agent explains what it did and what it confirmed on the results page. The text in this image was written by the model used for the task.
 
@@ -652,6 +677,15 @@ The browser comes from one of three places:
 - **Connect browser (experimental).** Off by default. When on, `list_windows` only reads the `DevToolsActivePort` file the browser writes, lists your browser as available and offers a `"<browser id>:connect"` handle; it neither connects nor shows a prompt. The agent first asks you to get ready to click Allow in the browser, then writes `connect` to that handle with `set_value`, and only then does the browser ask you. A refusal or timeout stops there with no automatic retry, and the listing says not allowed or timed out, so prompts never pile up. Once connected, tool results show the addresses of your own tabs without the part after `?` or `#`. The agent works only in tabs you mention or tabs it opened, and asks before sending, buying, deleting or changing account settings. Disconnecting leaves your browser running. While connected, the browser shows a bar saying it is controlled by automated test software.
 
 The Chromium lane reads and operates same-origin, cross-origin and nested iframes. Element ids bind their frame and document and expire on navigation/removal. With browserTab, coordinates use CSS pixels in the current page screenshot viewport, including canvas; the desktop pointer does not move. With the browser window shown, Chrome's own JavaScript dialogs (alert, confirm and the like) sometimes come to the front briefly. Shortcuts such as Ctrl+L and Ctrl+T belong to the browser window and never reach the page; use `address`, `new-tab` and `close_window` instead. Environment variables and result formats are in the [MCP tools reference](docs/wiki/mcp-tools.md#browser-lane).
+
+#### 7.5 Read less to save context
+
+- **Summarize a tree.** Use `detailLevel:"summary"` with `accessibility_tree` or `snapshot` on Windows controls. Each node keeps its ID, control type, name and states.
+- **Set a tree byte budget.** `maxBytes` starts at 2,000 and limits the UTF-8 JSON response. Screenshots are separate. Over the limit, the tool summarizes the tree first, then keeps actionable controls and their ancestors, then cuts the tree by level. If it cuts the tree, `budget.fullResultPath` points to the complete result. If the remaining content still cannot fit, the response gives the file path.
+- **Read just the changes.** Pass `treeDeltaBase:"start"` to `accessibility_tree` to get a tree and `treeId`. Pass that ID as `treeDeltaBase` when reading the same target again to get added, removed and changed controls and a new `treeId`. Use `detailLevel:"full"` to compare control values. A missing baseline, a different window or view settings, a truncated tree, or more than 40% of nodes changing falls back to a tree with the reason in `delta.fallback`. A delta over `maxBytes` also falls back to a tree reduced to fit the budget. A tree reduced by the budget cannot serve as a delta baseline.
+- **Set an OCR byte budget.** `ocr` also accepts `maxBytes` starting at 2,000. Over the limit, it drops word boxes first, then the combined text that repeats the lines, and finally lines from the end. If it cuts lines or returns only a file reference, `budget.fullResultPath` points to the complete result.
+
+To check whether one control changed, use `find` to locate it or `wait_for` to wait for the target state. See the [MCP tool reference](docs/wiki/mcp-tools.md#accessibility_tree) for arguments and results.
 
 ### 8. FAQ
 
