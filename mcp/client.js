@@ -617,14 +617,15 @@ window.__ModuleLoader__.load({
     "reportOk": "确定",
     "workMode": "工作方式",
     "modeQuiet": "少打扰",
-    "modeQuietHint": "你可以照常用电脑。DSH 能在后台做的都在后台做，只在必须用鼠标键盘时，等你停手再借用。",
+    "modeQuietHint": "你照常用电脑，任务不耽搁：DSH 尽量在后台做，必须用鼠标键盘时只借一下。",
     "modeQuietNote1": "DSH 自己打开的程序在看不见的后台桌面里运行，不会弹到你面前。",
-    "modeQuietNote2": "拖拽、画图这类后台做不了的步骤，等你停手 2 秒才借用鼠标键盘，用完放回原处。",
-    "modeQuietNote3": "退出 DSH 时，后台桌面里的程序会一起关闭，没保存的内容会丢失。",
-    "modeFast": "全速",
-    "modeFastHint": "适合你暂时不用电脑时：DSH 直接用鼠标键盘，窗口留在最前，速度最快；按 Esc 停止。",
+    "modeQuietNote2": "必须用鼠标键盘的步骤马上做，只借一下：窗口闪到前面再退回去，你这期间按的键和鼠标动作先存住，随后原样补上。",
+    "modeQuietNote3": "你正按着键、拼音还没上屏或在用全屏程序时，DSH 等一下再借。",
+    "modeQuietNote4": "退出 DSH 时，后台桌面里的程序会一起关闭，没保存的内容会丢失。",
+    "modeFast": "前台操作",
+    "modeFastHint": "适合你暂时不用电脑时：DSH 把窗口放在最前面，直接用鼠标键盘，最快；按 Esc 停止。",
     "modeVm": "虚拟机",
-    "modeVmHint": "在 Hyper-V 虚拟机里全速操作，不碰你的电脑；用虚拟机里的文件和软件，要先配置一次。",
+    "modeVmHint": "在 Hyper-V 虚拟机里操作，不碰你的电脑；用虚拟机里的文件和软件，要先配置一次。",
     "hypervVm": "虚拟机名称",
     "hypervVmRequired": "请填写虚拟机名称。",
     "hypervSetup": "配置步骤（只需一次）",
@@ -945,14 +946,15 @@ window.__ModuleLoader__.load({
     "reportOk": "OK",
     "workMode": "Work mode",
     "modeQuiet": "Low disruption",
-    "modeQuietHint": "Keep using your PC. DSH does what it can in the background and borrows the mouse and keyboard only when it must, after you pause.",
+    "modeQuietHint": "Keep using your PC and the task keeps going: DSH works in the background where it can and borrows the mouse and keyboard only briefly.",
     "modeQuietNote1": "Apps DSH opens run on a hidden desktop and never pop up in front of you.",
-    "modeQuietNote2": "Steps the background cannot do, such as drags and drawing, wait until you pause for 2 seconds, then put the window and pointer back.",
-    "modeQuietNote3": "Quitting DSH closes the apps on the hidden desktop; anything unsaved there is lost.",
-    "modeFast": "Full speed",
-    "modeFastHint": "For when you step away: DSH uses the mouse and keyboard directly and keeps its window in front, the fastest way. Press Esc to stop.",
+    "modeQuietNote2": "Steps that need the mouse and keyboard borrow them briefly, right away: the window flashes forward and back, and your keys and clicks meanwhile are held, then replayed.",
+    "modeQuietNote3": "DSH waits a moment while you hold a key or button, have input-method text not yet committed, or use a full-screen app.",
+    "modeQuietNote4": "Quitting DSH closes the apps on the hidden desktop; anything unsaved there is lost.",
+    "modeFast": "Foreground",
+    "modeFastHint": "For when you step away: DSH keeps its window in front and uses the mouse and keyboard directly, the fastest way. Press Esc to stop.",
     "modeVm": "Virtual machine",
-    "modeVmHint": "Works at full speed inside a Hyper-V virtual machine and never touches your PC; it uses the VM’s own files and apps. Set it up once first.",
+    "modeVmHint": "Works inside a Hyper-V virtual machine and never touches your PC; it uses the VM’s own files and apps. Set it up once first.",
     "hypervVm": "Virtual machine name",
     "hypervVmRequired": "Enter the virtual machine name.",
     "hypervSetup": "Set up once",
@@ -1312,13 +1314,13 @@ window.__ModuleLoader__.load({
         box('a-ink',14,13,42,3,1.5),box('a-ink',14,20,30,3,1.5),box('a-ink',14,27,36,3,1.5),box('a-ink',14,34,24,3,1.5),
         ...(on?[h('circle',{cx:50,cy:33,r:21,fill:`url(#${id})`})]:[]),arrow(48,25),...(on?[box('a-acc',60,44,26,11,5.5),h('text',{className:'a-tag',x:73,y:51.9,textAnchor:'middle'},'DSH')]:[])),
       // Work modes. Low disruption: your window and pointer, DSH's pointer on a
-      // hidden desktop beside them (dashed). Full speed: DSH's pointer at work in
-      // the window in front, with speed strokes. Virtual machine: DSH's pointer
-      // inside a Hyper-V window, yours outside.
+      // hidden desktop beside them (dashed). Foreground: DSH's pointer in the
+      // window in front of another, under the "hands off" banner. Virtual
+      // machine: DSH's pointer inside a Hyper-V window, yours outside.
       desktop:target=>drawing(...monitor(),...(target==='hyperv'
         ?[box('a-win',16,9,66,38,3),h('path',{className:'a-bar',d:'M16 12a3 3 0 0 1 3-3h60a3 3 0 0 1 3 3v3H16z'}),box('a-desk',20,19,58,24,2),h('text',{className:'a-cap',x:39,y:35.5,textAnchor:'middle'},'VM'),dshArrow(57,25),box('a-frame',16,9,66,38,3),arrow(87,27)]
         :target==='fast'
-          ?[box('a-win',18,11,58,32,2.5),h('path',{className:'a-bar',d:'M18 13.5a2.5 2.5 0 0 1 2.5-2.5h53a2.5 2.5 0 0 1 2.5 2.5V16H18z'}),box('a-ink',23,22,30,2.2,1.1),box('a-ink',23,27,22,2.2,1.1),box('a-frame',18,11,58,32,2.5),box('a-acc',38,29,8,1.8,.9),box('a-acc',41,33,6,1.8,.9),dshArrow(50,25)]
+          ?[...banner(7.5),box('a-win',60,22,33,21,2.5),box('a-frame',60,22,33,21,2.5),box('a-win',16,20,56,27,2.5),h('path',{className:'a-bar',d:'M16 22.5a2.5 2.5 0 0 1 2.5-2.5h51a2.5 2.5 0 0 1 2.5 2.5V25H16z'}),box('a-ink',21,30,28,2.2,1.1),box('a-ink',21,35,20,2.2,1.1),box('a-frame',16,20,56,27,2.5),dshArrow(48,31)]
           :[box('a-win',15,12,40,27,2.5),box('a-ink',19,19,24,2.2,1.1),box('a-ink',19,24,17,2.2,1.1),box('a-frame',15,12,40,27,2.5),arrow(38,26),box('a-ghost',60,9,37,32,2.5),dshArrow(75,20)])),
       // One square per tool: filled loads at startup, dashed loads on demand, faint is off.
       tools:(loaded,allowed)=>drawing(...toolGroups.flatMap(([,entries],row)=>entries.map(([name],col)=>box(loaded.has(name)?'a-acc':allowed.has(name)?'a-open':'a-ink',15.5+col*12,12.5+row*12,9,9,2.2)))),
@@ -1856,7 +1858,7 @@ window.__ModuleLoader__.load({
             h('div',{className:'wcu-segment wcu-presets wcu-desktops',role:'radiogroup','aria-labelledby':idPrefix+'-desktop-title'},...DESKTOP_OPTIONS.map(([value,label])=>h('label',{key:value},
               h('input',{type:'radio',name:idPrefix+'-desktopTarget',id:idPrefix+'-desktopTarget-'+value,value,checked:draft.desktopTarget===value,disabled,onChange:()=>change('desktopTarget',value)}),t(label)))),
             h('p',{className:'wcu-hint','data-wincu-desktop-hint':true},t((DESKTOP_OPTIONS.find(([value])=>value===draft.desktopTarget)??DESKTOP_OPTIONS[0])[2]))),
-          draft.desktopTarget==='quiet'&&h('div',{className:'wcu-notice','data-wincu-quiet-notes':true},h('ul',null,...[1,2,3].map(n=>h('li',{key:n},t('modeQuietNote'+n))))),
+          draft.desktopTarget==='quiet'&&h('div',{className:'wcu-notice','data-wincu-quiet-notes':true},h('ul',null,...[1,2,3,4].map(n=>h('li',{key:n},t('modeQuietNote'+n))))),
           draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
             h('strong',null,t('hypervSetup')),
             h('ol',null,...[1,2,3,4,5,6].map(n=>h('li',{key:n,'data-tone':hypervMessage&&hypervMessage.step===n?hypervMessage.tone:undefined},t('hypervStep'+n),

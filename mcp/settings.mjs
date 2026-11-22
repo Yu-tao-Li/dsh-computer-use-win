@@ -72,7 +72,7 @@ export function enabledToolsForSettings(input = {}) {
 }
 
 // Both permission and startup state matter when deciding whether to reconnect.
-// Low disruption and Full speed share one server, which reads the mode live.
+// Low disruption and Foreground share one server, which reads the mode live.
 export function toolSelectionKey(input = {}) {
   const settings=normalizeSettings(input);
   return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser,desktopTarget:settings.desktopTarget==='hyperv'?'hyperv':'local',hypervVm:settings.desktopTarget==='hyperv'?settings.hypervVm:''});

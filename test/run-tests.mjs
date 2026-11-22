@@ -17,6 +17,8 @@ const suites = [
   ['background-desktop',process.execPath,['test/background-desktop.mjs']],
   ['work-modes-live',process.execPath,['test/work-modes-live.mjs']],
   ['work-mode-contract',process.execPath,['test/work-mode-contract.mjs']],
+  ['input-hold',powershell,['-NoProfile','-File','test/input-hold.ps1']],
+  ['input-compose',process.execPath,['test/input-compose.mjs']],
   ['restart-route',process.execPath,['test/restart-route.mjs']],
   ['observation-budget',process.execPath,['test/observation-budget.mjs']],
   ['input-mutex',process.execPath,['test/input-mutex.mjs']],

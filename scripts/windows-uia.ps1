@@ -98,15 +98,6 @@ using System;
 using System.Runtime.InteropServices;
 
 public static class WindowsComputerUseNative {
-  [StructLayout(LayoutKind.Sequential)] struct LastInputInfo { public uint Size; public uint Time; }
-  [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LastInputInfo info);
-  // Milliseconds since the last mouse or keyboard input in this session, of
-  // any origin; -1 when Windows does not say. Low disruption waits for a pause.
-  public static long InputIdleMilliseconds() {
-    var info = new LastInputInfo { Size = 8 };
-    if (!GetLastInputInfo(ref info)) return -1;
-    return unchecked((uint)Environment.TickCount - info.Time);
-  }
   // Shared with the stop listener. Remote-control input without this marker
   // remains eligible for Esc / the configured stop shortcut.
   public static readonly uint InputMarker = ParseInputMarker();
@@ -680,6 +671,458 @@ public static class WindowsComputerUseNative {
       return true;
     }, IntPtr.Zero);
     return result.ToArray();
+  }
+}
+
+// Low disruption (the default work mode) borrows the pointer and keyboard for
+// a step without waiting for the user to stop. Meanwhile the user's own keys
+// and mouse actions are held here and replayed to the user's window once the
+// foreground and pointer are back, so nothing they type is lost or lands in
+// DSH's window. Afterwards, while a window DSH worked in stays in front (a
+// menu, list or dialog it opened, an app it started), the user's next key
+// first gives the foreground back to their window and is replayed there; a
+// click of theirs ends that. Esc always passes on to the stop listener. When
+// Windows does not install the hooks, or drops one that answered too slowly,
+// only this protection is lost.
+public static class WcuInputHold {
+  public const int Idle = 0, Holding = 1, Guarding = 2, Returning = 3;
+  public static readonly uint ReplayMarker = unchecked(WindowsComputerUseNative.InputMarker + 1u);
+  public struct Held { public bool Key, Up; public int Vk, Scan, Flags, X, Y, MouseData; public uint MouseFlags; }
+
+  // The decisions, without Windows calls, so tests can drive them.
+  public sealed class Core {
+    public int State;
+    public readonly System.Collections.Generic.List<Held> Queue = new System.Collections.Generic.List<Held>();
+    public readonly System.Collections.Generic.HashSet<int> PreHeld = new System.Collections.Generic.HashSet<int>();
+    public readonly System.Collections.Generic.HashSet<int> Keys = new System.Collections.Generic.HashSet<int>();
+    public readonly System.Collections.Generic.HashSet<int> Buttons = new System.Collections.Generic.HashSet<int>();
+    public int X, Y, KeyCount, MouseCount;
+    public bool Moved;
+    public void Reset(int x, int y) { Queue.Clear(); PreHeld.Clear(); Keys.Clear(); Buttons.Clear(); X = x; Y = y; Moved = false; KeyCount = 0; MouseCount = 0; }
+    static bool Ours(bool injected, bool lowerIntegrity, ulong extra) {
+      return injected && ((!lowerIntegrity && extra == (ulong)WindowsComputerUseNative.InputMarker) || extra == (ulong)ReplayMarker);
+    }
+    // A key (LLKHF flags: 0x01 extended, 0x02 injected at a lower integrity,
+    // 0x10 injected). repeat: the key was down already (auto-repeat). In
+    // Guarding, dshInFront: a window DSH worked in is in front and the user's
+    // window is there to go back to. True: swallow the key.
+    public bool Key(int vk, int scan, int flags, ulong extra, bool up, bool repeat, bool dshInFront, bool overdue) {
+      if (Ours((flags & 0x10) != 0, (flags & 0x02) != 0, extra)) return false;
+      if (State == Holding) {
+        if (overdue || vk == 0x1B) return false;
+        if (up) {
+          if (Keys.Remove(vk)) { Add(vk, scan, flags, true); return true; }
+          PreHeld.Remove(vk); return false;
+        }
+        // A key pressed before the hold: its repeats are dropped, its release passes.
+        if (PreHeld.Contains(vk) || (repeat && !Keys.Contains(vk))) { PreHeld.Add(vk); return true; }
+        Keys.Add(vk); KeyCount++; Add(vk, scan, flags, false); return true;
+      }
+      if (State == Guarding) {
+        if (up || vk == 0x1B || !dshInFront) return false;
+        State = Returning; Keys.Clear(); Keys.Add(vk); KeyCount = 1; Add(vk, scan, flags, false); return true;
+      }
+      if (State == Returning) {
+        if (vk == 0x1B) return false;
+        if (up) { if (Keys.Remove(vk)) { Add(vk, scan, flags, true); return true; } return false; }
+        Keys.Add(vk); KeyCount++; Add(vk, scan, flags, false); return true;
+      }
+      return false;
+    }
+    // A mouse event (LLMHF flags: 0x01 injected, 0x02 injected at a lower
+    // integrity). (x, y): where Windows would put the pointer; (cursorX,
+    // cursorY): where it is. True: swallow the event.
+    public bool Mouse(int message, int x, int y, int cursorX, int cursorY, int mouseData, int flags, ulong extra, bool overdue) {
+      bool injected = (flags & 0x01) != 0;
+      if (Ours(injected, (flags & 0x02) != 0, extra)) return false;
+      int button = Button(message, mouseData);
+      // A click of the user's own picks the window: the guard ends.
+      if (State == Guarding) { if (button != 0 && Down(message)) State = Idle; return false; }
+      if (State != Holding || overdue) return false;
+      if (message == 0x200) {
+        // A mouse moves the pointer by a distance; remote control, pens and touch place it.
+        if (injected || (extra & 0xFFFFFF00UL) == 0xFF515700UL) { X = x; Y = y; } else { X += x - cursorX; Y += y - cursorY; }
+        Moved = true; return true;
+      }
+      if (message == 0x20A || message == 0x20E) { MouseCount++; AddMouse(message, mouseData); return true; }
+      if (button == 0) return false;
+      if (Down(message)) { Buttons.Add(button); MouseCount++; AddMouse(message, mouseData); return true; }
+      if (Buttons.Remove(button)) { AddMouse(message, mouseData); return true; }
+      return false;
+    }
+    static bool Down(int message) { return message == 0x201 || message == 0x204 || message == 0x207 || message == 0x20B; }
+    static int Button(int message, int mouseData) {
+      switch (message) {
+        case 0x201: case 0x202: return 1;
+        case 0x204: case 0x205: return 2;
+        case 0x207: case 0x208: return 3;
+        case 0x20B: case 0x20C: return ((mouseData >> 16) & 0xFFFF) == 1 ? 4 : 5;
+        default: return 0;
+      }
+    }
+    void Add(int vk, int scan, int flags, bool up) { var held = new Held(); held.Key = true; held.Vk = vk; held.Scan = scan; held.Flags = flags; held.Up = up; Queue.Add(held); }
+    void AddMouse(int message, int mouseData) {
+      var held = new Held(); held.X = X; held.Y = Y;
+      int high = (short)((mouseData >> 16) & 0xFFFF);
+      switch (message) {
+        case 0x201: held.MouseFlags = 0x0002; break;
+        case 0x202: held.MouseFlags = 0x0004; break;
+        case 0x204: held.MouseFlags = 0x0008; break;
+        case 0x205: held.MouseFlags = 0x0010; break;
+        case 0x207: held.MouseFlags = 0x0020; break;
+        case 0x208: held.MouseFlags = 0x0040; break;
+        case 0x20B: held.MouseFlags = 0x0080; held.MouseData = high & 0xFFFF; break;
+        case 0x20C: held.MouseFlags = 0x0100; held.MouseData = high & 0xFFFF; break;
+        case 0x20A: held.MouseFlags = 0x0800; held.MouseData = high; break;
+        case 0x20E: held.MouseFlags = 0x1000; held.MouseData = high; break;
+      }
+      Queue.Add(held);
+    }
+  }
+
+  // What Windows gets on replay, tagged so that neither hook holds it again.
+  public static WindowsComputerUseNative.INPUT ToInput(Held held) {
+    var input = new WindowsComputerUseNative.INPUT();
+    if (held.Key) {
+      // VK_PACKET: a character another program typed (KEYEVENTF_UNICODE).
+      bool packet = held.Vk == 0xE7;
+      input.type = 1;
+      input.U.ki.wVk = (ushort)(packet ? 0 : held.Vk);
+      input.U.ki.wScan = (ushort)held.Scan;
+      input.U.ki.dwFlags = ((held.Flags & 0x01) != 0 && !packet ? 1u : 0u) | (held.Up ? 2u : 0u) | (packet ? 4u : 0u);
+      input.U.ki.dwExtraInfo = new IntPtr((long)(ulong)ReplayMarker);
+    } else {
+      input.type = 0;
+      input.U.mi.mouseData = unchecked((uint)held.MouseData);
+      input.U.mi.dwFlags = held.MouseFlags;
+      input.U.mi.dwExtraInfo = new IntPtr((long)(ulong)ReplayMarker);
+    }
+    return input;
+  }
+
+  public static readonly Core Decisions = new Core();
+  static readonly object gate = new object();
+  static IntPtr user, pendingUser;
+  static System.Collections.Generic.HashSet<long> dshWindows = new System.Collections.Generic.HashSet<long>();
+  static System.Collections.Generic.HashSet<long> before = new System.Collections.Generic.HashSet<long>(), pendingBefore;
+  static System.Collections.Generic.HashSet<uint> dshProcesses = new System.Collections.Generic.HashSet<uint>();
+  static DateTime since, guardUntil;
+  static string notice;
+  public const string GuardNote = "This window stays in front for now; if the user types before your next step, the foreground goes back to their window first.";
+
+  public sealed class UserInput { public bool Held, Fullscreen; public int Notification; public long Foreground; }
+  static readonly int[] Watched = { 0x01, 0x02, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x5B, 0x5C };
+  static bool AnyHeld() { foreach (int key in Watched) if ((GetAsyncKeyState(key) & 0x8000) != 0) return true; return false; }
+  // Whether borrowing now would break what the user is doing: a modifier or a
+  // mouse button down, or a full-screen app or presentation in front
+  // (SHQueryUserNotificationState: 2 busy, 3 Direct3D full screen, 4 presentation mode).
+  public static UserInput UserState() {
+    var state = new UserInput();
+    state.Held = AnyHeld();
+    int value;
+    if (SHQueryUserNotificationState(out value) == 0) { state.Notification = value; state.Fullscreen = value == 2 || value == 3 || value == 4; }
+    state.Foreground = WindowsComputerUseNative.GetForegroundWindow().ToInt64();
+    return state;
+  }
+
+  // Before DSH's input on the user's desktop: hold the user's input from now
+  // on. target: the window DSH works in (0: the one in front). False when the
+  // hooks are not there; the step then runs without this protection.
+  public static bool Begin(long target) {
+    var windows = TopLevelSet();
+    uint pid = 0;
+    if (target != 0) WindowsComputerUseNative.GetWindowThreadProcessId(new IntPtr(target), out pid);
+    for (int waited = 0; ; waited += 10) {
+      lock (gate) {
+        if (Decisions.State != Returning || waited >= 1000) {
+          WindowsComputerUseNative.POINT cursor;
+          WindowsComputerUseNative.GetCursorPos(out cursor);
+          // Coming from a guard, the user's window is still the one from before.
+          if (Decisions.State != Guarding) {
+            user = WindowsComputerUseNative.GetForegroundWindow(); before = windows;
+            dshWindows = new System.Collections.Generic.HashSet<long>(); dshProcesses = new System.Collections.Generic.HashSet<uint>();
+          }
+          Decisions.Reset(cursor.x, cursor.y);
+          if (target != 0) dshWindows.Add(target);
+          if (pid != 0) dshProcesses.Add(pid);
+          since = DateTime.UtcNow;
+          Decisions.State = Holding;
+          break;
+        }
+      }
+      System.Threading.Thread.Sleep(10);
+    }
+    // A fresh pair: Windows may have dropped an older hook without a word.
+    Request(UninstallMessage, true);
+    if (!Request(InstallMessage, false)) {
+      lock (gate) Decisions.State = Idle;
+      Request(UninstallMessage, true);
+      return false;
+    }
+    for (int key = 0x08; key <= 0xFE; key++) if ((GetAsyncKeyState(key) & 0x8000) != 0) lock (gate) Decisions.PreHeld.Add(key);
+    return true;
+  }
+
+  // During the hold, a modifier or button the user pressed before it may still
+  // be down; its release passes. True once none is down.
+  public static bool WaitForRelease(int milliseconds) {
+    DateTime start = DateTime.UtcNow;
+    while (AnyHeld()) {
+      if ((DateTime.UtcNow - start).TotalMilliseconds >= milliseconds) return false;
+      System.Threading.Thread.Sleep(10);
+    }
+    return true;
+  }
+
+  // After DSH's input, with the foreground and pointer given back: replay what
+  // the user did meanwhile. windows: what DSH worked in (the target and the
+  // menus, lists and dialogs it opened). A note for the result, or null.
+  public static string End(long[] windows) {
+    IntPtr target; bool hasKeys = false; int keys, mouse;
+    lock (gate) {
+      if (Decisions.State != Holding) return null;
+      if (windows != null) foreach (long window in windows) if (window != 0) dshWindows.Add(window);
+      if (Decisions.Keys.Count > 0) hasKeys = true;
+      foreach (Held held in Decisions.Queue) if (held.Key) hasKeys = true;
+      keys = Decisions.KeyCount; mouse = Decisions.MouseCount; target = user;
+    }
+    IntPtr front = WindowsComputerUseNative.GetForegroundWindow();
+    bool there = Present(target), returned = false, deliver = true, elevated = false, guard;
+    if (hasKeys && front != target) { returned = there && GiveBack(target); deliver = returned; }
+    // Windows lets no program type into a window that runs at a higher
+    // integrity level (an app run as administrator while DSH is not).
+    if (hasKeys && deliver && there) {
+      uint pid; WindowsComputerUseNative.GetWindowThreadProcessId(target, out pid);
+      var identity = pid == 0 ? null : WindowsComputerUseNative.ReadInputProcess(pid, false);
+      uint? own = WindowsComputerUseNative.ReadCurrentIntegrity();
+      if (identity != null && identity.Integrity.HasValue && own.HasValue && identity.Integrity.Value > own.Value) { deliver = false; elevated = true; }
+    }
+    lock (gate) guard = !hasKeys && there && front != target && IsDsh(front);
+    int dropped = Drain(deliver, Holding, guard ? Guarding : Idle);
+    int x, y; bool moved;
+    lock (gate) { moved = Decisions.Moved; x = Decisions.X; y = Decisions.Y; guardUntil = DateTime.UtcNow.AddMinutes(10); }
+    if (moved) Place(x, y);
+    if (!guard) Request(UninstallMessage, false);
+    var parts = new System.Collections.Generic.List<string>();
+    if (elevated) parts.Add("The user typed during this step in a window that runs as administrator; Windows lets DSH replay no keys there, so they were dropped.");
+    else if (returned) parts.Add("The user was typing, so the foreground went back to their window and their keys went there; a menu or list this step opened may have closed.");
+    else if (dropped > 0) parts.Add("The user typed during this step, but Windows kept this window in front, so their keys were dropped rather than sent here.");
+    else if (keys + mouse > 0) parts.Add("The user's own input during this step was held and then replayed to their window.");
+    if (guard) parts.Add(GuardNote);
+    return parts.Count == 0 ? null : String.Join(" ", parts.ToArray());
+  }
+
+  // Before an action that may bring a window forward without real input (an
+  // app DSH starts, activate_window, an element action whose app comes forward).
+  public static void Snapshot() {
+    var windows = TopLevelSet();
+    IntPtr front = WindowsComputerUseNative.GetForegroundWindow();
+    lock (gate) {
+      if (Decisions.State == Guarding) { pendingUser = user; pendingBefore = before; }
+      else if (Decisions.State == Idle) { pendingUser = front; pendingBefore = windows; }
+    }
+  }
+  // After it: until the user clicks, DSH's next input step or ten minutes, a
+  // key the user types while one of these windows, or a new window of these
+  // processes, is in front goes to the user's own window instead.
+  public static bool ArmGuard(long[] windows, long[] processes) {
+    lock (gate) {
+      if (pendingUser == IntPtr.Zero || (Decisions.State != Idle && Decisions.State != Guarding)) return false;
+      if (Decisions.State == Idle) { dshWindows = new System.Collections.Generic.HashSet<long>(); dshProcesses = new System.Collections.Generic.HashSet<uint>(); }
+      user = pendingUser; before = pendingBefore ?? new System.Collections.Generic.HashSet<long>(); pendingUser = IntPtr.Zero;
+      if (windows != null) foreach (long window in windows) if (window != 0) dshWindows.Add(window);
+      if (processes != null) foreach (long process in processes) if (process > 0) dshProcesses.Add((uint)process);
+      Decisions.Reset(0, 0); Decisions.State = Guarding; guardUntil = DateTime.UtcNow.AddMinutes(10);
+    }
+    if (Request(InstallMessage, false)) return true;
+    lock (gate) if (Decisions.State == Guarding) Decisions.State = Idle;
+    return false;
+  }
+
+  // A guard that acted between two steps, for the next result.
+  public static string TakeNotice() { lock (gate) { string text = notice; notice = null; return text; } }
+
+  static bool Present(IntPtr window) { return window != IntPtr.Zero && WindowsComputerUseNative.IsWindow(window) && WindowsComputerUseNative.IsWindowVisible(window); }
+  static bool GiveBack(IntPtr window) {
+    if (WindowsComputerUseNative.GiveForeground(window)) return true;
+    System.Threading.Thread.Sleep(30);
+    return WindowsComputerUseNative.GiveForeground(window);
+  }
+  static void Place(int x, int y) {
+    int left = WindowsComputerUseNative.GetSystemMetrics(76), top = WindowsComputerUseNative.GetSystemMetrics(77);
+    int width = WindowsComputerUseNative.GetSystemMetrics(78), height = WindowsComputerUseNative.GetSystemMetrics(79);
+    if (width > 0 && height > 0) { x = Math.Max(left, Math.Min(left + width - 1, x)); y = Math.Max(top, Math.Min(top + height - 1, y)); }
+    WindowsComputerUseNative.SetCursorPos(x, y);
+  }
+  static System.Collections.Generic.HashSet<long> TopLevelSet() {
+    var set = new System.Collections.Generic.HashSet<long>();
+    foreach (IntPtr window in WindowsComputerUseNative.TopLevelWindows()) set.Add(window.ToInt64());
+    return set;
+  }
+  // Under gate. A window DSH worked in, one of them owns, or a new window of
+  // the processes DSH worked in.
+  static bool IsDsh(IntPtr window) {
+    if (window == IntPtr.Zero) return false;
+    IntPtr owner = window;
+    for (int depth = 0; owner != IntPtr.Zero && depth < 8; depth++) {
+      if (dshWindows.Contains(owner.ToInt64())) return true;
+      owner = WindowsComputerUseNative.GetWindow(owner, 4);
+    }
+    uint pid; WindowsComputerUseNative.GetWindowThreadProcessId(window, out pid);
+    return pid != 0 && dshProcesses.Contains(pid) && !before.Contains(window.ToInt64());
+  }
+  static bool Overdue() { return (DateTime.UtcNow - since).TotalMilliseconds > 8000; }
+
+  // Replays the queue in order, also what arrives meanwhile, then switches
+  // from expected to next once nothing is left (unless a new step took over).
+  // Each batch waits until the hooks have seen its events: input the user sent
+  // before them is ahead in Windows' queue and must be held, not let through
+  // after the switch ahead of the replay. Keys go nowhere when they cannot
+  // reach the user's window. Returns how many key events were dropped.
+  static int Drain(bool deliverKeys, int expected, int next) {
+    int dropped = 0, size = Marshal.SizeOf(typeof(WindowsComputerUseNative.INPUT));
+    for (;;) {
+      Held[] batch;
+      lock (gate) {
+        if (Decisions.State != expected) return dropped;
+        if (Decisions.Queue.Count == 0) { Decisions.State = next; Decisions.Keys.Clear(); Decisions.Buttons.Clear(); Decisions.PreHeld.Clear(); return dropped; }
+        batch = Decisions.Queue.ToArray(); Decisions.Queue.Clear();
+      }
+      int sent = 0;
+      foreach (Held held in batch) {
+        if (held.Key && !deliverKeys) { dropped++; continue; }
+        if (!held.Key) WindowsComputerUseNative.SetCursorPos(held.X, held.Y);
+        sent += (int)WindowsComputerUseNative.SendInput(1, new WindowsComputerUseNative.INPUT[] { ToInput(held) }, size);
+      }
+      int target = System.Threading.Interlocked.Add(ref replaySent, sent);
+      DateTime start = DateTime.UtcNow;
+      while (System.Threading.Thread.VolatileRead(ref replaySeen) < target && (DateTime.UtcNow - start).TotalMilliseconds < 500) System.Threading.Thread.Sleep(1);
+      if (System.Threading.Thread.VolatileRead(ref replaySeen) < target) System.Threading.Interlocked.Exchange(ref replaySeen, target);
+    }
+  }
+  static int replaySent, replaySeen;
+  // On the hook thread: a replayed event has reached the hooks.
+  static void Seen(bool injected, ulong extra) { if (injected && extra == (ulong)ReplayMarker) System.Threading.Interlocked.Increment(ref replaySeen); }
+  static void ReturnToUser(object ignored) {
+    IntPtr target; lock (gate) target = user;
+    bool returned = Present(target) && GiveBack(target);
+    Drain(returned, Returning, Idle);
+    lock (gate) notice = returned
+      ? "Since your last step the user typed while a window DSH worked in was in front, so the foreground went back to their window and their keys went there. Observe again before acting in that window."
+      : "Since your last step the user typed while a window DSH worked in was in front; Windows did not give their window the foreground, so those keys were dropped.";
+    Request(UninstallMessage, false);
+  }
+
+  // The hooks live on one thread with a message loop. Install and remove are
+  // requests to it; a remove without force waits until nothing is held or guarded.
+  delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+  [StructLayout(LayoutKind.Sequential)] struct KeyData { public uint vk, scan, flags, time; public UIntPtr extra; }
+  [StructLayout(LayoutKind.Sequential)] struct MouseData { public int x, y; public uint data, flags, time; public UIntPtr extra; }
+  [StructLayout(LayoutKind.Sequential)] struct Msg { public IntPtr hwnd; public uint message; public IntPtr wParam, lParam; public uint time; public int x, y; }
+  [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int id, HookProc proc, IntPtr module, uint thread);
+  [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hook);
+  [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
+  [DllImport("user32.dll")] static extern bool PostThreadMessage(uint thread, uint message, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] static extern int GetMessage(out Msg message, IntPtr hwnd, uint min, uint max);
+  [DllImport("user32.dll")] static extern bool PeekMessage(out Msg message, IntPtr hwnd, uint min, uint max, uint remove);
+  [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+  [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
+  const uint InstallMessage = 0x8001, UninstallMessage = 0x8002;
+  static readonly HookProc keyboardProc = OnKey, mouseProc = OnMouse;
+  static readonly object pump = new object();
+  static System.Threading.Thread thread;
+  static uint threadId;
+  static int requested, done;
+  static IntPtr keyboardHook, mouseHook;
+
+  static void Pump() {
+    Msg message;
+    PeekMessage(out message, IntPtr.Zero, 0, 0, 0);
+    lock (pump) { threadId = WindowsComputerUseNative.GetCurrentThreadId(); System.Threading.Monitor.PulseAll(pump); }
+    while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0) {
+      if (message.message == InstallMessage) {
+        if (keyboardHook == IntPtr.Zero) keyboardHook = SetWindowsHookEx(13, keyboardProc, GetModuleHandle(null), 0);
+        if (mouseHook == IntPtr.Zero) mouseHook = SetWindowsHookEx(14, mouseProc, GetModuleHandle(null), 0);
+      } else if (message.message == UninstallMessage) {
+        bool idle; lock (gate) idle = Decisions.State == Idle;
+        if (idle || message.lParam != IntPtr.Zero) {
+          if (keyboardHook != IntPtr.Zero) { UnhookWindowsHookEx(keyboardHook); keyboardHook = IntPtr.Zero; }
+          if (mouseHook != IntPtr.Zero) { UnhookWindowsHookEx(mouseHook); mouseHook = IntPtr.Zero; }
+        }
+      } else continue;
+      lock (pump) { done = Math.Max(done, message.wParam.ToInt32()); System.Threading.Monitor.PulseAll(pump); }
+    }
+  }
+  static bool Request(uint message, bool force) {
+    int sequence; uint target;
+    lock (pump) {
+      if (thread == null || !thread.IsAlive) {
+        threadId = 0;
+        thread = new System.Threading.Thread(Pump);
+        thread.IsBackground = true; thread.Name = "DSH input hold"; thread.Start();
+        DateTime start = DateTime.UtcNow;
+        while (threadId == 0 && (DateTime.UtcNow - start).TotalMilliseconds < 2000) System.Threading.Monitor.Wait(pump, 100);
+        if (threadId == 0) return false;
+      }
+      sequence = ++requested; target = threadId;
+    }
+    if (!PostThreadMessage(target, message, new IntPtr(sequence), new IntPtr(force ? 1 : 0))) return false;
+    lock (pump) {
+      DateTime start = DateTime.UtcNow;
+      while (done < sequence) {
+        int left = 1000 - (int)(DateTime.UtcNow - start).TotalMilliseconds;
+        if (left <= 0) return false;
+        System.Threading.Monitor.Wait(pump, left);
+      }
+      return message != InstallMessage || (keyboardHook != IntPtr.Zero && mouseHook != IntPtr.Zero);
+    }
+  }
+  static void Release() { PostThreadMessage(threadId, UninstallMessage, IntPtr.Zero, IntPtr.Zero); }
+
+  static IntPtr OnKey(int code, IntPtr wParam, IntPtr lParam) {
+    if (code >= 0) {
+      var data = (KeyData)Marshal.PtrToStructure(lParam, typeof(KeyData));
+      Seen((data.flags & 0x10) != 0, data.extra.ToUInt64());
+      int kind = wParam.ToInt32();
+      bool up = kind == 0x101 || kind == 0x105, swallow, returning, ended;
+      bool repeat = !up && (GetAsyncKeyState((int)data.vk) & 0x8000) != 0;
+      lock (gate) {
+        int was = Decisions.State;
+        bool dshInFront = false;
+        if (was == Guarding && !up) {
+          if (DateTime.UtcNow > guardUntil) Decisions.State = Idle;
+          else {
+            IntPtr front = WindowsComputerUseNative.GetForegroundWindow();
+            dshInFront = front != user && Present(user) && IsDsh(front);
+          }
+        }
+        swallow = Decisions.Key((int)data.vk, (int)data.scan, (int)data.flags, data.extra.ToUInt64(), up, repeat, dshInFront, was == Holding && Overdue());
+        returning = was == Guarding && Decisions.State == Returning;
+        ended = was == Guarding && Decisions.State == Idle;
+      }
+      if (returning) System.Threading.ThreadPool.QueueUserWorkItem(ReturnToUser);
+      if (ended) Release();
+      if (swallow) return new IntPtr(1);
+    }
+    return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+  }
+  static IntPtr OnMouse(int code, IntPtr wParam, IntPtr lParam) {
+    if (code >= 0) {
+      var data = (MouseData)Marshal.PtrToStructure(lParam, typeof(MouseData));
+      Seen((data.flags & 0x01) != 0, data.extra.ToUInt64());
+      WindowsComputerUseNative.POINT cursor;
+      WindowsComputerUseNative.GetCursorPos(out cursor);
+      bool swallow, ended;
+      lock (gate) {
+        int was = Decisions.State;
+        swallow = Decisions.Mouse(wParam.ToInt32(), data.x, data.y, cursor.x, cursor.y, unchecked((int)data.data), (int)data.flags, data.extra.ToUInt64(), was == Holding && Overdue());
+        ended = was == Guarding && Decisions.State == Idle;
+      }
+      if (ended) Release();
+      if (swallow) return new IntPtr(1);
+    }
+    return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
   }
 }
 '@
@@ -1318,18 +1761,41 @@ function Resolve-InputWindow {
 function Start-Input {
   param([object]$InputObject, [long]$Hwnd, [switch]$NoActivate)
   Assert-NativeInputTarget $Hwnd
-  $cursor = New-Object WindowsComputerUseNative+POINT
-  [void][WindowsComputerUseNative]::GetCursorPos([ref]$cursor)
-  $state = @{ user = [WindowsComputerUseNative]::GetForegroundWindow().ToInt64(); target = [int64]$Hwnd; keep = [bool](Get-Prop $InputObject 'activate' $false)
-    cursor = $cursor; moved = $null; borrowed = $false; procId = (Get-WindowProcessId $Hwnd); popups = @() }
-  if ($state.procId) { $state.popups = @([WindowsComputerUseNative]::VisiblePopups([uint32]$state.procId)) }
-  if ($state.target -and $state.user -ne $state.target) {
-    if (-not $NoActivate -and -not (Set-WindowForeground ([pscustomobject]@{ nativeWindowHandle = $state.target }))) {
-      throw 'The target window could not be brought to the foreground (Windows foreground lock), so no input was sent. Try again, or call activate_window first.'
+  # Low disruption: from here until Complete-Input the user's own keys and
+  # mouse actions are held, then replayed to their window. A modifier or
+  # button they already hold gets a second to come up.
+  if ($script:WcuLowDisruption -and -not $script:WcuHolding -and -not (Get-Prop $InputObject 'activate' $false)) {
+    $script:WcuHolding = [WcuInputHold]::Begin($Hwnd)
+    if ($script:WcuHolding -and -not [WcuInputHold]::WaitForRelease(1000)) {
+      [void](Stop-InputHold)
+      throw 'WCU_USER_INPUT_HELD: The user is holding a key or mouse button, so nothing was sent. Try again in a moment, or use an element action, which needs neither.'
     }
-    $state.borrowed = $true
   }
-  return $state
+  try {
+    $cursor = New-Object WindowsComputerUseNative+POINT
+    [void][WindowsComputerUseNative]::GetCursorPos([ref]$cursor)
+    $state = @{ user = [WindowsComputerUseNative]::GetForegroundWindow().ToInt64(); target = [int64]$Hwnd; keep = [bool](Get-Prop $InputObject 'activate' $false)
+      cursor = $cursor; moved = $null; borrowed = $false; procId = (Get-WindowProcessId $Hwnd); popups = @() }
+    if ($state.procId) { $state.popups = @([WindowsComputerUseNative]::VisiblePopups([uint32]$state.procId)) }
+    if ($state.target -and $state.user -ne $state.target) {
+      if (-not $NoActivate -and -not (Set-WindowForeground ([pscustomobject]@{ nativeWindowHandle = $state.target }))) {
+        throw 'The target window could not be brought to the foreground (Windows foreground lock), so no input was sent. Try again, or call activate_window first.'
+      }
+      $state.borrowed = $true
+    }
+    return $state
+  } catch {
+    if ($script:WcuHolding) { [void](Stop-InputHold) }
+    throw
+  }
+}
+
+# The end of a hold: replays what the user did meanwhile (WcuInputHold::End).
+# $Windows: what DSH worked in. Returns the note for the result, or $null.
+function Stop-InputHold {
+  param([long[]]$Windows = @())
+  $script:WcuHolding = $false
+  return [WcuInputHold]::End([long[]]$Windows)
 }
 
 # Real input lands on whatever shows at the point. With the target in front,
@@ -1348,10 +1814,27 @@ function Assert-PointOnTarget {
   throw "POINT_COVERED: ($X,$Y) shows another window ('$($title.ToString())', class $($class.ToString()), HWND $hit) above the target, so no input was sent. Move or close that window, or pick a point of the target that is not covered."
 }
 
-# After real input: put the pointer back if it is still where DSH left it, and
-# give the foreground back (see the section note). Adds pointer/foreground to
-# the result, saying what was done.
+# After real input, and under Low disruption also the end of the hold, whose
+# note goes to the result as userInput.
 function Complete-Input {
+  param([hashtable]$State, [System.Collections.IDictionary]$Result)
+  try { Complete-BorrowedInput $State $Result }
+  finally {
+    if ($script:WcuHolding) {
+      # What DSH worked in: the target and the menus, lists and dialogs it opened.
+      $windows = @()
+      if ($State.target) { $windows += [int64]$State.target }
+      if ($State.procId) { $windows += @([WindowsComputerUseNative]::VisiblePopups([uint32]$State.procId) | Where-Object { $State.popups -notcontains $_ }) }
+      $note = Stop-InputHold $windows
+      if ($note) { $Result['userInput'] = $note }
+    }
+  }
+}
+
+# Put the pointer back if it is still where DSH left it, and give the
+# foreground back (see the section note). Adds pointer/foreground to the
+# result, saying what was done.
+function Complete-BorrowedInput {
   param([hashtable]$State, [System.Collections.IDictionary]$Result)
   $target = if ($State.target) { $State.target } else { [WindowsComputerUseNative]::GetForegroundWindow().ToInt64() }
   if ($target) { $script:InputWindow = @{ series = $script:WcuSeries; hwnd = [int64]$target; at = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() } }
@@ -1429,6 +1912,7 @@ function Invoke-Guarded {
   Assert-InputProcess $procId
   $popups = @([WindowsComputerUseNative]::VisiblePopups($procId))
   $script:BackgroundReport = [ordered]@{}
+  if ($script:WcuLowDisruption) { [WcuInputHold]::Snapshot() }
   try { return (& $Call) }
   finally {
     $now = New-Object WindowsComputerUseNative+POINT
@@ -1445,6 +1929,7 @@ function Invoke-Guarded {
       $opened = @([WindowsComputerUseNative]::VisiblePopups($procId) | Where-Object { $popups -notcontains $_ })
       $script:BackgroundReport['foreground'] = if ([WindowsComputerUseNative]::InMenuMode([IntPtr]$after) -or $opened.Count) { 'kept: the app came forward and a menu, list or dialog it opened is showing' }
         elseif ([WindowsComputerUseNative]::GiveForeground([IntPtr]$front)) { 'returned (the app had come forward)' } else { 'kept: the app came forward and Windows refused to switch back' }
+      if ($script:WcuLowDisruption -and $script:BackgroundReport['foreground'] -like 'kept*' -and [WcuInputHold]::ArmGuard([long[]](@([int64]$after) + $opened), [long[]]@([int64]$procId))) { $script:BackgroundReport['userInput'] = [WcuInputHold]::GuardNote }
     }
   }
 }
@@ -3585,6 +4070,7 @@ function Invoke-LaunchApp {
     $application = $document.Application
     [void](Test-Failsafe)
     $show = if ([bool](Get-Prop $InputObject 'activate' $false)) { 1 } else { 4 }
+    if ($script:WcuLowDisruption) { [WcuInputHold]::Snapshot() }
     $application.ShellExecute($resolved.target, $arguments, $directory, 'open', $show)
   } catch {
     throw ('LAUNCH_SHELL_FAILED: ' + $_.Exception.Message + ' An interactive Explorer desktop is required; the request is not retried as a tool child process.')
@@ -3595,11 +4081,17 @@ function Invoke-LaunchApp {
   }
   if ($waitMs) { Start-Sleep -Milliseconds $waitMs }
   $observed = @(Get-NativeWindowList -MaxWindows 1000 | ForEach-Object { $_.ToArray() } | Where-Object { $before -notcontains $_.nativeWindowHandle })
-  return [ordered]@{
+  $result = [ordered]@{
     ok=$true; action='launch_app'; target=$resolved.target; launchMethod='explorer-shell'; verification='dispatched'
     observedNewWindows=$observed
     note='The shell accepted the request. New windows are observations, not confirmed matches; an app may reuse an existing window or show none. Verify with list_windows/wait_for. activate=false requests no activation, but applications may activate themselves.'
   }
+  # Low disruption: an app that comes forward by itself does not get the
+  # user's typing; it goes to the window they were in.
+  if ($script:WcuLowDisruption -and $observed.Count -and [WcuInputHold]::ArmGuard([long[]]@($observed | ForEach-Object { [int64]$_.nativeWindowHandle }), [long[]]@($observed | ForEach-Object { [int64]$_.processId }))) {
+    $result['userInput'] = 'If the user types while this app is in front, the foreground goes back to their window first, until they click into it themselves.'
+  }
+  return $result
 }
 
 function Get-DesktopInputMutexName {
@@ -3650,6 +4142,11 @@ function Invoke-Action {
   $script:WcuQuiet = [bool](Get-Prop $inputObject '_wcuQuiet' $false)
   $script:WcuSeries = Get-Prop $inputObject '_wcuSeries' $null
   $background = $env:WCU_BACKGROUND_DESKTOP -eq '1'
+  # Low disruption on the user's desktop: real input holds the user's own
+  # input and replays it afterwards, and a window DSH leaves in front is
+  # guarded (WcuInputHold).
+  $script:WcuLowDisruption = [bool](Get-Prop $inputObject '_wcuLowDisruption' $false) -and -not $background
+  $script:WcuHolding = $false
   if ($background) {
     $nativeTarget = Get-Prop $inputObject 'nativeWindowHandle' $null
     if ($null -ne $nativeTarget -and [WindowsComputerUseNative]::TopLevelWindows() -notcontains [IntPtr]([long]$nativeTarget)) {
@@ -3671,7 +4168,10 @@ function Invoke-Action {
 
   switch ($Action) {
     "launch_app" { return (Invoke-LaunchApp $inputObject) }
-    "input_idle" { return [ordered]@{ ok = $true; action = 'input_idle'; idleMs = [WindowsComputerUseNative]::InputIdleMilliseconds() } }
+    "input_state" {
+      $state = [WcuInputHold]::UserState()
+      return [ordered]@{ ok = $true; action = 'input_state'; held = $state.Held; fullscreen = $state.Fullscreen; notification = $state.Notification; foreground = $state.Foreground }
+    }
     "health" {
       $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
       # Health checks backend availability independently of any application's
@@ -3975,10 +4475,13 @@ function Invoke-Action {
         $state.drain = $true
         try {
           if ([WindowsComputerUseNative]::SendMouseEvent(0, 0, [uint32]$flags[0], 0) -ne 1) { throw 'COMPUTER_USE_INPUT_UNAVAILABLE: Windows rejected mouse input.' }
+          # Under Low disruption the user's input waits for the stroke, so a
+          # long one moves faster: about a second at most.
+          $pause = if ($script:WcuLowDisruption -and $path.Count -gt 40) { [Math]::Max(8, [int](1000 / $path.Count)) } else { 25 }
           foreach ($pt in $path) {
             [void](Test-Failsafe)
             Move-ToPoint -X ([int]$pt.x) -Y ([int]$pt.y)
-            Start-Sleep -Milliseconds 25
+            Start-Sleep -Milliseconds $pause
           }
           $state.moved = @{ x = [int]$last.x; y = [int]$last.y }
         } finally {
@@ -4297,6 +4800,7 @@ function Invoke-Action {
       }
       $hwnd = [int64]$window.nativeWindowHandle
       $wasMinimized = [WindowsComputerUseNative]::IsIconic([IntPtr]$hwnd)
+      if ($script:WcuLowDisruption) { [WcuInputHold]::Snapshot() }
       $result.activated = [bool](Set-WindowForeground $window)
       # Report the window as it is now. The entry above was read before the
       # activation, so a window just restored would still show its minimized
@@ -4310,6 +4814,7 @@ function Invoke-Action {
       Update-WindowIdentity $inputObject $window
       # Kept in front by request; typing without a target goes here too.
       if ($result.activated) { $script:InputWindow = @{ series = $script:WcuSeries; hwnd = $hwnd; at = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() } }
+      if ($result.activated -and $script:WcuLowDisruption -and [WcuInputHold]::ArmGuard([long[]]@($hwnd), [long[]]@([int64](Get-WindowProcessId $hwnd)))) { $result['userInput'] = [WcuInputHold]::GuardNote }
       if (-not $result.activated) {
         $result["targetResponsive"] = Get-WindowResponsive $window
         $result["warning"] = if ($stillMinimized) { "The window is still minimized: Windows did not restore it. Try again; if it stays minimized, ask the user to restore it." } elseif ($result.targetResponsive) { "The window could not be brought to the foreground (Windows foreground lock)." } else { "The target window became unresponsive; avoid repeated activation, tree or input calls." }
@@ -4575,7 +5080,11 @@ function Invoke-Action {
       return $null
     }
   }
-  } finally { Exit-DesktopInput $inputLease }
+  } finally {
+    # A step that failed between Start-Input and Complete-Input still replays.
+    if ($script:WcuHolding) { [void](Stop-InputHold) }
+    Exit-DesktopInput $inputLease
+  }
 }
 
 # ============================================================================
@@ -4624,6 +5133,8 @@ if ($Persistent) {
     try {
       $result = Invoke-Action -Action $name -InputObject (Get-Prop $req "args" $null)
       if ($null -eq $result) { throw "Unknown action '$name'." }
+      $notice = [WcuInputHold]::TakeNotice()
+      if ($notice -and $result -is [System.Collections.IDictionary]) { $result['userInputNotice'] = $notice }
     } catch {
       $result = [ordered]@{
         ok = $false

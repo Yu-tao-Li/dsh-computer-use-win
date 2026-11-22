@@ -57,6 +57,14 @@ jobs:
       - name: Live Firefox BiDi verification
         run: node test/browser-bidi.mjs --live
 
+      # The one check that sends real input, so it runs here and never in the
+      # isolated suite: a fixture "user" types while DSH works in another
+      # window under Low disruption, and every character must land where it
+      # was typed.
+      - name: Live input hold
+        run: node test/input-hold-live.mjs
+        timeout-minutes: 5
+
       - name: Legacy settings page transport
         run: node test/client-settings-contract.mjs
         env:

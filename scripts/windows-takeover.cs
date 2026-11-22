@@ -93,6 +93,22 @@ namespace DshTakeover {
     [DllImport("user32.dll")] internal static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] internal static extern IntPtr GetModuleHandle(string name);
     [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
+    [DllImport("imm32.dll")] internal static extern IntPtr ImmGetDefaultIMEWnd(IntPtr window);
+    [DllImport("user32.dll")] internal static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+    // The input method of the window in front is open in native (non-Latin)
+    // conversion mode: WM_IME_CONTROL to its thread's default IME window
+    // (IMC_GETOPENSTATUS, IMC_GETCONVERSIONMODE). Null when it does not answer.
+    internal static bool? ImeNative() {
+      IntPtr front = GetForegroundWindow();
+      if (front == IntPtr.Zero) return null;
+      IntPtr ime = ImmGetDefaultIMEWnd(front);
+      if (ime == IntPtr.Zero) return false;
+      IntPtr open, mode;
+      if (SendMessageTimeout(ime, 0x283, new IntPtr(5), IntPtr.Zero, 2, 100, out open) == IntPtr.Zero) return null;
+      if (open == IntPtr.Zero) return false;
+      if (SendMessageTimeout(ime, 0x283, new IntPtr(1), IntPtr.Zero, 2, 100, out mode) == IntPtr.Zero) return null;
+      return (mode.ToInt64() & 1) != 0;
+    }
     [DllImport("user32.dll",SetLastError=true)] internal static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll")] internal static extern IntPtr MonitorFromPoint(Point point, uint flags);
     [DllImport("user32.dll",SetLastError=true)] internal static extern bool EnumDisplayMonitors(IntPtr dc,IntPtr clip,MonitorCallback callback,IntPtr data);
@@ -329,6 +345,13 @@ namespace DshTakeover {
     readonly KeyboardWatch keyboard;
     readonly StopBus stopBus;
     readonly object keyState=new object();
+    // The user's last letter (pinyin and other input-method text) and last key
+    // that commits or cancels it (space, Enter, a digit, punctuation, Esc,
+    // Tab), as positions in the stream of their keys; when that letter came,
+    // in milliseconds of composeClock.
+    readonly System.Diagnostics.Stopwatch composeClock = System.Diagnostics.Stopwatch.StartNew();
+    long keyCount, letterAt = -1, letterIndex = -1, commitIndex = -1;
+    bool? testIme;
     readonly bool testMode;
     readonly CommandJson json = new CommandJson();
     readonly List<Frame> frames = new List<Frame>();
@@ -442,6 +465,9 @@ namespace DshTakeover {
           var command = new CommandJson().Deserialize<Dictionary<string,object>>(line);
           if(Get(command,"command","")=="cancel_input"){
             cancel.Set();object id;command.TryGetValue("id",out id);if(id!=null)Emit(new {id=id,ok=true});continue;
+          }
+          if(Get(command,"command","")=="input_state"){
+            object id;command.TryGetValue("id",out id);Emit(new {id=id,ok=true,composing=Composing()});continue;
           }
           dispatcher.BeginInvoke((Action)(() => Dispatch(command)));
         }
@@ -575,6 +601,8 @@ namespace DshTakeover {
           uint flags=(uint)Get<long>(command,"flags",injected?0x10L:0L);
           ulong extra=(ulong)Get<long>(command,"extra",injected?(long)(ulong)KeyboardWatch.InputMarker:0L);
           consumed = HandleKey(Get(command, "vk", 0), KeyboardWatch.OwnInput(flags,new UIntPtr(extra)), Get(command, "down", true));
+        } else if (action == "test_ime" && testMode) {
+          object native; testIme = command.TryGetValue("native", out native) && native != null ? (bool?)Convert.ToBoolean(native) : null;
         } else if (action == "test_render" && testMode) {
           using (var image = Frame.Draw(1200, 675, Get(command, "indicatorText", text), Get(command, "indicatorPosition", "top"), Get(command, "stopShortcut", stopShortcut), 0f)) image.Save(Get(command, "path", ""), ImageFormat.Png);
         } else if (action == "test_render_pointer" && testMode) {
@@ -606,6 +634,27 @@ namespace DshTakeover {
         }
       } catch (Exception error) { Emit(new { id = id, ok = false, error = error.Message }); }
     }
+    // Under keyState. Shortcuts (Ctrl, Alt, Win) and Shift+letter (Latin
+    // capitals) neither start nor end input-method text.
+    void TrackComposition(int vk) {
+      int held = 0; foreach (int key in physicalDown) if (key != vk) held |= Modifier(key);
+      if ((held & 11) != 0) return;
+      keyCount++;
+      bool letter = (vk >= 0x41 && vk <= 0x5A) || vk == 0xDE || vk == 0xBA;
+      if (letter) { if ((held & 4) == 0) { letterIndex = keyCount; letterAt = composeClock.ElapsedMilliseconds; } return; }
+      bool commit = vk == 0x20 || vk == 0x0D || vk == 0x1B || vk == 0x09 || (vk >= 0x30 && vk <= 0x39) || (vk >= 0x60 && vk <= 0x69) || (vk >= 0xBB && vk <= 0xC0) || (vk >= 0xDB && vk <= 0xDD);
+      if (commit) commitIndex = keyCount;
+    }
+    // The user is in the middle of input-method text: a letter came last,
+    // within 4 s, and the window in front has its input method in native mode
+    // (or does not say). Low disruption waits for it before borrowing input.
+    bool Composing() {
+      long letter, commit, at, now = composeClock.ElapsedMilliseconds;
+      lock (keyState) { letter = letterIndex; commit = commitIndex; at = letterAt; }
+      if (letter < 0 || letter < commit || now - at > 4000) return false;
+      bool? native = testMode && testIme.HasValue ? testIme : Native.ImeNative();
+      return native != false;
+    }
     static int Modifier(int vk) {
       if (vk == 0x11 || vk == 0xA2 || vk == 0xA3) return 1;
       if (vk == 0x12 || vk == 0xA4 || vk == 0xA5) return 2;
@@ -636,6 +685,7 @@ namespace DshTakeover {
       if (ownInput) return false;
       if (!down) { physicalDown.Remove(vk); return swallowed.Remove(vk); }
       physicalDown.Add(vk);
+      TrackComposition(vk);
       if (swallowed.Contains(vk)) return true;
       int modifiers = 0; foreach (int key in physicalDown) modifiers |= Modifier(key);
       if(progressAvailable&&progressKey!=0&&vk==progressKey&&modifiers==progressModifiers&&!(armed&&!paused&&vk==stopKey&&modifiers==stopModifiers)){

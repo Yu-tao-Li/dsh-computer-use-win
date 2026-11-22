@@ -798,7 +798,7 @@ app.whenReady().then(async()=>{
   assert.equal(await evaluate("window.fetchCalls.filter(call=>call.url==='/dsh-computer-use-win/api/hyperv'&&call.method==='POST').length"),1,'Credential setup starts only after the explicit action');
   // The Hyper-V choice explains itself and lists its setup steps; a result
   // names the step that fixes it, in its tone, with Windows' words in the tooltip.
-  assert.equal(await evaluate("document.querySelector('[data-wincu-desktop-hint]').textContent.startsWith('在 Hyper-V 虚拟机里全速操作')"),true);
+  assert.equal(await evaluate("document.querySelector('[data-wincu-desktop-hint]').textContent.startsWith('在 Hyper-V 虚拟机里操作')"),true);
   assert.equal(await evaluate("document.querySelectorAll('[data-wincu-hyperv-steps] li').length"),6);
   assert.equal(await evaluate("document.querySelector('[data-wincu-hyperv-steps] li:nth-child(2) code').textContent"),'Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)');
   await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:500,body:{ok:false,error:'WCU_HYPERV_PERMISSION: add your Windows account to the Hyper-V Administrators group, then sign out and back in.'}}:window.previousFetch(call);window.clickButton('配置连接')");
@@ -809,7 +809,7 @@ app.whenReady().then(async()=>{
   await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.startsWith('登录信息已保存。还差第 3 步')");
   assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'warning|2');
   await evaluate("window.selectDesktop('quiet')");
-  await until("document.querySelector('[data-wincu-desktop-hint]').textContent.includes('照常用电脑')&&document.querySelectorAll('[data-wincu-quiet-notes] li').length===3&&!document.querySelector('[data-wincu-hyperv-steps]')");
+  await until("document.querySelector('[data-wincu-desktop-hint]').textContent.includes('照常用电脑')&&document.querySelectorAll('[data-wincu-quiet-notes] li').length===4&&!document.querySelector('[data-wincu-hyperv-steps]')");
   await evaluate("window.selectDesktop('hyperv')");
   await until("!!document.querySelector('[data-wincu-hyperv-steps]')&&!document.querySelector('[data-wincu-hyperv-result]')");
   await evaluate("window.selectDesktop('fast');window.clickButton('保存更改')");
@@ -819,7 +819,7 @@ app.whenReady().then(async()=>{
   await savePicture('work-mode-fast.png');
   // A choice saved before 0.6.3 (current or background desktop) reads as Low disruption.
   await evaluate("window.snapshot={...window.snapshot,value:{...window.snapshot.value,desktopTarget:'background'}};for(const fn of window.listeners)fn()");
-  await until("document.getElementById('wincu-page-desktopTarget-quiet').checked&&document.querySelectorAll('[data-wincu-quiet-notes] li').length===3");
+  await until("document.getElementById('wincu-page-desktopTarget-quiet').checked&&document.querySelectorAll('[data-wincu-quiet-notes] li').length===4");
   await savePicture('work-mode-quiet.png');
   await evaluate("window.renderPage('en')");
   await until("document.body.textContent.includes('Press Esc to stop')");

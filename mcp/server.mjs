@@ -95,7 +95,7 @@ const windowTargetProperties = {
   activate: {
     type: "boolean",
     default: false,
-    description: "Bring the target to the foreground and keep it there. Otherwise reads and element actions leave the foreground alone, and real input borrows it: the target comes forward for the action, then the foreground and pointer go back, unless a menu, list or dialog it opened is showing. Without a window target, the active window is the one this operation series last gave input to, else the foreground window. close_window ignores this; activate_window always activates. The user's work mode decides over this flag: Low disruption (the default) never keeps a window in front, Full speed keeps the window at the front for every input action."
+    description: "Bring the target to the foreground and keep it there. Otherwise reads and element actions leave the foreground alone, and real input borrows it: the target comes forward for the action, then the foreground and pointer go back, unless a menu, list or dialog it opened is showing. Without a window target, the active window is the one this operation series last gave input to, else the foreground window. close_window ignores this; activate_window always activates. The user's work mode decides over this flag: Low disruption (the default) never keeps a window in front, Foreground keeps the window at the front for every input action."
   }
 };
 
@@ -1083,8 +1083,8 @@ async function ensureHiddenBackend(request) {
 }
 
 // The user's work mode, read live from settings: quiet (Low disruption, the
-// default) or fast (Full speed). Inside a Hyper-V guest the whole machine is
-// DSH's, so it works at full speed there. A server started without DSH's
+// default) or fast (Foreground). Inside a Hyper-V guest the whole machine is
+// DSH's, so it works as Foreground there. A server started without DSH's
 // settings keeps the behaviour of earlier versions (direct): the foreground
 // as the agent asks, no wait for the user, apps on the user's desktop.
 const startupSettings = (() => { try { return JSON.parse(process.env.WCU_SETTINGS_JSON || '{}'); } catch { return {}; } })();
@@ -1095,30 +1095,41 @@ function workMode() {
   return ['fast', 'hyperv'].includes(takeover.config.desktopTarget) ? 'fast' : 'quiet';
 }
 // On the user's desktop, Low disruption never keeps a window in front
-// (activate_window excepted) and Full speed keeps the one it works in there.
+// (activate_window excepted) and Foreground keeps the one it works in there.
 const FAST_FRONT = new Set(['click', 'double_click', 'move', 'drag', 'scroll', 'type_text', 'keypress', 'focus', 'invoke', 'set_value', 'launch_app']);
 function modeArgs(action, args, mode) {
   if (mode === 'quiet' && args.activate && action !== 'activate_window') return { ...args, activate: false };
   if (mode === 'fast' && !args.activate && FAST_FRONT.has(action) && !isBrowserCall(args)) return { ...args, activate: true };
   return args;
 }
-// Low disruption borrows the user's pointer and keyboard only after they have
-// rested for 2 s, and gives up after 20 s of continuous use. Windows reports
-// the time of the last input of any origin; input that arrives while DSH sends
-// its own counts as DSH's.
-const USER_PAUSE_MS = 2000, USER_PAUSE_LIMIT_MS = (process.env.NODE_ENV === 'test' && Number(process.env.WCU_TEST_USER_PAUSE_LIMIT_MS)) || 20000;
-const PAUSE_ACTIONS = new Set(['click', 'double_click', 'move', 'drag', 'scroll', 'type_text', 'keypress', 'focus', 'invoke', 'set_value', 'activate_window', 'launch_app']);
-const ownInput = { start: 0, end: 0 };
-async function waitForUserPause(request) {
+// Low disruption borrows the pointer and keyboard for a step right away, also
+// while the user works: the backend holds the user's own input during the step
+// and replays it to their window afterwards (WcuInputHold). It waits only
+// while borrowing would break what the user is doing: a key or mouse button
+// held down, input-method text not committed yet (pinyin), or a full-screen
+// app or presentation in front.
+const testLimit = name => process.env.NODE_ENV === 'test' && Number(process.env[name]);
+const HELD_LIMIT_MS = testLimit('WCU_TEST_HELD_LIMIT_MS') || 10000;
+const FULLSCREEN_LIMIT_MS = testLimit('WCU_TEST_FULLSCREEN_LIMIT_MS') || 20000;
+const COMPOSING_LIMIT_MS = 5000;
+const BORROW_ACTIONS = new Set(['click', 'double_click', 'move', 'drag', 'scroll', 'type_text', 'keypress', 'focus', 'invoke', 'set_value', 'activate_window', 'launch_app']);
+async function waitForSafeMoment(request, args = {}) {
   const started = Date.now();
   for (;;) {
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
-    const { idleMs } = await dispatchBackend('input_idle', {}, 5000, undefined, 'current');
-    if (!Number.isFinite(idleMs) || idleMs < 0) return 0;
-    const lastInput = Date.now() - idleMs;
-    if (idleMs >= USER_PAUSE_MS || (lastInput >= ownInput.start - 100 && lastInput <= ownInput.end + 300)) return Date.now() - started;
-    if (Date.now() - started >= USER_PAUSE_LIMIT_MS) throw new Error('WCU_USER_ACTIVE: The user kept using the mouse or keyboard for 20 s. Under Low disruption DSH borrows them only after a 2-second pause, so nothing was sent. Try again in a moment, or use an element action, which needs neither.');
-    await new Promise(resolve => setTimeout(resolve, Math.max(100, Math.min(500, USER_PAUSE_MS - idleMs))));
+    let state;
+    try { state = await dispatchBackend('input_state', {}, 5000, undefined, 'current'); }
+    catch { return Date.now() - started; }
+    const target = Number(args.nativeWindowHandle);
+    const fullscreen = state?.fullscreen === true && !(Number.isFinite(target) && target === state.foreground);
+    const held = state?.held === true;
+    const composing = !held && !fullscreen && await takeover.composing() === true;
+    const waited = Date.now() - started;
+    if (!held && !fullscreen && !composing) return waited;
+    if (held && waited >= HELD_LIMIT_MS) throw new Error(`WCU_USER_INPUT_HELD: The user has held a key or mouse button for ${HELD_LIMIT_MS / 1000} s, so nothing was sent. Try again in a moment, or use an element action, which needs neither.`);
+    if (fullscreen && waited >= FULLSCREEN_LIMIT_MS) throw new Error('WCU_USER_FULLSCREEN: The user is in a full-screen app or presenting, so DSH did not borrow the mouse and keyboard and nothing was sent. Element actions still work; try real input again later.');
+    if (composing && waited >= COMPOSING_LIMIT_MS) return waited;
+    await new Promise(resolve => setTimeout(resolve, fullscreen ? 500 : 60));
   }
 }
 
@@ -1191,13 +1202,14 @@ async function runBackendOn(desk, action, args = {}, timeoutMs = 30000, request)
 
 async function runBackendOnce(action, args, timeoutMs, request, quiet, desk = 'current') {
   const changesDesktop = action!=='health';
+  const lowDisruption = desk === 'current' && !backgroundDesktop && workMode() === 'quiet';
   if (request) request.requiresInput = !quiet;
   let acquired = false, capturing = false, waitedForUser = 0;
   // Reserve preparation in arrival order. Otherwise awaiting the native
   // indicator can let a later observation reach the backend before its input.
   const prepared = takeoverSetup.then(async () => {
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
-    if (!quiet && desk === 'current' && PAUSE_ACTIONS.has(action) && workMode() === 'quiet') waitedForUser = await waitForUserPause(request);
+    if (!quiet && lowDisruption && BORROW_ACTIONS.has(action)) waitedForUser = await waitForSafeMoment(request, args);
     if (changesDesktop) { await takeover.begin({ quiet }); acquired = true; }
     if(takeover.child && (['screenshot','ocr'].includes(action) || (action==='snapshot' && args.includeScreenshot!==false) || (action==='wait_for' && args.condition==='text'))) {
       try { await takeover.command('capture_begin');capturing=true; }
@@ -1210,12 +1222,7 @@ async function runBackendOnce(action, args, timeoutMs, request, quiet, desk = 'c
     if (request?.cancelled) throw new Error(request.stoppedByUser ? STOPPED : 'COMPUTER_USE_CANCELLED');
     // The series lets typing without a window target follow the window the
     // series last gave input to, after the user got the foreground back.
-    // Input DSH sends itself is not the user's (waitForUserPause).
-    const own = !quiet && desk === 'current';
-    if (own) ownInput.start = Date.now();
-    let result;
-    try { result = await dispatchBackend(action, { ...args, _wcuImageData: args._wcuImageData ?? (process.env.WCU_IMAGE_MODE !== 'file'), _wcuCornerFailsafe: false, _wcuTakeoverPid: takeover.helperProcessId, _wcuSeries: takeover.seriesKey ?? null }, timeoutMs, request, desk); }
-    finally { if (own) ownInput.end = Date.now(); }
+    const result = await dispatchBackend(action, { ...args, _wcuImageData: args._wcuImageData ?? (process.env.WCU_IMAGE_MODE !== 'file'), _wcuCornerFailsafe: false, _wcuTakeoverPid: takeover.helperProcessId, _wcuSeries: takeover.seriesKey ?? null, ...(lowDisruption ? { _wcuLowDisruption: true } : {}) }, timeoutMs, request, desk);
     if (waitedForUser >= 500 && result && typeof result === 'object') result.waitedForUserMs = waitedForUser;
     return result;
   } finally {
@@ -1626,8 +1633,8 @@ async function runBatch(args, request) {
 const inputActions = INPUT_ACTIONS;
 // Under Low disruption an executable opens on DSH's hidden desktop. A shortcut,
 // an installed or Store app, or a program that desktop cannot start opens on
-// the user's desktop instead (after a pause in the user's input), unless the
-// agent chose the desktop.
+// the user's desktop instead, not while the user holds a key or composes text,
+// unless the agent chose the desktop.
 async function launchApp(args, request) {
   const { desktop, ...plain } = args;
   const mode = workMode();
@@ -1644,7 +1651,7 @@ async function launchApp(args, request) {
       if (desktop || !/^WCU_BACKGROUND_DESKTOP_(?:LIMIT|UNAVAILABLE)\b/.test(error.message)) throw error;
     }
   }
-  if (mode === 'quiet') await waitForUserPause(request);
+  if (mode === 'quiet') await waitForSafeMoment(request, plain);
   return backendText('launch_app', plain, 30000, request, 'current');
 }
 

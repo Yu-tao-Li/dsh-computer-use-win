@@ -22,11 +22,11 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
 
 按你这时还用不用电脑来选，随时可以切换，切换立即生效，不用重启：
 
-- **少打扰**（默认）：你可以照常用电脑。读窗口、按按钮、填输入框都用 UI 自动化在后台完成，网页在后台标签页里操作。DSH 自己用 `launch_app` 打开的程序放在当前 Windows 会话里一个看不见的后台桌面上，沿用你的账号、文件权限、已安装软件和 DSH 启动环境，不会弹到你面前；`list_windows` 把这些窗口标成 `desktop:"background"`。只有后台做不了的步骤（拖拽、画图、只认真实鼠标键盘的程序）才借用你的鼠标键盘：先等你停手 2 秒，用完把窗口和鼠标放回原处；你 20 秒内一直没停手，这一步就不做，agent 稍后再试。少打扰从不把窗口一直顶在最前面。
-- **全速**：适合你暂时不用电脑时。DSH 直接用鼠标键盘，工作窗口一直留在最前面，不等你停手，也不在每步之后还原，所以最快、最稳，菜单也不会被打断。屏幕顶部提示“DSH 正在全速操作，请别动鼠标键盘”，按 Esc 随时停止。
-- **虚拟机**：在 Hyper-V 虚拟机里全速操作，完全不碰你的电脑；用的是虚拟机里的文件和软件，第一次要先配置（见下一节）。
+- **少打扰**（默认）：你可以照常用电脑。读窗口、按按钮、填输入框都用 UI 自动化在后台完成，网页在后台标签页里操作。DSH 自己用 `launch_app` 打开的程序放在当前 Windows 会话里一个看不见的后台桌面上，沿用你的账号、文件权限、已安装软件和 DSH 启动环境，不会弹到你面前；`list_windows` 把这些窗口标成 `desktop:"background"`。后台做不了的步骤（快捷键、拖拽、画图、只认真实鼠标键盘的程序）马上借用你的鼠标键盘，不等你停手：DSH 操作的窗口闪到前面，做完把窗口和鼠标放回原处。这一下里你按的键、点的鼠标先存起来，窗口还给你之后原样补上，不会丢，也不会打进 DSH 的窗口；Esc 照常停止 DSH。只在打断会坏事时等一下：你正按着键或鼠标（比如在拖东西）、拼音还没上屏，或在用全屏程序（全屏游戏、放幻灯片）。DSH 打开的菜单或对话框留在前面时，你接着打字，窗口先还给你，字打进你的窗口。少打扰从不把窗口一直顶在最前面。
+- **前台操作**：适合你暂时不用电脑时。DSH 把工作窗口一直留在最前面，直接用鼠标键盘，不等你，也不在每步之后还原，所以最快、最稳，菜单也不会被打断。屏幕顶部提示“DSH 正在前台操作，请别动鼠标键盘”，按 Esc 随时停止。
+- **虚拟机**：在 Hyper-V 虚拟机里操作，完全不碰你的电脑；用的是虚拟机里的文件和软件，第一次要先配置（见下一节）。
 
-后台桌面上的程序只接受 UI 自动化和窗口消息，按坐标点击、拖拽、系统组合键和整屏截图到不了那里；需要这些时，agent 会关掉它，用 `desktop:"current"` 在你的桌面上重新打开（这时同样等你停手）。快捷方式、商店应用和已安装应用的名称只能在你的桌面上打开。已在你的桌面上运行的单实例程序会把窗口开在你的桌面上。普通设置保存和 MCP 重连会保留后台桌面上的程序；选 **虚拟机** 或退出 DSH 会关闭它们，没保存的内容会丢失。
+后台桌面上的程序只接受 UI 自动化和窗口消息，按坐标点击、拖拽、系统组合键和整屏截图到不了那里；需要这些时，agent 会关掉它，用 `desktop:"current"` 在你的桌面上重新打开。快捷方式、商店应用和已安装应用的名称只能在你的桌面上打开。已在你的桌面上运行的单实例程序会把窗口开在你的桌面上。普通设置保存和 MCP 重连会保留后台桌面上的程序；选 **虚拟机** 或退出 DSH 会关闭它们，没保存的内容会丢失。
 
 ### 虚拟机（Hyper-V）
 
@@ -109,11 +109,11 @@ Report a problem exports one TXT at a time. If writing to Windows Downloads fail
 
 Choose by whether you are using the PC right now. You can switch at any time; the change applies at once, without a restart:
 
-- **Low disruption** (the default): keep using your PC. Reading windows, pressing buttons and filling in fields go through UI Automation in the background, and web pages are worked in background tabs. Apps DSH opens with `launch_app` run on a hidden desktop in your current Windows session that keeps your account, file permissions, installed apps and the environment DSH started with, and never pop up in front of you; `list_windows` marks their windows `desktop:"background"`. Only steps the background cannot do (drags, drawing, apps that accept only real input) borrow your mouse and keyboard: DSH waits until you pause for 2 seconds and puts the window and pointer back afterwards; if you keep working for 20 seconds, the step is not sent and the agent tries again later. Low disruption never keeps a window in front.
-- **Full speed**: for when you step away. DSH uses the mouse and keyboard directly, keeps its window in front, does not wait for you and does not restore anything between steps, which is fastest and keeps menus open. The banner at the top says DSH is working at full speed; press Esc to stop at any time.
-- **Virtual machine**: works at full speed inside a Hyper-V virtual machine and never touches your PC; it uses the VM’s own files and apps. Set it up once first (next section).
+- **Low disruption** (the default): keep using your PC. Reading windows, pressing buttons and filling in fields go through UI Automation in the background, and web pages are worked in background tabs. Apps DSH opens with `launch_app` run on a hidden desktop in your current Windows session that keeps your account, file permissions, installed apps and the environment DSH started with, and never pop up in front of you; `list_windows` marks their windows `desktop:"background"`. Steps the background cannot do (shortcuts, drags, drawing, apps that accept only real input) borrow your mouse and keyboard at once, without waiting for you to stop: the window DSH works in comes forward, and the window and pointer go back afterwards. What you type or click in that moment is held and replayed once your window is back, so nothing is lost or typed into DSH's window; Esc still stops DSH. DSH waits only where interrupting would break what you are doing: while you hold a key or button (dragging something), have input-method text not yet committed, or use a full-screen app (a game, a slideshow). If a menu or dialog DSH opened stays in front, your next keystroke first gives the foreground back to your window and goes there. Low disruption never keeps a window in front.
+- **Foreground**: for when you step away. DSH keeps its window in front and uses the mouse and keyboard directly, does not wait for you and does not restore anything between steps, which is fastest and keeps menus open. The banner at the top says DSH is working in the foreground; press Esc to stop at any time.
+- **Virtual machine**: works inside a Hyper-V virtual machine and never touches your PC; it uses the VM’s own files and apps. Set it up once first (next section).
 
-Apps on the hidden desktop take UI Automation and window messages only: clicks at screen positions, drags, system key combinations and full-screen screenshots cannot reach them. For those the agent closes the app and opens it again on your desktop with `desktop:"current"`, again after you pause. Shortcuts, Store apps and installed-app names open on your desktop only. A single-instance app already running on your desktop opens its window there. Ordinary settings changes and MCP reconnects keep the apps on the hidden desktop; choosing **Virtual machine** or quitting DSH closes them, and anything unsaved there is lost.
+Apps on the hidden desktop take UI Automation and window messages only: clicks at screen positions, drags, system key combinations and full-screen screenshots cannot reach them. For those the agent closes the app and opens it again on your desktop with `desktop:"current"`. Shortcuts, Store apps and installed-app names open on your desktop only. A single-instance app already running on your desktop opens its window there. Ordinary settings changes and MCP reconnects keep the apps on the hidden desktop; choosing **Virtual machine** or quitting DSH closes them, and anything unsaved there is lost.
 
 ### Virtual machine (Hyper-V)
 

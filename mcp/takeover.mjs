@@ -285,6 +285,13 @@ export class TakeoverControl {
   // The helper's Windows process id, which the backend watches during input.
   // Under WSL the child's own pid is that of the interop process (#79).
   get helperProcessId() { return this.child ? (this.helperPid || this.child.pid || 0) : 0; }
+  // Whether the user is in the middle of input-method text (pinyin typed, not
+  // committed yet), from the stop listener's keyboard hook. Null while the
+  // helper is not running: it has seen no keys.
+  async composing() {
+    if (this.helperDisabled || !this.child) return null;
+    try { return (await this.command('input_state')).composing === true; } catch { return null; }
+  }
   // A quiet lease (browser-lane calls) checks the stopped state and counts as an
   // action in progress, but neither shows the indicator nor arms the stop keys.
   // Quiet calls send no real input, so they need no stop listener: when the
