@@ -1005,8 +1005,8 @@ public static class WcuInputHold {
       }
       int target = System.Threading.Interlocked.Add(ref replaySent, sent);
       DateTime start = DateTime.UtcNow;
-      while (System.Threading.Thread.VolatileRead(ref replaySeen) < target && (DateTime.UtcNow - start).TotalMilliseconds < 500) System.Threading.Thread.Sleep(1);
-      if (System.Threading.Thread.VolatileRead(ref replaySeen) < target) System.Threading.Interlocked.Exchange(ref replaySeen, target);
+      while (System.Threading.Volatile.Read(ref replaySeen) < target && (DateTime.UtcNow - start).TotalMilliseconds < 500) System.Threading.Thread.Sleep(1);
+      if (System.Threading.Volatile.Read(ref replaySeen) < target) System.Threading.Interlocked.Exchange(ref replaySeen, target);
     }
   }
   static int replaySent, replaySeen;
