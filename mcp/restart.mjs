@@ -6,13 +6,18 @@
 // not DSH Desktop report no support, and the page then says how to restart by
 // hand.
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { trustedRequest } from './diagnostics.mjs';
-import { DEFAULT_POWERSHELL } from './takeover.mjs';
+import { DEFAULT_POWERSHELL, WORK_DIR } from './takeover.mjs';
 
 export const RESTART_ROUTE = '/dsh-computer-use-win/api/restart';
-const script = fileURLToPath(new URL('../scripts/restart-dsh.ps1', import.meta.url));
+// Read before the market replaces this install. The newly installed build
+// may not contain the same helper (or any helper), and the old DSH process
+// still owns the restart route until the application actually quits.
+const restartScript = readFileSync(new URL('../scripts/restart-dsh.ps1', import.meta.url), 'utf8').replace(/^\uFEFF/, '');
 
 // The adapter runs inside DSH Desktop's host process, whose executable is DSH
 // Desktop itself; a dsh CLI or web host runs on node.exe instead.
@@ -25,25 +30,36 @@ export function desktopExecutable(execPath = process.execPath, platform = proces
 // it, and the second DSH Desktop instance it starts finds the running one. (A
 // process that WMI creates is not on that desktop, and its quit request never
 // reached DSH.)
-export function restartArguments(executable) {
-  return `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${script}" -Executable "${executable}"`;
+function restartArguments(helper, executable) {
+  return `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${helper}" -Executable "${executable}"`;
 }
-export function startRestart(executable, spawnProcess = spawn) {
-  return new Promise((resolve, reject) => {
-    const child = spawnProcess(DEFAULT_POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command',
-      "$windows = [Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]'9BA05972-F6A8-11CF-A442-00A0C90A8F39')); " +
-      '$location = 0; $root = $null; $hwnd = 0; ' +
-      '$desktop = $windows.FindWindowSW([ref]$location, [ref]$root, 8, [ref]$hwnd, 1); ' +
-      'if ($null -eq $desktop) { exit 3 }; ' +
-      "$desktop.Document.Application.ShellExecute($env:WCU_RESTART_FILE, $env:WCU_RESTART_ARGUMENTS, '', 'open', 0); exit 0"],
-      { windowsHide: true, stdio: 'ignore', env: { ...process.env, WCU_RESTART_FILE: DEFAULT_POWERSHELL, WCU_RESTART_ARGUMENTS: restartArguments(executable) } });
-    child.once('error', reject);
-    child.once('close', code => code === 0 ? resolve() : reject(new Error(`Windows did not start the restart helper (${code}).`)));
-  });
+export async function startRestart(executable, spawnProcess = spawn) {
+  // Explorer can refuse a long inline script. Stage the saved script outside
+  // the plugin and remove this copy after the detached helper uses it.
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'wcu-restart-'));
+  const helper = path.join(folder, 'restart-dsh.ps1');
+  try {
+    await writeFile(helper, `\uFEFFparam([string]$Executable)\ntry {\n& {\n${restartScript}\n} -Executable $Executable\n} finally {\n  Remove-Item -LiteralPath $PSCommandPath -ErrorAction SilentlyContinue\n  Remove-Item -LiteralPath $PSScriptRoot -ErrorAction SilentlyContinue\n}\n`, { flag: 'wx' });
+    await new Promise((resolve, reject) => {
+      const child = spawnProcess(DEFAULT_POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command',
+        "$ErrorActionPreference = 'Stop'; $windows = [Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]'9BA05972-F6A8-11CF-A442-00A0C90A8F39')); " +
+        '$location = 0; $root = $null; $hwnd = 0; ' +
+        '$desktop = $windows.FindWindowSW([ref]$location, [ref]$root, 8, [ref]$hwnd, 1); ' +
+        'if ($null -eq $desktop) { exit 3 }; ' +
+        "$desktop.Document.Application.ShellExecute($env:WCU_RESTART_FILE, $env:WCU_RESTART_ARGUMENTS, '', 'open', 0); exit 0"],
+        { cwd: WORK_DIR, windowsHide: true, stdio: 'ignore', env: { ...process.env, WCU_RESTART_FILE: DEFAULT_POWERSHELL, WCU_RESTART_ARGUMENTS: restartArguments(helper, executable) } });
+      child.once('error', reject);
+      child.once('close', code => code === 0 ? resolve() : reject(new Error(`Windows did not start the restart helper (${code}).`)));
+    });
+  } catch (error) {
+    await unlink(helper).catch(() => {});
+    await rmdir(folder).catch(() => {});
+    throw error;
+  }
 }
 
 export function createRestartHandler({ executable = desktopExecutable(), start = startRestart, logger } = {}) {
-  let started = false;
+  let restart;
   return async (request, response) => {
     const send = (status, data) => {
       response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -54,11 +70,14 @@ export function createRestartHandler({ executable = desktopExecutable(), start =
     if (request.method !== 'POST') return send(405, { ok: false });
     if (!executable) return send(409, { ok: false, error: 'WCU_RESTART_UNSUPPORTED' });
     // One restart per host process: a second click while DSH quits is the same request.
-    if (started) return send(200, { ok: true });
-    try {
-      await start(executable);
-      started = true;
+    restart ??= Promise.resolve().then(() => start(executable)).then(() => {
       logger?.info?.('dsh-computer-use-win: restarting DSH Desktop for the plugin update');
+    }).catch(error => {
+      restart = undefined;
+      throw error;
+    });
+    try {
+      await restart;
       send(200, { ok: true });
     } catch (error) {
       send(500, { ok: false, error: String(error?.message || error).slice(0, 300) });

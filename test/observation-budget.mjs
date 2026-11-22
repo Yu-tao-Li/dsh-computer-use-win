@@ -62,6 +62,11 @@ assert.match(tight.budget.hint, /find/);
 assert.ok(bytesOf(tight) <= 4000, 'cut result fits: ' + bytesOf(tight));
 assert.equal(saved.at(-1).tree.children.length, 40, 'the saved copy is the whole original result');
 assert.equal(saved.length, 1, 'only a cut saves a file');
+const oversizedName = '观察'.repeat(2000);
+const oversizedRoot = { ...treeResult(), tree: { ...window(), name: oversizedName, children:[] } };
+const rootPointer = await budgetTree(oversizedRoot, 2000, { save });
+assert.ok(bytesOf(rootPointer) <= 2000 && rootPointer.budget.steps.includes('fileOnly'));
+assert.equal(saved.at(-1).tree.name, oversizedName, 'the oversize root is still accessible from its file');
 
 // OCR: word boxes, then the joined text, then lines; the file holds them all.
 const words = n => Array.from({ length: 8 }, (_, w) => ({ text: `word${n}-${w}`, x: w * 40, y: n * 20, width: 36, height: 16 }));
@@ -81,6 +86,9 @@ assert.deepEqual(cutLines.budget.steps, ['noWordBoxes', 'noJoinedText', 'cutLine
 assert.ok(cutLines.budget.linesShown > 5 && cutLines.budget.linesShown < 120 && cutLines.lineCount === 120);
 assert.ok(bytesOf(cutLines) <= 4000);
 assert.equal(saved.at(-1).lines[0].words.length, 8);
+const oversizedMatch = await budgetOcr({ ok:true, matched:[{ text:oversizedName }] }, 2000, { save });
+assert.ok(bytesOf(oversizedMatch) <= 2000 && oversizedMatch.budget.steps.includes('fileOnly'));
+assert.equal(saved.at(-1).matched[0].text, oversizedName);
 
 // Deltas: start, the changes, and each fallback.
 const deltas = new TreeDeltas(2);
@@ -115,6 +123,7 @@ await writeFile(fixtures.tree2, JSON.stringify(treeResult(1)));
 await writeFile(fixtures.ocr, JSON.stringify(ocr));
 const log = path.join(root, 'requests.jsonl'), flag = path.join(root, 'variant');
 await writeFile(path.join(root, 'scripts/windows-uia.ps1'), `param([switch]$Persistent)
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 [Console]::WriteLine((@{type='ready';protocol=1;pid=$PID}|ConvertTo-Json -Compress))
 while($null -ne ($line=[Console]::In.ReadLine())) {
   [IO.File]::AppendAllText($env:WCU_FAKE_LOG, $line + [char]10)
@@ -157,6 +166,16 @@ try {
   const words = data(await call('ocr', { nativeWindowHandle: 4242, maxBytes: 4000 }));
   assert.deepEqual(words.budget.steps, ['noWordBoxes', 'noJoinedText', 'cutLines']);
   assert.equal(data(await call('ocr', { nativeWindowHandle: 4242 })).lines[0].words.length, 8);
+  const deltaBase = data(await call('accessibility_tree', { nativeWindowHandle: 4242, treeDeltaBase:'start' }));
+  const largeChange = treeResult(1);
+  largeChange.tree.children.at(-1).name = oversizedName;
+  await writeFile(fixtures.tree2, JSON.stringify(largeChange));
+  const boundedResponse = await call('accessibility_tree', { nativeWindowHandle:4242, treeDeltaBase:deltaBase.treeId, maxBytes:2000 });
+  const boundedDelta = data(boundedResponse);
+  assert.ok(Buffer.byteLength(boundedResponse.content[0].text) <= 2000, 'tree delta cannot bypass maxBytes');
+  assert.equal(boundedDelta.delta.fallback, 'maxBytes');
+  assert.equal(JSON.parse(await readFile(boundedDelta.budget.fullResultPath,'utf8')).tree.children.at(-1).name, oversizedName);
+  assert.equal(data(await call('accessibility_tree', { nativeWindowHandle:4242, treeDeltaBase:boundedDelta.treeId })).delta.fallback, 'truncated', 'a reduced tree is not a complete delta baseline');
   assert.match((await call('accessibility_tree', { nativeWindowHandle: 4242, treeDeltaBase: 'yesterday' })).content[0].text, /INVALID_ARGUMENTS/);
   assert.match((await call('accessibility_tree', { nativeWindowHandle: 4242, maxBytes: 100 })).content[0].text, /INVALID_ARGUMENTS/);
 } finally { client.close(); await rm(flag, { force: true }); }

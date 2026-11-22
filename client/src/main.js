@@ -402,6 +402,19 @@ window.__ModuleLoader__.load({
       }
       return 0;
     }
+    // A settings page can be reloaded while the market replaces the package.
+    // Keep the operation it accepted in this window; never send it again.
+    const UPDATE_RECEIPT_KEY='dsh-computer-use-win.update.v1';
+    const UPDATE_TIMEOUT_MS=15*60000;
+    function updateReceipt(value){
+      try{
+        if(value===null){sessionStorage.removeItem(UPDATE_RECEIPT_KEY);return null;}
+        if(value!==undefined){sessionStorage.setItem(UPDATE_RECEIPT_KEY,JSON.stringify(value));return value;}
+        const receipt=JSON.parse(sessionStorage.getItem(UPDATE_RECEIPT_KEY));
+        if(receipt&&versionParts(receipt.before)&&versionParts(receipt.target)&&typeof receipt.id==='string'&&receipt.id.length<=256&&Date.now()-receipt.at>=0&&Date.now()-receipt.at<24*60*60000)return receipt;
+      }catch{}
+      return null;
+    }
     const updateStore={state:{phase:'idle'},listeners:new Set(),
       set(patch){this.state={...this.state,...patch};for(const listener of [...this.listeners])listener();},
       subscribe(listener){this.listeners.add(listener);return ()=>this.listeners.delete(listener);}};
@@ -415,7 +428,7 @@ window.__ModuleLoader__.load({
       }finally{if(timer)clearTimeout(timer);}
     }
     // undefined: not asked yet; null: no usable market (asked again on the next check).
-    let updateMarket,updateChecking,updateStarted=false;
+    let updateMarket,updateChecking,updateRecoveryTimer,updateStarted=false;
     async function discoverMarket(){
       if(updateMarket)return updateMarket;
       try{
@@ -443,24 +456,48 @@ window.__ModuleLoader__.load({
       }
       return null;
     }
-    function settleUpdateCheck({found,latest}){
-      const installed=found?.installedVersion??PLUGIN_VERSION;
+    async function recoverUpdateConfirmation(market,found,latest){
+      const receipt=updateReceipt();
+      if(!market||!receipt)return null;
+      const {status,data}=await requestJson(market.endpoints.operations+'?operationId='+encodeURIComponent(receipt.id),{timeoutMs:5000}).catch(()=>({}));
+      const operation=data?.operation?.operationId===receipt.id?data.operation:null;
+      if(operation&&['queued','running'].includes(operation.state))return {pending:true};
+      if(operation&&operation.state!=='succeeded'){updateReceipt(null);return null;}
+      const verified=operation?.state==='succeeded'?operation.installedVersion:null;
+      if(compareVersions(verified,receipt.before)>0&&(compareVersions(verified,receipt.target)===0||
+          (compareVersions(verified,receipt.target)>0&&compareVersions(latest,verified)>=0))){
+        const restartRequired=operation.outcome?.restartRequired===true;
+        return {installed:verified,restartRequired,refreshRequired:operation.outcome?.refreshRequired===true&&compareVersions(verified,PLUGIN_VERSION)>0,dialog:!receipt.dismissed};
+      }
+      // The market can discard its in-memory operation on a host restart.
+      // An older client still running against a newer disk install needs a restart.
+      if(compareVersions(found?.installedVersion,receipt.target)>=0&&compareVersions(found.installedVersion,PLUGIN_VERSION)>0)
+        return {restartRequired:true,refreshRequired:false,dialog:!receipt.dismissed};
+      if(status===404)updateReceipt(null);
+      return null;
+    }
+    function settleUpdateCheck({found,latest,confirmation}){
+      const installed=confirmation?.installed??found?.installedVersion??PLUGIN_VERSION;
       const source=found?.source==='npm'?'market':'help';
       // A newer version already on disk is an update waiting for a restart.
-      const phase=compareVersions(installed,PLUGIN_VERSION)>0?'updated':compareVersions(latest,installed)>0?'available':latest?'latest':'unknown';
-      updateStore.set({phase,source,installed,latest,failure:null,waiting:null,notice:null,marketMissing:false,stage:null,bytes:null,stoppable:false,stopping:false,checkedAt:Date.now(),restartRequired:phase==='updated',refreshRequired:false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
-      if(phase==='updated')void probeRestart();
+      const phase=confirmation?.pending?'updating':confirmation||compareVersions(installed,PLUGIN_VERSION)>0?'updated':compareVersions(latest,installed)>0?'available':latest?'latest':'unknown';
+      const success=phase==='updated';
+      const restartRequired=confirmation?.restartRequired??success;
+      updateStore.set({phase,source,installed,latest,failure:null,waiting:null,notice:null,marketMissing:false,stage:null,bytes:null,stoppable:false,stopping:false,checkedAt:Date.now(),restartRequired,refreshRequired:confirmation?.refreshRequired??false,dialog:confirmation?.dialog??false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
+      if(restartRequired)void probeRestart();
+      if(confirmation?.pending)updateRecoveryTimer=setTimeout(()=>{void checkUpdate();},2000);
     }
     // Checks run on their own: once per DSH start, and again when the settings
     // page opens on a result that is old or missing. "Check for updates" asks
     // the market to skip its cache.
     function checkUpdate({fresh=false}={}){
-      if(updateStore.state.phase==='updating')return Promise.resolve();
+      if(updateRun||updateStore.state.phase==='updated')return Promise.resolve();
       if(updateChecking)return updateChecking;
       updateStore.set({checking:true});
       updateChecking=(async()=>{
         const [found,latest]=await Promise.all([discoverMarket().then(market=>marketPackage(market,{fresh})),latestNpmVersion()]);
-        settleUpdateCheck({found,latest});
+        const confirmation=await recoverUpdateConfirmation(updateMarket,found,latest);
+        settleUpdateCheck({found,latest,confirmation});
       })().finally(()=>{updateChecking=undefined;updateStore.set({checking:false});});
       return updateChecking;
     }
@@ -487,7 +524,8 @@ window.__ModuleLoader__.load({
       const {status,data}=await requestJson(market.endpoints.updates,{method:'POST',body:{packageName:UPDATE_PACKAGE,...(force?{force:true}:{})},timeoutMs:30000});
       let operation=data?.operation;
       if(status!==202||!operation?.operationId)return {failure:data?.failure??{code:status===409?'OPERATION_BUSY':'UPDATE_FAILED',message:data?.error||('HTTP '+status),retryable:status===409}};
-      const id=operation.operationId,deadline=Date.now()+15*60000;
+      const id=operation.operationId,at=Date.now(),deadline=at+UPDATE_TIMEOUT_MS;
+      updateReceipt({id,at,before:run.before,target:run.target});
       let swapping=false,cancel=null;
       const poll=async()=>{
         const polled=await requestJson(market.endpoints.operations+'?operationId='+encodeURIComponent(id),{timeoutMs:15000}).catch(()=>null);
@@ -567,9 +605,9 @@ window.__ModuleLoader__.load({
     async function startUpdate(){
       const state=updateStore.state,market=updateMarket;
       if(!market||state.source!=='market'||state.checking||!['available','failed'].includes(state.phase))return;
-      const run={stop:false,wake:null},before=state.installed;
+      const before=state.installed,run={stop:false,wake:null,before};
       updateRun=run;
-      updateStore.set({phase:'updating',percent:null,failure:null,waiting:null,stage:'prepare',bytes:null,stoppable:true,stopping:false,stopLate:false,stopUnsupported:false,notice:null});
+      updateStore.set({phase:'updating',percent:null,failure:null,waiting:null,stage:'prepare',bytes:null,stoppable:true,stopping:false,stopLate:false,stopUnsupported:false,notice:null,restartVia:undefined});
       // Back to Update, saying the plugin is as it was.
       const stopped=()=>updateStore.set({phase:'available',percent:null,waiting:null,stage:null,bytes:null,stoppable:false,stopping:false,stopLate:false,stopUnsupported:false,notice:{kind:'stopped',version:before}});
       try{
@@ -591,18 +629,20 @@ window.__ModuleLoader__.load({
         const ready=await checkReplaceable();
         if(run.stop)return stopped();
         if(ready.failure)return failUpdate(ready.failure);
+        run.target=target;
         updateStore.set({stage:'prepare'});
         let result=await runWhenFree(market,false,run);
         if(UPDATE_HOLD_CODES.includes(result.failure?.code)&&!run.stop)result=await runWhenFree(market,true,run);
         if(result.stopped)return stopped();
         if(result.cancelled){
+          updateReceipt(null);
           // The plugin must be as it was before; the market says what it has now.
           const now=await marketPackage(market,{fresh:true});
           if(now&&compareVersions(now.installedVersion,before)===0)return stopped();
           if(!now)return failUpdate(await withInstallState(market,{code:'UPDATE_CANCELLED'}));
           return settleUpdateCheck({found:now,latest:target});
         }
-        if(result.failure)return failUpdate(await withInstallState(market,result.failure));
+        if(result.failure){if(result.failure.code!=='UPDATE_STATUS_UNKNOWN')updateReceipt(null);return failUpdate(await withInstallState(market,result.failure));}
         const {operation}=result;
         // The API asks each client to compare the installed version with the
         // version it offered before it reports success or offers a restart.
@@ -610,8 +650,8 @@ window.__ModuleLoader__.load({
           || compareVersions(operation.installedVersion,operation.beforeVersion)<0)return failUpdate({code:'RESOLVED_VERSION_MISMATCH',message:String(operation.installedVersion??'')});
         if(compareVersions(operation.installedVersion,target)>0&&!(compareVersions(await latestNpmVersion(),operation.installedVersion)>=0))return failUpdate({code:'UPDATE_STATUS_UNKNOWN'});
         const restartRequired=operation.outcome?.restartRequired===true;
-        if(restartRequired)await probeRestart();
         updateStore.set({phase:'updated',installed:operation.installedVersion,percent:null,stage:null,bytes:null,stoppable:false,stopping:false,restartRequired,refreshRequired:operation.outcome?.refreshRequired===true,dialog:true,restartFailed:false});
+        if(restartRequired)await probeRestart();
       }catch{failUpdate({code:'UPDATE_STATUS_UNKNOWN'});}
       finally{if(updateRun===run)updateRun=null;}
     }
@@ -687,7 +727,7 @@ window.__ModuleLoader__.load({
       const [asked,setAsked]=React.useState(null),resultTimer=React.useRef();
       // DSH can stay open for days: an old or failed check is repeated when
       // the page opens.
-      React.useEffect(()=>{const current=updateStore.state;if(current.phase==='unknown'||(['latest','available'].includes(current.phase)&&Date.now()-(current.checkedAt??0)>UPDATE_STALE_MS))void checkUpdate();return ()=>clearTimeout(resultTimer.current);},[]);
+      React.useEffect(()=>{const current=updateStore.state;if((current.phase==='idle'&&updateReceipt())||current.phase==='unknown'||(['latest','available'].includes(current.phase)&&Date.now()-(current.checkedAt??0)>UPDATE_STALE_MS))void checkUpdate();return ()=>clearTimeout(resultTimer.current);},[]);
       const checkNow=async()=>{
         clearTimeout(resultTimer.current);setAsked('checking');
         // A check already running may have read the market's cache: ask again.
@@ -713,8 +753,8 @@ window.__ModuleLoader__.load({
       // one-click restart, the note below the title says what to do).
       if(state.phase==='updated')return h(React.Fragment,null,
         wrap('success',h('span',{title:fill(t('updateDoneTitle'),{version:state.installed})},t('updateDone')),
-          state.restartRequired&&state.restartVia&&small(t(state.restarting?'updateRestartingShort':'updateRestartPending'),{'data-wincu-update-restart':true,disabled:state.restarting,onClick:()=>updateStore.set({dialog:true})}),
-          !state.restartRequired&&state.refreshRequired&&small(t('updateRefresh'),{'data-wincu-update-refresh':true,onClick:()=>{try{window.location.reload();}catch{}}})),
+          state.restartRequired&&small(t(state.restarting?'updateRestartingShort':'updateRestartPending'),{'data-wincu-update-reminder':true,'data-wincu-update-restart':state.restartVia?true:undefined,disabled:state.restarting,onClick:()=>updateStore.set({dialog:true})}),
+          !state.restartRequired&&state.refreshRequired&&small(t('updateRefresh'),{'data-wincu-update-refresh':true,onClick:refreshAfterUpdate})),
         state.dialog?h(UpdateDialog,{t,state}):null);
       if(state.phase==='failed'){
         const code=state.failure?.code;
@@ -756,29 +796,39 @@ window.__ModuleLoader__.load({
     // finishes it. A restart first says that it stops the task in progress, then
     // runs with one click where DSH allows it; elsewhere the dialog says how to
     // restart by hand.
+    function dismissUpdateConfirmation(){
+      const receipt=updateReceipt();
+      if(receipt)updateReceipt({...receipt,dismissed:true});
+      updateStore.set({dialog:false});
+    }
+    function refreshAfterUpdate(){
+      dismissUpdateConfirmation();
+      try{window.location.reload();}catch{}
+    }
     function UpdateDialog({t,state}){
-      const ref=React.useRef(null),main=React.useRef(null);
+      const ref=React.useRef(null),safeButton=React.useRef(null);
       React.useEffect(()=>{
         const node=ref.current;if(!node)return;
-        const closed=()=>updateStore.set({dialog:false});
-        node.addEventListener('close',closed);
+        node.addEventListener('close',dismissUpdateConfirmation);
         try{if(!node.open)node.showModal();}catch{node.setAttribute('open','');}
-        main.current?.focus({preventScroll:true});
-        return ()=>node.removeEventListener('close',closed);
+        safeButton.current?.focus({preventScroll:true});
+        return ()=>node.removeEventListener('close',dismissUpdateConfirmation);
       },[]);
-      const dismiss=()=>{const node=ref.current;if(node&&typeof node.close==='function'&&node.open)node.close();else updateStore.set({dialog:false});};
+      const dismiss=()=>{const node=ref.current;if(node&&typeof node.close==='function'&&node.open)node.close();else dismissUpdateConfirmation();};
       const button=(text,props)=>h('button',{type:'button',className:'wcu-small',...props},text);
+      const probing=state.restartRequired&&state.restartVia===undefined;
       const oneClick=state.restartRequired&&state.restartVia&&!state.restartFailed;
-      const kind=oneClick?(state.restarting?'restarting':'restart'):state.restartRequired?(state.restartFailed?'failed':'manual'):state.refreshRequired?'refresh':'done';
+      const kind=probing?'checking':oneClick?(state.restarting?'restarting':'restart'):state.restartRequired?(state.restartFailed?'failed':'manual'):state.refreshRequired?'refresh':'done';
       const body=oneClick?t(state.restarting?'updateRestarting':'updateDialogRestart')
         :state.restartRequired?(state.restartFailed?t('updateRestartFailed')+' ':'')+t(state.runtime==='web'?'updateRestartWeb':'updateRestartDesktop')
         :t(state.refreshRequired?'updateDialogRefresh':'updateDialogReady');
-      const actions=oneClick?[button(t('updateLater'),{key:'later',disabled:state.restarting,onClick:dismiss}),
-          button(t(state.restarting?'updateRestartingShort':'updateRestartNow'),{key:'now',ref:main,className:'wcu-small wcu-primary','data-wincu-update-restart-now':true,disabled:state.restarting,onClick:()=>{void restartNow();}})]
-        :kind==='refresh'?[button(t('updateLater'),{key:'later',onClick:dismiss}),
-          button(t('updateRefresh'),{key:'refresh',ref:main,className:'wcu-small wcu-primary',onClick:()=>{try{window.location.reload();}catch{}}})]
-        :[button(t('reportOk'),{key:'ok',ref:main,className:'wcu-small wcu-primary',onClick:dismiss})];
-      return h('dialog',{ref,className:'wcu-dialog','data-wincu-update-dialog':kind,'aria-labelledby':'wcu-update-dialog-title','aria-describedby':'wcu-update-dialog-body'},
+      const later=()=>button(t('updateLater'),{key:'later',ref:safeButton,disabled:state.restarting,onClick:dismiss});
+      const actions=probing?[later()]:oneClick?[later(),
+          button(t(state.restarting?'updateRestartingShort':'updateRestartNow'),{key:'now',className:'wcu-small wcu-primary','data-wincu-update-restart-now':true,disabled:state.restarting,onClick:()=>{void restartNow();}})]
+        :kind==='refresh'?[later(),button(t('updateRefresh'),{key:'refresh',className:'wcu-small wcu-primary',onClick:refreshAfterUpdate})]
+        :[button(t('reportOk'),{key:'ok',ref:safeButton,className:'wcu-small wcu-primary',onClick:dismiss})];
+      return h('dialog',{ref,className:'wcu-dialog',role:'dialog','aria-modal':true,'data-wincu-update-dialog':kind,'aria-labelledby':'wcu-update-dialog-title','aria-describedby':'wcu-update-dialog-body',
+        onKeyDown:event=>{if(event.key==='Tab')event.stopPropagation();if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(!state.restarting)dismiss();}}},
         h('p',{id:'wcu-update-dialog-title',className:'wcu-dialog-title'},fill(t('updateDoneTitle'),{version:state.installed})),
         h('p',{id:'wcu-update-dialog-body',className:'wcu-dialog-body',role:kind==='restarting'||kind==='failed'?'status':undefined},body),
         h('div',{className:'wcu-dialog-actions'},...actions));
@@ -1253,7 +1303,7 @@ window.__ModuleLoader__.load({
       ctx.effect(()=>{
         const delay=Number.isFinite(globalThis.__wcuUpdateDelayMs)?globalThis.__wcuUpdateDelayMs:8000;
         // Tests set the delay; they also get a way back to a fresh, unchecked state.
-        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,waiting:null,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restartVia:undefined,restarting:false,restartFailed:false,dialog:false,restartRequired:false,refreshRequired:false,stage:null,bytes:null,stoppable:false,stopping:false,stopLate:false,stopUnsupported:false,notice:null,marketDialog:false,marketMissing:false});}};
+        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:({keepReceipt=false}={})=>{clearTimeout(updateRecoveryTimer);if(!keepReceipt)updateReceipt(null);updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,waiting:null,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restartVia:undefined,restarting:false,restartFailed:false,dialog:false,restartRequired:false,refreshRequired:false,stage:null,bytes:null,stoppable:false,stopping:false,stopLate:false,stopUnsupported:false,notice:null,marketDialog:false,marketMissing:false});}};
         if(updateStarted||delay<0||typeof setTimeout!=='function'||typeof fetch!=='function')return ()=>{};
         updateStarted=true;
         const timer=setTimeout(()=>{void checkUpdate();},delay);

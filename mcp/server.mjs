@@ -13,7 +13,7 @@ import { TOOL_NAMES,LITE_TOOL_NAMES,normalizeEnabledTools,browserRoutingInstruct
 import { BrowserLane } from './browser.mjs';
 import { isBrowserCall,isQuietCall,NEW_TAB,USER_CONNECT,ELEMENT_ID,BACKGROUND_FIRST,INTERRUPTIBLE_ACTIONS,INPUT_ACTIONS,toolAnnotations } from './catalog.mjs';
 import { assertOperation, collectApprovalRequirements, consumeGrant } from './policy.mjs';
-import { budgetOcr, budgetTree, summarizeTree, TreeDeltas } from './observation-budget.mjs';
+import { budgetOcr, budgetTree, bytesOf, observationFileResult, spill, summarizeTree, TreeDeltas } from './observation-budget.mjs';
 const usedApprovalGrants = new Map();
 const SESSION_INPUT_MARKER = '0x' + (((randomBytes(4).readUInt32BE(0) & 0x7fffffff) || 0x44534857) >>> 0).toString(16);
 process.env.WCU_INPUT_MARKER ||= SESSION_INPUT_MARKER;
@@ -1388,7 +1388,7 @@ async function callTool(name, args, request) {
       if (!args.maxBytes) return imageResult(result);
       const { screenshot, ...rest } = result;
       const shaped = await budgetOcr(rest, args.maxBytes);
-      return imageResult(screenshot ? { ...shaped, screenshot } : shaped);
+      return imageResult(screenshot ? { ...shaped, screenshot } : shaped, true, args.maxBytes);
     }
     case "windows_computer_use_screenshot":
       return imageResult(await runBackend("screenshot", args, 15000, request));
@@ -1403,10 +1403,15 @@ async function callTool(name, args, request) {
   }
 }
 
-async function imageResult(result, includeImage = true) {
+async function imageResult(result, includeImage = true, maxBytes) {
   if (IN_WSL) for (const item of [result, result.ocr]) if (typeof item?.image === 'string') item.image = linuxPath(item.image);
   const image = await screenshotOutput(result.screenshot, includeImage);
-  const metadata = result.screenshot ? { ...result, screenshot: image.metadata } : result;
+  let metadata = result.screenshot ? { ...result, screenshot: image.metadata } : result;
+  if (maxBytes && metadata.ok !== false && bytesOf(metadata) > maxBytes) {
+    const file = metadata.budget?.fullResultPath ?? await spill(metadata);
+    treeDeltas.markTruncated(metadata.treeId);
+    metadata = observationFileResult(metadata, maxBytes, file);
+  }
   const content = [{ type: "text", text: safeJson(metadata) }, ...image.content];
   return { content, ...(result.ok === false ? { isError: true } : {}) };
 }
@@ -1491,14 +1496,28 @@ const backendTreeArgs = args => args.detailLevel === 'summary' ? { ...args, deta
 async function shapeTree(result, args) {
   if (!result?.tree) return result;
   if (args.detailLevel === 'summary') result = { ...result, tree: summarizeTree(result.tree), detailLevel: 'summary' };
-  if (args.treeDeltaBase) result = treeDeltas.apply(args.treeDeltaBase, JSON.stringify([result.scope, result.tree.nativeWindowHandle ?? result.tree.id, result.viewMode, result.includeOffscreen, result.detailLevel, args.maxDepth]), result);
+  const full = result;
+  if (args.treeDeltaBase) {
+    const key = JSON.stringify([result.scope, result.tree.nativeWindowHandle ?? result.tree.id, result.viewMode, result.includeOffscreen, result.detailLevel, args.maxDepth]);
+    result = treeDeltas.apply(args.treeDeltaBase, key, result);
+  }
   // An inline screenshot travels as an image block, not as text: the budget
   // and the saved copy leave it out.
-  if (args.maxBytes) { const { screenshot, ...rest } = result; result = await budgetTree(rest, args.maxBytes); if (screenshot) result.screenshot = screenshot; }
+  if (args.maxBytes) {
+    const { screenshot, ...rest } = result;
+    let shaped = rest;
+    if (!rest.tree && bytesOf(rest) > args.maxBytes) {
+      const { screenshot: _image, ...fullTree } = full;
+      shaped = { ...fullTree, treeId:rest.treeId, delta:{ base:rest.delta.base, fallback:'maxBytes' } };
+    }
+    result = await budgetTree(shaped, args.maxBytes);
+    if (result.budget) treeDeltas.markTruncated(result.treeId);
+    if (screenshot) result.screenshot = screenshot;
+  }
   return result;
 }
 async function observationText(action, args, request) {
-  return imageResult(await shapeTree(await observeBackend(action, backendTreeArgs(args), request), args));
+  return imageResult(await shapeTree(await observeBackend(action, backendTreeArgs(args), request), args), true, args.maxBytes);
 }
 
 let batchOwner = null;

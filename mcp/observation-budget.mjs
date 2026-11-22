@@ -89,6 +89,15 @@ export async function spill(result, dir = SPILL_DIR) {
   return file;
 }
 
+// Even a single root name or auxiliary metadata can exceed the whole budget.
+// In that case the file is the only complete result that fits the contract.
+export function observationFileResult(result, maxBytes, fullResultPath) {
+  const { ok, action, scope, treeId, delta } = result;
+  return { ok, action, scope, treeId, ...(delta?.fallback ? { delta:{ base:delta.base, fallback:delta.fallback } } : {}),
+    truncated:true, truncationReason:'maxBytes', budget:{ maxBytes, steps:[...(result.budget?.steps??[]),'fileOnly'], fullResultPath,
+      hint:'Read fullResultPath for the result.' } };
+}
+
 // Over maxBytes a tree becomes a summary, then keeps only actionable controls
 // and their ancestors, and only then is cut, with the whole result in a file.
 export async function budgetTree(result, maxBytes, { save = spill } = {}) {
@@ -96,25 +105,28 @@ export async function budgetTree(result, maxBytes, { save = spill } = {}) {
   const steps = [], original = result;
   let shaped = result;
   if (result.detailLevel !== 'summary') { shaped = { ...shaped, tree: summarizeTree(shaped.tree), detailLevel: 'summary' }; steps.push('summary'); }
-  if (bytesOf(shaped) > maxBytes) {
+  const response = () => ({ ...shaped, budget: { maxBytes, steps, ...(shaped.budget?.omittedNodes ? { omittedNodes: shaped.budget.omittedNodes } : {}) } });
+  if (bytesOf(response()) > maxBytes) {
     const { tree, omitted } = keepActionable(shaped.tree);
     shaped = { ...shaped, tree }; steps.push('actionable');
     shaped.budget = { maxBytes, steps, omittedNodes: omitted };
   }
-  if (bytesOf({ ...shaped, budget: { maxBytes, steps } }) > maxBytes) {
+  if (bytesOf(response()) > maxBytes) {
     const fullResultPath = await save(original);
     const { tree, kept, total } = cutTree({ ...shaped, budget: { maxBytes, steps: [...steps, 'cut'], fullResultPath } }, maxBytes - 400);
     steps.push('cut');
-    return { ...shaped, tree, budget: { maxBytes, steps, omittedNodes: (shaped.budget?.omittedNodes ?? 0) + total - kept, fullResultPath,
+    const cut = { ...shaped, tree, budget: { maxBytes, steps, omittedNodes: (shaped.budget?.omittedNodes ?? 0) + total - kept, fullResultPath,
       hint: 'The tree was cut to fit maxBytes. Read fullResultPath for the whole result, or use find for a specific control.' } };
+    return bytesOf(cut) <= maxBytes ? cut : observationFileResult(cut, maxBytes, fullResultPath);
   }
-  return { ...shaped, budget: { maxBytes, steps, ...(shaped.budget?.omittedNodes ? { omittedNodes: shaped.budget.omittedNodes } : {}) } };
+  return response();
 }
 
 // Over maxBytes an OCR result drops its word boxes, then its joined text (the
 // lines carry it), then lines from the end, with the whole result in a file.
 export async function budgetOcr(result, maxBytes, { save = spill } = {}) {
-  if (!result || !maxBytes || bytesOf(result) <= maxBytes || !Array.isArray(result.lines)) return result;
+  if (!result || !maxBytes || bytesOf(result) <= maxBytes) return result;
+  if (!Array.isArray(result.lines)) return observationFileResult(result, maxBytes, await save(result));
   const steps = [];
   let shaped = { ...result, lines: result.lines.map(({ words, ...line }) => line) }; steps.push('noWordBoxes');
   if (bytesOf(shaped) > maxBytes && typeof shaped.text === 'string') { const { text, ...rest } = shaped; shaped = rest; steps.push('noJoinedText'); }
@@ -126,7 +138,8 @@ export async function budgetOcr(result, maxBytes, { save = spill } = {}) {
     budget: { maxBytes, steps, linesShown: count, fullResultPath, hint: 'Lines were cut to fit maxBytes. Read fullResultPath for every line and word box, or call ocr with a query.' } });
   let low = 0, high = lineCount, best = 0;
   while (low <= high) { const mid = (low + high) >> 1; if (bytesOf(fit(mid)) <= maxBytes) { best = mid; low = mid + 1; } else high = mid - 1; }
-  return fit(best);
+  const cut = fit(best);
+  return bytesOf(cut) <= maxBytes ? cut : observationFileResult(cut, maxBytes, fullResultPath);
 }
 
 // Tree deltas. A read with treeDeltaBase 'start' returns the tree and a treeId;
@@ -134,7 +147,7 @@ export async function budgetOcr(result, maxBytes, { save = spill } = {}) {
 // controls added, removed and changed since it. A missing base, another window,
 // another view, a truncated tree, or a change to more than 40 % of the controls
 // returns the whole tree, saying why.
-const DELTA_FIELDS = ['name', 'controlType', 'isEnabled', 'isOffscreen', 'hasKeyboardFocus', 'disabled', 'focused', 'offscreen'];
+const DELTA_FIELDS = ['name', 'controlType', 'value', 'isEnabled', 'isOffscreen', 'hasKeyboardFocus', 'disabled', 'focused', 'offscreen'];
 function flatten(tree) {
   const nodes = new Map();
   const walk = (node, parentId) => {
@@ -152,6 +165,10 @@ export class TreeDeltas {
     this.entries.set(id, { key, nodes: flatten(result.tree), truncated: result.truncated === true });
     while (this.entries.size > this.limit) this.entries.delete(this.entries.keys().next().value);
     return id;
+  }
+  markTruncated(id) {
+    const entry = this.entries.get(id);
+    if (entry) entry.truncated = true;
   }
   apply(base, key, result) {
     if (!result?.tree) return result;

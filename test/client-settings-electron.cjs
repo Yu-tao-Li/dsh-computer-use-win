@@ -24,6 +24,7 @@ app.whenReady().then(async()=>{
   // update API v1) and for npm. The startup check runs at once here, against a
   // market that reports this version as the latest.
   await evaluate(
+    "{const store=new Map();Object.defineProperty(window,'sessionStorage',{value:{getItem:key=>store.get(key)??null,setItem:(key,value)=>store.set(key,value),removeItem:key=>store.delete(key)}});}"+
     "window.__wcuUpdateDelayMs=0;window.fetchCalls=[];window.fakeFetch=null;"+
     "window.fetch=async(url,init={})=>{const call={url:String(url),method:init.method||'GET',headers:init.headers||{},body:init.body?JSON.parse(init.body):undefined};window.fetchCalls.push(call);if(!window.fakeFetch)throw new TypeError('offline');const r=await window.fakeFetch(call);return {status:r.status,ok:r.status>=200&&r.status<300,json:async()=>r.body};};"+
     "window.bump=v=>v.replace(/(\\d+)$/,n=>String(+n+1));"+
@@ -735,11 +736,26 @@ app.whenReady().then(async()=>{
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
   await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='restart'");
   assert.ok(await evaluate("document.querySelector('[data-wincu-update-dialog]').textContent.includes('重启会中断正在进行的任务')"));
+  assert.equal(await evaluate("document.activeElement.textContent"),'稍后','A stray Enter must not restart DSH');
   assert.equal(await evaluate(noteText),'');
   await savePicture('update-dialog-restart.png');
-  // Later closes it; the button by the title opens it again.
-  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  // A scheduled version check must not overwrite the verified install with a
+  // stale or unavailable registry/market result.
+  await evaluate("window.fakeFetch=window.fakeMarket({absent:true,installed:window.V,latest:null});window.__wcuUpdateTest.check()");
+  assert.equal(await evaluate("document.querySelector('[data-wincu-update-dialog]').dataset.wincuUpdateDialog"),'restart');
+  // Recreate just the UI's update state as on a reload. The market still owns
+  // the original operation. Poll it, and never send another install request.
+  await evaluate("window.__wcuUpdateTest.reset({keepReceipt:true});window.fakeFetch=window.fakeMarket({runtime:'web',restart:true,installed:window.V,latest:window.bump(window.V),operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]});window.__wcuUpdateTest.check()");
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='restart'");
+  assert.equal(await evaluate(posts+'.length'),1,'Recovering confirmation must not submit another update');
+  // DSH's outer Settings layer also closes on Escape. Only the confirmation
+  // should close, and its reminder can reopen it.
+  await evaluate("window.outerEscape=0;document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented)window.outerEscape++;});document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));void 0");
   await until("!document.querySelector('[data-wincu-update-dialog]')&&document.querySelector('[data-wincu-update-restart]')?.textContent==='重启以完成更新'");
+  assert.equal(await evaluate('window.outerEscape'),0,'Escape must not close the surrounding DSH settings');
+  await evaluate("window.__wcuUpdateTest.reset({keepReceipt:true});window.fakeFetch=window.fakeMarket({runtime:'web',restart:true,installed:window.bump(window.V),latest:window.bump(window.V),operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]});window.__wcuUpdateTest.check()");
+  await until("!!document.querySelector('[data-wincu-update-restart]')");
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-dialog]')"),false,'An explicitly dismissed confirmation stays closed after reload');
   await evaluate("window.__wcuRestartWaitMs=300;document.querySelector('[data-wincu-update-restart]').click()");
   await until("!!document.querySelector('[data-wincu-update-restart-now]')");
   await evaluate("document.querySelector('[data-wincu-update-restart-now]').click()");
