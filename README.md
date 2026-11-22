@@ -42,13 +42,13 @@
 
 #### 1.2 升级
 
-DSH 启动时按 npm 的 `latest` 自动检查。**设置 → 电脑操控** 标题右侧显示 **检查更新**，发现新版后变成 **更新**。点 **更新** 后，插件市场下载安装，标题下方显示当前步骤和进度。市场开始替换插件文件前，可以点 **停止更新** 保留现有版本。刚发布的版本可能需要等市场同步。按钮更新失败时，可以从页面直达插件市场的 **已安装** 再试。下载跟随插件市场的 **下载区域** 设置。
+DSH 启动时按 npm 的 `latest` 自动检查。**设置 → 电脑操控** 的更新入口在标题右侧。项目说明折叠时，入口位于 GitHub 链接左边。点 **检查更新** 会立即再查，发现新版后按钮会变成 **更新**。点 **更新** 后，插件市场下载安装，标题下方显示当前步骤和进度。市场开始替换插件文件前，可以点 **停止更新** 保留现有版本。市场收录新版通常比 npm 晚一些。新版刚发布、市场还没同步时，页面会自动等待同步后再安装。按钮更新失败时，可以从页面直达插件市场的 **已安装** 再试。下载跟随插件市场的 **下载区域** 设置。选 **全球** 直接从 npm 下载，选 **中国大陆** 则走镜像。
 
 **从 0.6.3 起**，安装完成后会弹出确认。点 **立即重启**，DSH Desktop 会正常退出并自动重新打开。点 **稍后**，标题旁会保留 **重启以完成更新**，可以随时重新打开确认。
 
 **从 0.6.1 或 0.6.2 升到 0.6.3** 时，由旧版页面执行更新。先右键任务栏托盘里的 DSH 图标，选 **退出**，再打开 DSH Desktop。先别用电脑操控，直接在 **设置 → 电脑操控** 点 **更新**。如果看到 **仍要更新**，点它继续。装好后设置页会立即换成新版，后台仍运行旧版。这一次没有重启确认。请再次从托盘 **退出** 并打开 DSH Desktop，重启前先别改电脑操控设置。如果提示插件被移除，退出并打开 DSH Desktop 后可从插件市场重新安装，原来的设置会保留。
 
-也可以运行上面的安装命令，再从托盘退出并重新打开 DSH Desktop。没有插件市场或从本地文件安装时，**更新** 会打开这段说明。命令里的 `desktop` 指 DSH Desktop 使用的配置（profile）。
+也可以运行上面的安装命令，再从托盘退出并重新打开 DSH Desktop。没有插件市场或从本地文件安装时，**更新** 会打开这段说明。命令里的 `desktop` 指 DSH Desktop 使用的配置（profile）。安装到其他 profile 时，正在用的 DSH 不会有任何变化。
 
 #### 1.3 其他安装方式
 
@@ -104,7 +104,7 @@ DSH Web 和单独的 MCP 客户端会用你电脑上的 Node.js 运行插件，�
 
 #### 2.3 思考与操作浮窗
 
-DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示它在想什么、做了什么。每一步一个小标题，写明这一步的操作，后面是这一步的思考文字，和对话里看到的一致。任务结束后，标题变成“已完成 · 步数 · 用时”，浮窗从回复开头显示结果，再保留 20 秒。这样你不用把 DSH 窗口拉到前面查看进度，也就不会打断它的操作。浮窗、提示条和 AI 总结的文字跟着 DSH 的界面语言走：DSH 里选了哪种语言就用哪种，没选时跟系统；目前提供中文、英文和俄文，其他语言暂时显示英文；设置页在俄文环境下仍显示英文。
+DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示它在想什么、做了什么。每一步一个小标题，写明这一步的操作，后面是这一步的思考文字，和对话里看到的一致。任务结束后，标题变成“已完成 · 步数 · 用时”，浮窗从回复开头显示结果，再保留 20 秒。这样你不用把 DSH 窗口拉到前面查看进度，也就不会打断它的操作。浮窗、提示条和 AI 总结的文字跟着 DSH 的界面语言走：DSH 里选了哪种语言就用哪种，没选时跟系统；目前提供中文、英文和俄文，其他语言暂时显示英文。设置页在俄文环境下仍显示英文。
 
 ![思考与操作浮窗的两个画面，取自一次真实的“打开浏览器搜索晴天并下滑到底”任务，由插件的浮窗程序按记录重新画出：左边是执行中，标题“DSH · 第 3 步 · 执行中”，副标题“连续执行 7 个操作：滚动页面、等待”，下面是模型这一步的思考（这个模型用英文思考）；右边是结束后，标题“DSH · 已完成 · 10 步 · 41 秒”，下面从回复开头显示“已完成：我打开了一个新的浏览器标签页，在必应上搜索「晴天」，并一直下滑到页面最底部。”；两个浮窗的右上角都是锁形按钮](assets/desktop-progress-overlay-hd.png)
 
@@ -114,9 +114,9 @@ DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示�
 
 在左侧打开带鼠标图标的 **电脑操控**。标题旁显示插件版本，右侧有 **检查更新** 或 **更新**，以及 **反馈问题**。**工作方式** 可以选 **少打扰**（默认）、**前台操作** 或 **虚拟机**。少打扰会尽量在后台操作，详细说明默认折叠在 **更多说明** 里。前台操作直接使用鼠标和键盘。虚拟机模式在配置好的 Hyper-V 虚拟机里操作。
 
-页面上还能调整工具加载方案、网页与浏览器、接管提示、思考与操作浮窗和停止快捷键。顶部的 Star 和 Issue 说明可以折叠，折叠后只留 GitHub 链接和展开箭头，升级后也会保持这个选择。
+页面上还能调整工具加载方案、网页与浏览器、接管提示、思考与操作浮窗和停止快捷键。每项左边的小图会随设置变化，说明收在 ⓘ 图标里。顶部的 Star 和 Issue 说明可以折叠，折叠后只留 GitHub 链接和展开箭头，升级后也会保持这个选择。
 
-*下图取自 v0.6.1。当时的设置页尚未显示工作方式和更新按钮。*
+*下图取自 v0.6.1。当时还没有“工作方式”和“检查更新”，只有发现新版时才会显示“更新”。*
 
 ![v0.6.1 的电脑操控设置页，显示展开的项目说明、反馈问题按钮、工具与网页设置](assets/desktop-settings-overview-hd.png)
 
@@ -413,13 +413,13 @@ You need a Windows computer with DSH Desktop installed. The plugin uses Windows 
 
 #### 1.2 Upgrade
 
-DSH checks npm’s `latest` at startup. The top right of **Settings → Computer Use** shows **Check for updates** and switches to **Update** when there’s a newer version. Click **Update** to have the plugin market install it. The current step and progress appear below the title. **Stop update** keeps your installed version if you click it before the market starts replacing files. A new release may take time to reach the market. If updating from settings fails, the page links to the market’s **Installed** tab so you can try there. Downloads follow the market’s **Download region** setting.
+DSH checks npm’s `latest` at startup. The update button is at the top right of **Settings → Computer Use**, to the left of the GitHub link when the project note is folded. Click **Check for updates** to check again right away. The button changes to **Update** when a newer version is available. Click **Update** to have the plugin market install it. The current step and progress appear below the title. **Stop update** keeps your installed version if you click it before the market starts replacing files. New releases usually reach the market after npm. If the market hasn’t picked up a new release yet, the page waits for it to sync before installing. If updating from settings fails, the page links to the market’s **Installed** tab so you can try there. In the market’s **Download region** setting, **Global** downloads directly from npm and **China mainland** uses a mirror.
 
 **Starting with 0.6.3**, a confirmation appears when installation finishes. **Restart now** quits DSH Desktop normally and opens it again. Choose **Later** to keep working. **Restart to finish** stays beside the title and lets you reopen the confirmation any time.
 
 **Upgrading from 0.6.1 or 0.6.2 to 0.6.3** uses the old settings page. Right-click the DSH icon in the taskbar tray, choose **Quit**, and open DSH Desktop again. Go straight to **Settings → Computer Use** and click **Update** before using computer use. If offered **Update anyway**, click it to continue. After installation, the settings page switches to the new version immediately, while DSH still runs the old version in the background. This upgrade has no restart confirmation. Choose **Quit** from the tray again, reopen DSH Desktop, and leave the Computer Use settings alone until it restarts. If the plugin is reported as removed, quit and reopen DSH Desktop, then reinstall it from the plugin market. Your previous settings are kept.
 
-You can also run the install command above, then quit from the tray and reopen DSH Desktop. Without the plugin market or with a local-file install, **Update** opens these instructions. `desktop` in the command is the profile DSH Desktop uses.
+You can also run the install command above, then quit from the tray and reopen DSH Desktop. Without the plugin market or with a local-file install, **Update** opens these instructions. `desktop` in the command is the profile DSH Desktop uses. Installing into another profile leaves the DSH you’re using unchanged.
 
 #### 1.3 Other ways to install
 
@@ -475,7 +475,7 @@ Each desktop action is a row with a mouse icon, such as “Entered text”, “S
 
 #### 2.3 Reasoning and progress overlay
 
-While DSH works on the computer, a translucent overlay in a corner of the screen shows what it is thinking and doing, step by step. Each step gets a heading with its action, followed by the reasoning for that step, the same text you see in the conversation. When the task ends, the heading shows that it is done, with the number of steps and the time taken, and the overlay shows the reply from its start for another 20 seconds. So you never have to bring the DSH window to the front to check on progress, which would interrupt the work. The overlay, the indicator bar and the AI summary use the DSH interface language: the language chosen in DSH, or the system's when none is chosen. Languages other than Chinese show English for now.
+While DSH works on the computer, a translucent overlay in a corner of the screen shows what it is thinking and doing, step by step. Each step gets a heading with its action, followed by the reasoning for that step, the same text you see in the conversation. When the task ends, the heading shows that it is done, with the number of steps and the time taken, and the overlay shows the reply from its start for another 20 seconds. So you never have to bring the DSH window to the front to check on progress, which would interrupt the work. The overlay, the indicator bar and the AI summary use the DSH interface language: the language chosen in DSH, or the system's when none is chosen. Chinese, English and Russian are available for the overlay, indicator and AI summary. Other languages show English. The settings page still uses English for Russian.
 
 ![Two frames of the progress overlay, redrawn by the plugin's overlay code from the record of a real task (open a browser, search for 晴天 and scroll to the end). Left, during the task: the heading reads DSH · step 3 · acting, the subheading reads run 7 actions: scroll the page, wait, and below it is the model's reasoning for that step, in English. Right, after the task: the heading reads DSH · done · 10 steps · 41 s, followed by the start of the reply. Both overlays have the padlock button in the top-right corner](assets/desktop-progress-overlay-hd.png)
 
@@ -485,9 +485,9 @@ The overlay is locked by default, so the mouse passes through it and it never bl
 
 Open **Computer Use**, the mouse-icon tab on the left (电脑操控 in the Chinese interface). The plugin version is beside the title, with **Check for updates** or **Update** and **Report a problem** on the right. **Work mode** offers **Low disruption** (the default), **Foreground**, and **Virtual machine**. Low disruption works in the background where possible. Its **More details** section starts collapsed. Foreground uses the mouse and keyboard directly. Virtual machine mode works inside a configured Hyper-V VM.
 
-The page also lets you choose which tools load and adjust browser options, the takeover indicator, the reasoning and progress overlay, and the stop shortcut. Folding the Star and Issue note leaves a GitHub link and an expand arrow. Your choice survives upgrades.
+The page also lets you choose which tools load and adjust browser options, the takeover indicator, the reasoning and progress overlay, and the stop shortcut. The small illustration beside each setting reflects your selection. Open the ⓘ icon for an explanation. Folding the Star and Issue note leaves a GitHub link and an expand arrow. Your choice survives upgrades.
 
-*The screenshot below is from v0.6.1, before the settings page showed Work mode and the update button.*
+*The screenshot below is from v0.6.1. Work mode and Check for updates had yet to be added. Update appeared only when a newer version was available.*
 
 ![Computer Use settings in v0.6.1, showing the expanded project note, Report a problem button, and tools and browser settings](assets/desktop-settings-overview-hd.png)
 
