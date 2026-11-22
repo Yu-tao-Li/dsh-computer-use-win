@@ -26,16 +26,27 @@ const text=r=>r.content.filter(x=>x.type==='text').map(x=>x.text).join('\n');
 let checks=0;
 const call=async(name,args,pattern)=>{const r=await client.call('windows_computer_use_'+name,args);checks++;if(pattern){assert.equal(r.isError,true,text(r));assert.match(text(r),pattern);return r;}assert.notEqual(r.isError,true,text(r));return r;};
 const data=r=>JSON.parse(r.content[0].text);
-const noSecrets=r=>{for(const value of secrets)assert.equal(text(r).includes(value),false,'Leaked sensitive field value');};
+const noSecrets=(result, observedTab)=>{
+ let visible=text(result).replace(/wcu_untrusted_[0-9a-f]{32}/g,' ');
+ // Generated fixture addresses and IDs can also contain the short test value.
+ for(const marker of [site,observedTab?.id,observedTab?.browser]){
+  if(marker)visible=visible.replaceAll(marker,' ');
+ }
+ for(const value of secrets)assert.equal(visible.includes(value),false,'Leaked sensitive field value');
+};
 try{
+ const boundary='wcu_untrusted_987'+'a'.repeat(29);
+ const response=body=>({content:[{type:'text',text:body}]});
+ assert.doesNotThrow(()=>noSecrets(response(`<${boundary}>[redacted]</${boundary}>`)));
+ assert.throws(()=>noSecrets(response(`<${boundary}>987</${boundary}>`)),/Leaked sensitive field value/);
  await client.init();
  await call('set_value',{elementId:'new-tab',value:pathToFileURL(local).href},/APPROVAL_REQUIRED/);
  await call('set_value',{elementId:'new-tab',value:`http://127.0.0.1:${protectedPort}/`},/POLICY_DENIED/);
  await call('set_value',{elementId:'new-tab',value:'http://169.254.169.254/'},/POLICY_DENIED/);
- const opened=await call('set_value',{elementId:'new-tab',value:site});noSecrets(opened);const tab=data(opened).opened.id;
- const snapshot=await call('snapshot',{browserTab:tab,includeScreenshot:false});noSecrets(snapshot);assert.match(text(snapshot),/ordinary visible value/);
+ const opened=await call('set_value',{elementId:'new-tab',value:site});const observedTab=data(opened).opened;const tab=observedTab.id;noSecrets(opened,observedTab);
+ const snapshot=await call('snapshot',{browserTab:tab,includeScreenshot:false});noSecrets(snapshot,observedTab);assert.match(text(snapshot),/ordinary visible value/);
  const hits=data(await call('find',{browserTab:tab,query:'field',controlType:'Edit',maxResults:20})).results;
- assert.equal(hits.length,5);for(const hit of hits){const info=await call('element_info',{elementId:hit.id});noSecrets(info);if(hit.name!=='Ordinary field')assert.match(text(info),/redacted/);}
+ assert.equal(hits.length,5);for(const hit of hits){const info=await call('element_info',{elementId:hit.id});noSecrets(info,observedTab);if(hit.name!=='Ordinary field')assert.match(text(info),/redacted/);}
  for(const keys of [['ctrl','v'],['ctrl','shift','v'],['ctrl','c'],['ctrl','x'],['shift','insert'],['shift','delete']])await call('keypress',{browserTab:tab,keys},/CLIPBOARD_SHORTCUT/);
  const attachment=data(await call('find',{browserTab:tab,query:'Attachment',maxResults:1})).results[0].id;
  const uploadArgs={elementId:attachment,value:upload};await call('set_value',uploadArgs,/APPROVAL_REQUIRED/);

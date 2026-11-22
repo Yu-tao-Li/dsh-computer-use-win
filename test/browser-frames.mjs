@@ -31,7 +31,8 @@ try{
     assert(item,'Missing frame element: '+query);return item.id;
   };
   assert.match(result.text,/Frame input/);assert.match(result.text,/Same input/);assert.match(result.text,/Nested click/);
-  assert.equal(result.text.includes('frame-secret'),false);assert.equal(result.text.includes('123456'),false);
+  assert.equal(result.text.includes('frame-secret'),false);
+  assert.equal(result.text.replaceAll(tab.key,' ').includes('123456'),false,'OTP must be absent from the outline text');
   assert.equal([...tab.frames.values()].some(frame=>frame.sessionId!==tab.sessionId),true,'The cross-site frame must use a separate CDP renderer session');checks.push('oopif-and-nested-outline');
   const input=await find('Frame input');
   const written=await lane.run('set_value',{elementId:input,value:'frame value'},{});assert.equal(written.meta.verifyValue,'frame value');
