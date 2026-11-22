@@ -155,9 +155,13 @@ $child=New-Object Fixture.Automation.AutomationElement 2
 $child.Add((New-Object Fixture.Automation.AutomationElement 3));$script:Root.Add($child)
 $result=Get-TreeResult active_window 0 100 ([pscustomobject]@{})
 Assert-Equal $result.nodeCount 1 'Depth zero only root'
+Assert-Equal $result.countedDepth 0 'Root counted depth'
+Assert-Equal $result.structuralDepth 0 'Root structural depth'
 Assert-Equal ([Fixture.Automation.AutomationElement]::FirstCalls) 0 'No navigation beyond depth cap'
 $result=Get-TreeResult active_window 3 100 ([pscustomobject]@{detailLevel='full'})
 Assert-Equal $result.nodeCount 3 'Deep tree traversal'
+Assert-Equal $result.countedDepth 2 'Native levels count toward maxDepth'
+Assert-Equal $result.structuralDepth 2 'Native structural depth'
 Assert-Equal $result.tree.value 'cached value' 'Full cached value'
 Assert-Equal ($result.tree.patterns -join ',') 'Invoke,Value' 'Full supported cached patterns'
 Assert-Equal $script:Root.Request.Patterns.Count 6 'Full batches patterns'
@@ -198,6 +202,8 @@ Reset-Fixture
 $script:Responsive=$false
 $result=Get-TreeResult active_window 3 100 ([pscustomobject]@{})
 Assert-Equal $result.truncationReason targetUnresponsive 'Hung window rejected'
+Assert-Equal $result.countedDepth 0 'No counted depth without a tree'
+Assert-Equal $result.structuralDepth 0 'No structural depth without a tree'
 Assert-Equal ([Fixture.Automation.AutomationElement]::CacheBuilds) 0 'Hung window never enters UIA'
 $result=Invoke-Action activate_window ([pscustomobject]@{nativeWindowHandle=42})
 Assert-Equal $result.activated $false 'Hung window activation skipped'
@@ -270,6 +276,8 @@ New-PaneChain 7
 $result=Get-TreeResult active_window 1 100 ([pscustomobject]@{})
 Assert-Equal $result.nodeCount 9 'Layout panes do not use depth'
 Assert-Equal (Find-Node $result.tree 'Page action').depth 8 'Reported depth stays structural'
+Assert-Equal $result.countedDepth 1 'Window counted depth skips layout panes'
+Assert-Equal $result.structuralDepth 8 'Window structural depth includes layout panes'
 Assert-Equal (Find-Node $result.tree 'Page label') $null 'Content levels still use depth'
 Assert-Equal (Get-TreeResult active_window 2 100 ([pscustomobject]@{})).nodeCount 10 'Next content level'
 Assert-Equal ([Fixture.Automation.AutomationElement]::CurrentReads) 0 'Layout check reads cached properties'
@@ -280,7 +288,10 @@ Assert-Equal (Get-TreeResult active_window 1 100 ([pscustomobject]@{})).nodeCoun
 New-PaneChain 30
 Assert-Equal (Get-TreeResult active_window 2 100 ([pscustomobject]@{})).nodeCount 19 'Layout recursion bounded at maxDepth+16'
 New-PaneChain 7
-Assert-Equal (Get-TreeResult desktop 1 100 ([pscustomobject]@{})).nodeCount 2 'Desktop trees keep layout panes in maxDepth'
+$desktopTree=Get-TreeResult desktop 1 100 ([pscustomobject]@{})
+Assert-Equal $desktopTree.nodeCount 2 'Desktop trees keep layout panes in maxDepth'
+Assert-Equal $desktopTree.countedDepth 1 'Desktop counted depth includes layout panes'
+Assert-Equal $desktopTree.structuralDepth 1 'Desktop structural depth matches counted depth'
 # Chromium page warm-up: probe each visible renderer, wait briefly, retry later.
 Reset-Fixture
 [WindowsComputerUseNative]::Renderers=@([IntPtr]101); $script:PageReadyAt=@{'101'=1}; $script:PageProbes=0

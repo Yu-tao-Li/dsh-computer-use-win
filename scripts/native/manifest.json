@@ -1,27 +1,27 @@
 {
     "schemaVersion":  1,
-    "version":  "0.6.2",
+    "version":  "0.6.3",
     "runtime":  "netfx-clr4",
     "helpers":  {
                     "native":  {
                                    "file":  "wcu-native-netfx.dll",
-                                   "sourceHash":  "09bb5a62f83fd3e2",
-                                   "sha256":  "993e81ae0d1f61f75ec91c94671b2f518db7222d47a9dcbe5e235dba43338b24"
+                                   "sourceHash":  "24ea43fe6bcc6432",
+                                   "sha256":  "3eebef8e3fab5f3a6858a4802f08ac9a54d45a580af6eff7e786f95994ac1036"
                                },
                     "ocr":  {
                                 "file":  "wcu-ocr-netfx.dll",
                                 "sourceHash":  "4be4c00822f73e47",
-                                "sha256":  "9b1f0acb8c5e35f0c2632cfd8b5f52eb9af09e095e30198a6b1ae7386d75d4b8"
+                                "sha256":  "d5d05ca4878fda37f6d2d1e314442f98302feb71ff98f6e9ae00dc9420c75c2a"
                             },
                     "clipboard":  {
                                       "file":  "wcu-clipboard-netfx.dll",
                                       "sourceHash":  "2549f15ffe4931db",
-                                      "sha256":  "47adca74fd2083545e7c4fe8da46aeed24a72d9414a2840eec20cb4033a5efd3"
+                                      "sha256":  "c9d5f7696b7bf167e7f16f923fd9a5a1120b7a856d87c87b77912ead74049bc3"
                                   },
                     "takeover":  {
                                      "file":  "wcu-takeover-netfx.dll",
-                                     "sourceHash":  "748391be66f7f053",
-                                     "sha256":  "22772e331d959d7ff6aa767782b9d9f68cd31563f85dc555c538737158fe31e3"
+                                     "sourceHash":  "77bedd3e62e8cbbd",
+                                     "sha256":  "6bcf835ab5b75709e7172bb9430075357c2ae9b67f3d2ba5b70f108dc2958a5d"
                                  }
                 }
 }

@@ -2,6 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, statSync } from 'node:fs';
 import { mkdir, writeFile, rename, unlink } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_SETTINGS, normalizeSettings } from './settings.mjs';
@@ -21,6 +22,11 @@ async function readControl(file) {
   }
 }
 const helperScript = fileURLToPath(new URL('../scripts/windows-takeover.ps1', import.meta.url));
+// Child processes start in the user's home folder, never inside this package.
+// A process whose working folder is inside the plugin (or one of its child
+// folders) keeps the plugin market from replacing the package, and a failed
+// replacement can cost the plugin its place in the profile (update-guard.mjs).
+export const WORK_DIR = os.homedir();
 export const DEFAULT_POWERSHELL=process.platform==='win32'
   ? path.win32.join(process.env.SystemRoot||process.env.WINDIR||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe')
   : 'powershell.exe';
@@ -267,7 +273,7 @@ export class TakeoverControl {
         this.persist();
       }
     }
-    const presentation=JSON.stringify([this.config.indicatorEnabled,this.config.cursorIndicatorEnabled,this.config.remoteIndicatorVisible,this.config.indicatorText,this.config.indicatorPosition,this.config.indicatorIdleMs,this.config.stopShortcut,this.locale]);
+    const presentation=JSON.stringify([this.config.indicatorEnabled,this.config.cursorIndicatorEnabled,this.config.remoteIndicatorVisible,this.config.indicatorText,this.config.desktopTarget==='fast',this.config.indicatorPosition,this.config.indicatorIdleMs,this.config.stopShortcut,this.locale]);
     if (this.child && this.sentPresentation!==presentation) {
       await this.command(((this.seriesHeld&&this.seriesIndicator)||this.shown>0)&&!this.paused&&!this.blockedSeries.has(this.seriesKey)?'begin':'configure', this.config);
       this.sentPresentation=presentation;
@@ -285,6 +291,13 @@ export class TakeoverControl {
   // The helper's Windows process id, which the backend watches during input.
   // Under WSL the child's own pid is that of the interop process (#79).
   get helperProcessId() { return this.child ? (this.helperPid || this.child.pid || 0) : 0; }
+  // Whether the user is in the middle of input-method text (pinyin typed, not
+  // committed yet), from the stop listener's keyboard hook. Null while the
+  // helper is not running: it has seen no keys.
+  async composing() {
+    if (this.helperDisabled || !this.child) return null;
+    try { return (await this.command('input_state')).composing === true; } catch { return null; }
+  }
   // A quiet lease (browser-lane calls) checks the stopped state and counts as an
   // action in progress, but neither shows the indicator nor arms the stop keys.
   // Quiet calls send no real input, so they need no stop listener: when the
@@ -366,7 +379,7 @@ export class TakeoverControl {
       const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-File', windowsScript(helperScript), '-CancelEvent', this.eventName];
       if (this.testMode) args.push('-TestMode');
       const helperEnv={...process.env};delete helperEnv.WCU_APPROVAL_SECRET;delete helperEnv.WCU_APPROVAL_LEDGER;
-      const child = this.child = spawn(this.powershell, args, { cwd: path.dirname(helperScript), env:windowsEnv(helperEnv,Object.keys(helperEnv).filter(name=>name.startsWith('WCU_'))), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      const child = this.child = spawn(this.powershell, args, { cwd: WORK_DIR, env:windowsEnv(helperEnv,Object.keys(helperEnv).filter(name=>name.startsWith('WCU_'))), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       const startupFailure = error => {
         clearTimeout(deadline);
         reject(error);
@@ -428,7 +441,7 @@ export class TakeoverControl {
   withWords(command, params) {
     if (!['begin', 'configure', 'preview', 'progress'].includes(command)) return params;
     const sent = { ...params, strings: helperStrings(this.locale) };
-    if (command !== 'progress') sent.indicatorText = indicatorText(params.indicatorText, this.locale);
+    if (command !== 'progress') sent.indicatorText = indicatorText(params.indicatorText, this.locale, this.config.desktopTarget === 'fast');
     return sent;
   }
   async command(command, params = {}) {

@@ -34,7 +34,25 @@ for(const mode of ['lite','full']) {
       const described=data(await manage({operation:'describe',names:[advertised.name]}));
       assert.deepEqual(stripDescriptions(advertised.inputSchema),stripDescriptions(described.inputSchema));
     }
-    if(mode==='lite') assert.equal(await access(path.join(root,'started.txt')).then(()=>true,()=>false),false,'Discovery must not start PowerShell');
+    const observationNames=['accessibility_tree','snapshot','element_info'];
+    if(mode==='lite') {
+      assert.ok(observationNames.every(name=>!initial.some(tool=>tool.name===prefix+name)));
+      await manage({operation:'enable',names:observationNames});
+    }
+    const observationTools=mode==='lite'?(await client.request('tools/list')).tools:initial;
+    const advertised=name=>observationTools.find(tool=>tool.name===prefix+name);
+    const treeDescription=advertised('accessibility_tree').description;
+    assert.match(treeDescription,/\bfind\b/);
+    assert.match(treeDescription,/\bwait_for\b/);
+    for(const name of ['accessibility_tree','snapshot']){
+      assert.match(advertised(name).inputSchema.properties.detailLevel.description,/summary keeps only IDs, types, names and states/);
+    }
+    assert.equal(advertised('element_info').inputSchema.properties.detailLevel.description,'compact omits empty/heavy fields.');
+    if(mode==='lite') {
+      await manage({operation:'reset'});
+      assert.deepEqual((await client.request('tools/list')).tools,initial);
+      assert.equal(await access(path.join(root,'started.txt')).then(()=>true,()=>false),false,'Discovery must not start PowerShell');
+    }
     const notificationCount=client.notifications.length;
     assert.equal((await manage({operation:'enable',names:['drag','unknown']})).isError,true);
     assert.equal(client.notifications.length,notificationCount);

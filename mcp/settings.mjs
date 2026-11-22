@@ -28,10 +28,16 @@ export function normalizeStopShortcut(value) {
 // back to their defaults and unknown tool names are dropped; each change is
 // returned so it can be reported. Values typed on the settings page (shortcut,
 // text, numbers) stay strict, so a mistyped one is still refused when saved.
+// 0.6.3 turned "where DSH works" into work modes. Both former local choices,
+// the current desktop and the background desktop, are now parts of Low
+// disruption (quiet), so a saved one carries over without a reset notice.
+export const LEGACY_DESKTOP_TARGETS = Object.freeze({ current: 'quiet', background: 'quiet' });
 export function repairStaleSettings(input) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return { value: input, repaired: [] };
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { value: input, repaired: [], migrated: false };
   const value = { ...input }, repaired = [];
   const read = key => typeof value[key]?.get === 'function' ? value[key].get() : value[key];
+  const migrated = Object.hasOwn(LEGACY_DESKTOP_TARGETS, String(read('desktopTarget')));
+  if (migrated) value.desktopTarget = LEGACY_DESKTOP_TARGETS[read('desktopTarget')];
   const reset = key => { repaired.push(`${key}: ${JSON.stringify(read(key))}`); delete value[key]; };
   for (const [key, allowed] of Object.entries(SETTING_CHOICES)) if (read(key) != null && !allowed.includes(read(key))) reset(key);
   for (const key of SETTING_SWITCHES) if (read(key) != null && typeof read(key) !== 'boolean') reset(key);
@@ -43,15 +49,16 @@ export function repairStaleSettings(input) {
     // A list made only of unknown names would leave no tool at all.
     if (known.length) value.enabledTools = known; else delete value.enabledTools;
   }
-  return { value, repaired };
+  return { value, repaired, migrated };
 }
 
 export function normalizeSettings(input = {}) {
   const value = { ...DEFAULT_SETTINGS, ...Object.fromEntries(Object.entries(input).map(([key,value])=>[key,typeof value?.get === 'function' ? value.get() : value])) };
+  value.desktopTarget = LEGACY_DESKTOP_TARGETS[value.desktopTarget] ?? value.desktopTarget;
   for(const key of Object.keys(SETTINGS_SCHEMA))validateSetting(key,value[key]);
   value.enabledTools=normalizeEnabledTools(value.enabledTools);
   if(value.toolPreset==='auto')value.toolPreset=value.enabledTools.length===TOOL_NAMES.length?'full':'custom';
-  if(value.browserApp==='firefox'||value.desktopTarget!=='current')value.browserAttachUser=false;
+  if(value.browserApp==='firefox'||value.desktopTarget==='hyperv')value.browserAttachUser=false;
   value.hypervVm=value.hypervVm.trim();
   value.stopShortcut=normalizeStopShortcut(value.stopShortcut);
   value.progressLockShortcut=normalizeStopShortcut(value.progressLockShortcut);
@@ -65,9 +72,10 @@ export function enabledToolsForSettings(input = {}) {
 }
 
 // Both permission and startup state matter when deciding whether to reconnect.
+// Low disruption and Foreground share one server, which reads the mode live.
 export function toolSelectionKey(input = {}) {
   const settings=normalizeSettings(input);
-  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser,desktopTarget:settings.desktopTarget,hypervVm:settings.desktopTarget==='hyperv'?settings.hypervVm:''});
+  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser,desktopTarget:settings.desktopTarget==='hyperv'?'hyperv':'local',hypervVm:settings.desktopTarget==='hyperv'?settings.hypervVm:''});
 }
 
 export function browserRoutingInstructions(settings = {}, allowed = enabledToolsForSettings(settings)) {

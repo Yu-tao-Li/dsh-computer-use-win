@@ -2,17 +2,21 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_POWERSHELL } from './takeover.mjs';
+import { DEFAULT_POWERSHELL, WORK_DIR } from './takeover.mjs';
 
 export function backgroundDesktopArgs(name) {
   return ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
     fileURLToPath(new URL('../scripts/background-desktop.ps1', import.meta.url)), '-DesktopName', name];
 }
 
+// The server asks the DSH adapter for the hidden desktop by writing this file
+// next to the one where the adapter then puts the desktop's name.
+export const backgroundRequestFile = file => file.replace(/\.json$/i, '') + '-request.json';
+
 export function startBackgroundDesktop(onExit) {
   if (process.platform !== 'win32') throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: use a native Windows DSH host.');
   const name = 'Wincu-' + randomUUID().replaceAll('-', '');
-  const child = spawn(DEFAULT_POWERSHELL, [...backgroundDesktopArgs(name), '-Own'], { windowsHide: true });
+  const child = spawn(DEFAULT_POWERSHELL, [...backgroundDesktopArgs(name), '-Own'], { cwd: WORK_DIR, windowsHide: true });
   let disposed = false, started = false, stderr = '';
   child.stdin.on('error', () => {}); // The owner may already have exited at cleanup.
   child.stderr.setEncoding('utf8').on('data', data => { stderr = (stderr + data).slice(-2048); });

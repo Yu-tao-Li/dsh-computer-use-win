@@ -13,9 +13,40 @@ function Write-ProtocolError([string]$Message) { [Console]::Error.WriteLine($Mes
 function Get-SelectedVm {
   if ([string]::IsNullOrWhiteSpace($VMName)) { throw 'WCU_HYPERV_VM_REQUIRED: name a local Hyper-V virtual machine in Computer Use settings.' }
   if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { throw 'WCU_HYPERV_UNAVAILABLE: Hyper-V PowerShell tools are not installed.' }
-  $result = @(Get-VM -ComputerName localhost | Where-Object Name -EQ $VMName)
+  try { $result = @(Get-VM -ComputerName localhost | Where-Object Name -EQ $VMName) }
+  catch {
+    # Hyper-V refuses a token that is neither elevated nor in Hyper-V
+    # Administrators, with a message in the system language and no usable
+    # error category, so name the cause from the token itself.
+    $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -and
+        -not $principal.IsInRole([Security.Principal.SecurityIdentifier]'S-1-5-32-578')) {
+      throw 'WCU_HYPERV_PERMISSION: add your Windows account to the Hyper-V Administrators group, then sign out and back in.'
+    }
+    throw
+  }
   if ($result.Count -ne 1) { throw 'WCU_HYPERV_VM_UNKNOWN: the configured local virtual machine could not be found.' }
   return $result[0]
+}
+
+# What the relay needs inside the guest, checked read-only when the connection
+# is configured: the same rules as the relay's own check below, without
+# creating a worker folder. Returns the missing step's code, or nothing.
+$guestReadiness = {
+  $ErrorActionPreference = 'Stop'
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $desktop = @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Where-Object {
+    $_.SessionId -gt 0 -and (Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid).Sid -eq $identity.User.Value
+  } | Select-Object -ExpandProperty SessionId -Unique)
+  if ($desktop.Count -ne 1) { return 'WCU_HYPERV_DESKTOP_REQUIRED' }
+  $node = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+  if (-not $node) {
+    $node = @((Join-Path $env:ProgramFiles 'nodejs\node.exe'), (Join-Path $env:LOCALAPPDATA 'Programs\nodejs\node.exe')) |
+      Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+  }
+  if (-not $node) { return 'WCU_HYPERV_NODE_REQUIRED' }
+  $version = (& $node --version | Select-Object -First 1)
+  if ($version -notmatch '^v(\d+)\.' -or [int]$Matches[1] -lt 22) { return 'WCU_HYPERV_NODE_REQUIRED' }
 }
 
 function Connect-Guest($Vm, [pscredential]$Credential) {
@@ -127,10 +158,21 @@ try {
   if ($Mode -eq 'Configure') {
     $credential = Get-Credential -Message "Sign in to the Windows guest $($vm.Name) for Wincu. Use the account already signed in inside this VM."
     if ($null -eq $credential) { [Console]::WriteLine('{"cancelled":true}'); exit 0 }
-    $session = Connect-Guest $vm $credential
+    try { $session = Connect-Guest $vm $credential }
+    catch {
+      # PowerShell Direct reports a wrong password, a PIN or a guest that has
+      # not finished starting in the system language; the settings page shows
+      # one sign-in hint for all of them and keeps this text as the detail.
+      if ($_.Exception.Message -match '^WCU_HYPERV_') { throw }
+      throw ('WCU_HYPERV_SIGNIN_FAILED: ' + $_.Exception.Message)
+    }
     [void][IO.Directory]::CreateDirectory($credentialRoot)
     $credential | Export-Clixml -LiteralPath $credentialFile -Force
-    [Console]::WriteLine('{"ok":true}')
+    # The credential works. A step still missing inside the guest is reported,
+    # not failed: the relay checks it again on every start.
+    $missing = $null
+    try { $missing = Invoke-Command -Session $session -ScriptBlock $guestReadiness | Select-Object -First 1 } catch {}
+    [Console]::WriteLine((@{ ok = $true; missing = $(if ($missing -match '^WCU_HYPERV_(DESKTOP|NODE)_REQUIRED$') { [string]$missing } else { $null }) } | ConvertTo-Json -Compress))
     exit 0
   }
 

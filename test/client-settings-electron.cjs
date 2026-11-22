@@ -24,17 +24,24 @@ app.whenReady().then(async()=>{
   // update API v1) and for npm. The startup check runs at once here, against a
   // market that reports this version as the latest.
   await evaluate(
+    "{const store=new Map();Object.defineProperty(window,'sessionStorage',{value:{getItem:key=>store.get(key)??null,setItem:(key,value)=>store.set(key,value),removeItem:key=>store.delete(key)}});}"+
     "window.__wcuUpdateDelayMs=0;window.fetchCalls=[];window.fakeFetch=null;"+
     "window.fetch=async(url,init={})=>{const call={url:String(url),method:init.method||'GET',headers:init.headers||{},body:init.body?JSON.parse(init.body):undefined};window.fetchCalls.push(call);if(!window.fakeFetch)throw new TypeError('offline');const r=await window.fakeFetch(call);return {status:r.status,ok:r.status>=200&&r.status<300,json:async()=>r.body};};"+
     "window.bump=v=>v.replace(/(\\d+)$/,n=>String(+n+1));"+
-    "window.fakeMarket=o=>{let n=0;const schema='dsh-market/update-api/v1';return call=>{const u=call.url;"+
+    "window.fakeMarket=o=>{let n=0;const schema='dsh-market/update-api/v1';const fake=call=>{const u=call.url;"+
+      "if(u==='/dsh-computer-use-win/api/update-ready'&&call.method==='POST'){o.readyCalls=(o.readyCalls||0)+1;o.readyHeader=call.headers['x-wcu-request'];return o.ready===undefined?{status:404,body:null}:{status:200,body:o.ready==='locked'?{ok:true,checked:true,ready:false,code:'EPERM'}:{ok:true,checked:true,ready:true}};}"+
+      "if(u==='/dsh-market/cancel'&&call.method==='POST'){o.cancels=(o.cancels||0)+1;const s=(o.cancelStatus||[]).shift()??200;if(s===200)o.cancelled=true;return {status:s,body:s===200?{ok:true,cancelled:true}:{error:'no operation is running'}};}"+
+      "if(u.startsWith('/dsh-market/api/v1/updates?name=dsh-computer-use-win')&&o.removed)return {status:404,body:{schema,error:'plugin is not installed'}};"+
       "if(u==='/dsh-market/api/v1/capabilities')return o.absent?{status:404,body:null}:{status:200,body:{schema,apiVersion:1,runtime:o.runtime||'desktop',features:{check:true,update:true,progress:true,rollback:true,restart:!!o.restart,updatesSummary:true},restart:{supported:!!o.restart,managedBy:o.restart?'market':'desktop-host'},endpoints:{updates:'/dsh-market/api/v1/updates',updatesSummary:'/dsh-market/api/v1/updates/summary',operations:'/dsh-market/api/v1/operations',rollback:'/dsh-market/api/v1/rollback',restart:'/dsh-market/api/v1/restart'}}};"+
       "if(u.startsWith('/dsh-market/api/v1/updates?name=dsh-computer-use-win'))return {status:200,body:{schema,package:{name:'dsh-computer-use-win',source:o.source||'npm',installedVersion:o.installed,latestVersion:u.includes('force=1')?o.freshLatest??o.latest:o.latest,updateAvailable:!!o.available,channelSwitch:null}}};"+
       "if(u==='/dsh-market/api/v1/updates'&&call.method==='POST'){if(o.busy)return {status:409,body:{schema,error:'busy',failure:{code:'OPERATION_BUSY',message:'busy',retryable:true}}};n++;return {status:202,body:{schema,operation:{schema,operationId:'boot-update-'+n,state:'running',progress:{percent:0}}}};}"+
-      "if(u.startsWith('/dsh-market/api/v1/operations?operationId=boot-update-')){if(o.lost)return {status:404,body:null};const next=o.operations.shift()||{state:'running'};return {status:200,body:{schema,operation:{schema,operationId:decodeURIComponent(u.split('=')[1]),kind:'update',packageName:'dsh-computer-use-win',beforeVersion:o.installed,installedVersion:o.installed,progress:{percent:null},outcome:{refreshRequired:false,restartRequired:true},failure:null,...next}}};}"+
+      "if(u.startsWith('/dsh-market/api/v1/operations?operationId=boot-update-')){if(o.lost)return {status:404,body:null};const next=o.cancelled?{state:'cancelled'}:o.operations.shift()||{state:'running'};if(next.state==='failed'&&o.removeOnFailure)o.removed=true;return {status:200,body:{schema,operation:{schema,operationId:decodeURIComponent(u.split('=')[1]),kind:'update',packageName:'dsh-computer-use-win',beforeVersion:o.installed,installedVersion:o.installed,progress:{percent:null},outcome:{refreshRequired:false,restartRequired:true},failure:null,...next}}};}"+
       "if(u==='/dsh-market/api/v1/restart'&&call.method==='POST')return {status:200,body:{ok:true}};"+
+      "if(u==='/dsh-computer-use-win/api/restart')return call.method==='GET'?{status:200,body:{supported:!!o.pluginRestart}}:o.pluginRestart?{status:200,body:{ok:true}}:{status:409,body:{ok:false,error:'WCU_RESTART_UNSUPPORTED'}};"+
+      "if(u==='https://registry.npmjs.org/dsh-computer-use-win/latest'&&o.npmDown)throw new TypeError('npm unreachable');"+
+      "if(u==='https://mirrors.cloud.tencent.com/npm/dsh-computer-use-win/latest'&&o.mirror)return {status:200,body:{name:'dsh-computer-use-win',version:o.mirror}};"+
       "if(u==='https://registry.npmjs.org/dsh-computer-use-win/latest'){const npm=o.npm===undefined?o.latest:o.npm;return npm?{status:200,body:{name:'dsh-computer-use-win',version:npm}}:{status:404,body:{error:'Not found'}};}"+
-      "return {status:404,body:null};};};"+
+      "return {status:404,body:null};};fake.o=o;return fake;};"+
     "window.V="+JSON.stringify(require('../package.json').version)+";window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.V,available:false});"+
     // A settings nav button like DSH's, so the update dot can be checked.
     "document.body.insertAdjacentHTML('beforeend','<div id=\"fake-nav\"><button class=\"x_navCell_1\"><svg></svg><span>电脑操控</span></button></div>');void 0;"
@@ -54,9 +61,10 @@ app.whenReady().then(async()=>{
   );
   await until("!!document.getElementById('wincu-page-tool-screenshot')");
   // The check ran at start, without asking the market to skip its short cache,
-  // and found this version current, leaving the update control hidden.
+  // and found this version current: the button offers a check by hand.
   await until("window.fetchCalls.some(c=>c.url.startsWith('/dsh-market/api/v1/updates?name=dsh-computer-use-win'))&&window.__wcuUpdateTest.state().phase==='latest'");
-  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update]')"),false,'Nothing next to GitHub while there is no update');
+  assert.equal(await evaluate("(b=>b&&b.textContent+'|'+b.title)(document.querySelector('[data-wincu-update-check]'))"),'检查更新|当前版本 v'+await evaluate('window.V'),'Without an update the one button checks for one; its tooltip names this version');
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-now]')"),false);
   assert.equal(await evaluate("document.querySelector('.wcu-title-row h2').textContent"),'电脑操控','The title is the name alone');
   assert.equal(await evaluate("document.querySelector('.wcu-section').getAttribute('aria-labelledby')"),'wincu-page-tools-title','Tools come first');
   assert.equal(await evaluate("window.fetchCalls.find(c=>c.url.startsWith('/dsh-market/api/v1/updates')).url.includes('force=1')"),false,'Automatic checks use the market cache');
@@ -392,7 +400,11 @@ app.whenReady().then(async()=>{
   assert.ok(await evaluate("(()=>{const row=document.querySelector('.wcu-title-row').getBoundingClientRect(),link=document.querySelector('.wcu-header-actions a').getBoundingClientRect(),title=document.querySelector('.wcu-title-row h2').getBoundingClientRect();return !document.querySelector('[data-wincu-community]')&&link.left>title.right&&link.right<=row.right&&Math.abs(link.y-title.y)<20})()"),'Collapsed GitHub text link must stay at the upper right of the title');
   await savePicture('settings-compact.png');
   // The update control sits left of the GitHub group, on its line, and needs no
-  // more room than one short button.
+  // more room than one short button: Check for updates, or Update.
+  await evaluate("window.__wcuUpdateTest.reset();window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.V,available:false});window.__wcuUpdateTest.check();void 0");
+  await until("window.__wcuUpdateTest.state().phase==='latest'&&!!document.querySelector('[data-wincu-update-check]')");
+  assert.ok(await evaluate("(()=>{const b=document.querySelector('[data-wincu-update-check]').getBoundingClientRect(),g=document.querySelector('.wcu-header-actions').getBoundingClientRect();return b.right<=g.left&&b.width<=96&&Math.abs((b.top+b.bottom)/2-(g.top+g.bottom)/2)<3&&getComputedStyle(document.querySelector('[data-wincu-update-check]')).backgroundColor==='rgba(0, 0, 0, 0)'})()"),'A transparent Check for updates sits left of GitHub, centred on its line');
+  await savePicture('settings-compact-check.png');
   await evaluate("window.__wcuUpdateTest.reset();window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[]});window.__wcuUpdateTest.check();void 0");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   assert.ok(await evaluate("(()=>{const b=document.querySelector('[data-wincu-update-now]').getBoundingClientRect(),g=document.querySelector('.wcu-header-actions').getBoundingClientRect();return b.right<=g.left&&b.width<=72&&Math.abs((b.top+b.bottom)/2-(g.top+g.bottom)/2)<3&&getComputedStyle(document.querySelector('[data-wincu-update-now]')).backgroundColor==='rgba(0, 0, 0, 0)'})()"),'A transparent Update sits left of GitHub, centred on its line');
@@ -591,13 +603,44 @@ app.whenReady().then(async()=>{
   await until("!!document.querySelector('[data-wincu-update-now]')");
   await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),npm:window.V,available:true})");
   await until("window.__wcuUpdateTest.state().phase==='latest'");
-  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update]')"),false,'A newer market channel cannot override npm latest');
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-now]')"),false,'A newer market channel cannot override npm latest');
+  // Check for updates by hand: the market skips its cache, "Checking…" while it
+  // runs, the result for a moment, then the button again.
+  await evaluate("window.__wcuUpdateResultMs=400;window.fetchCalls=[];window.slowMarket=window.fakeMarket({installed:window.V,latest:window.V,available:false});window.fakeFetch=call=>new Promise(r=>setTimeout(()=>r(window.slowMarket(call)),300));document.querySelector('[data-wincu-update-check]').click()");
+  await until(updateText+"==='检查中…'");
+  await savePicture('update-checking.png');
+  await until("document.querySelector('[data-wincu-update-result=latest]')?.textContent==='已是最新版本'");
+  await savePicture('update-latest.png');
+  assert.equal(await evaluate("window.fetchCalls.some(c=>c.url.startsWith('/dsh-market/api/v1/updates?name=dsh-computer-use-win')&&c.url.includes('force=1'))"),true,'A check by hand skips the market cache');
+  await until("!!document.querySelector('[data-wincu-update-check]')");
+  await evaluate("window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[]});document.querySelector('[data-wincu-update-check]').click()");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-result]')"),false,'A found update goes straight to Update');
+  await recheck("null");
+  await until("window.__wcuUpdateTest.state().phase==='unknown'&&!!document.querySelector('[data-wincu-update-check]')");
+  await evaluate("document.querySelector('[data-wincu-update-check]').click()");
+  await until("document.querySelector('[data-wincu-update-result=unknown]')?.textContent==='暂时无法检查更新'");
+  await until("!!document.querySelector('[data-wincu-update-check]')");
+  // Right after a release the market's mirror can trail npm: the one click
+  // waits for it, says why it takes longer, then installs.
+  await evaluate("window.__wcuUpdateSyncMs=40;void 0");
   await recheck("window.fakeMarket({installed:window.V,latest:window.V,npm:window.bump(window.V),available:false})");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
-  await until("window.__wcuUpdateTest.state().failure?.code==='MARKET_NOT_SYNCED'");
+  await until("document.querySelector('[data-wincu-update-note=syncing]')?.textContent.includes('正在等插件市场同步')&&"+updateText+".includes('更新中')");
+  await savePicture('update-syncing.png');
+  assert.equal(await evaluate(posts+'.length'),0,'Nothing is installed before the market lists the version');
+  await evaluate("window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]});void 0");
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'&&!document.querySelector('[data-wincu-update-note=syncing]')");
+  assert.deepEqual(await evaluate(posts+".map(c=>c.body)"),[{packageName:'dsh-computer-use-win'}],'One install once the market caught up');
+  // A market that never catches up: no install, one plain sentence and a retry.
+  await recheck("window.fakeMarket({installed:window.V,latest:window.V,npm:window.bump(window.V),available:false})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("window.__wcuUpdateTest.state().failure?.code==='MARKET_NOT_SYNCED'&&!!document.querySelector('[data-wincu-update-retry]')");
   assert.equal(await evaluate(posts+'.length'),0,'A stale market must not install a different version');
-  assert.equal(await evaluate("window.fetchCalls.some(c=>c.url.includes('force=1'))"),true,'Check the market again before asking the user to retry');
+  assert.ok(await evaluate("window.fetchCalls.filter(c=>c.url.includes('force=1')).length>1"),'The market is asked again while it catches up');
+  assert.ok(await evaluate(noteText+".startsWith('插件市场还没同步到新版本')"));
   // A local (file:/link:) install: the market reports it as linked and cannot
   // replace it, so Update opens the upgrade steps instead of installing.
   await recheck("window.fakeMarket({source:'linked',installed:window.V,latest:null,npm:window.bump(window.V),operations:[]})");
@@ -608,35 +651,62 @@ app.whenReady().then(async()=>{
   await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='available'");
   assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-now]')"),false,'npm alone cannot update in place');
   assert.equal(await evaluate("(a=>a.textContent==='更新'&&a.href.includes('#12-')&&a.title.includes('v'+window.bump(window.V)))(document.querySelector('[data-wincu-update-help]'))"),true);
-  assert.equal(await evaluate("document.querySelector('#fake-nav button').hasAttribute('data-wincu-update')"),true,'An available update puts a dot on the nav button');
-  // Offline: the check says so only when asked by hand.
-  await recheck("null");
-  await until("window.__wcuUpdateTest.state().phase==='unknown'");
-  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update]')"),false,'An offline check shows nothing');
-  assert.equal(await evaluate("document.querySelector('#fake-nav button').hasAttribute('data-wincu-update')"),false);
-  // The market is busy with another change: no install, a retry.
+  assert.equal(await evaluate("(b=>b.hasAttribute('data-wincu-nav')&&!b.hasAttribute('data-wincu-update')&&getComputedStyle(b,'::after').content==='none')(document.querySelector('#fake-nav button'))"),true,'An available update leaves the nav button without a dot');
+  // npm's registry first; when it cannot be reached, a mirror answers.
+  await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,npmDown:true,mirror:window.bump(window.V),operations:[]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  assert.deepEqual(await evaluate("window.fetchCalls.filter(c=>c.url.endsWith('/dsh-computer-use-win/latest')).map(c=>c.url).slice(0,2)"),['https://registry.npmjs.org/dsh-computer-use-win/latest','https://mirrors.cloud.tencent.com/npm/dsh-computer-use-win/latest'],'npm first, then a mirror');
+  await recheck("window.fakeMarket({installed:window.V,latest:window.V,available:false,operations:[]})");
+  await until("window.__wcuUpdateTest.state().phase==='latest'");
+  assert.equal(await evaluate("window.fetchCalls.some(c=>c.url.includes('mirrors.cloud.tencent.com')||c.url.includes('npmmirror'))"),false,'A mirror is not asked while npm answers');
+  // The market is busy with another install: the page waits for it, says so,
+  // then installs.
   await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,busy:true,operations:[]})");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   assert.equal(await evaluate("(b=>b.textContent+'|'+b.title)(document.querySelector('[data-wincu-update-now]'))"),'更新|有新版本 v'+await evaluate('window.bump(window.V)'),'One word on the button, the version in its tooltip');
   await savePicture('update-available.png');
+  await evaluate("window.__wcuUpdateSyncMs=200;document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update-note=busy]')?.textContent.includes('插件市场正在处理别的安装')&&"+updateText+".includes('更新中')");
+  await savePicture('update-busy-waiting.png');
+  await evaluate("window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]});void 0");
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
+  // Success opens a dialog with the new version. Neither the market nor the
+  // plugin restarts this host, so it says how to restart by hand.
+  await until("document.querySelector('[data-wincu-update-dialog]')?.open===true&&document.querySelector('[data-wincu-update-dialog]').dataset.wincuUpdateDialog==='manual'");
+  assert.equal(await evaluate("document.querySelector('[data-wincu-update-dialog]').querySelector('p').textContent"),'已更新到 v'+await evaluate('window.bump(window.V)'));
+  assert.ok(await evaluate("document.querySelector('[data-wincu-update-dialog]').textContent.includes('托盘')"));
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
+  // A market that stays busy ends in one short word and a retry.
+  await evaluate("window.__wcuUpdateSyncMs=40;void 0");
+  await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,busy:true,operations:[]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
   await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='failed'&&!!document.querySelector('[data-wincu-update-retry]')");
   assert.ok(await evaluate(updateText+".includes('插件市场正忙')"));
-  // A release too young for pnpm's waiting period: "update anyway" sends force once.
-  await recheck("window.market=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'failed',failure:{code:'RELEASE_TOO_FRESH',message:'release age',retryable:true}}]})");
+  assert.ok(await evaluate(posts+'.length>10'),'The busy market was asked again before the page gave up');
+  // An agent is running: the market does not update meanwhile, and the page
+  // says to retry after it.
+  await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'failed',failure:{code:'AGENTS_RUNNING',message:'agents are running',retryable:true}}]})");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
-  await until("!!document.querySelector('[data-wincu-update-force]')");
-  assert.ok(await evaluate(noteText+".includes('仍要更新')"));
-  await savePicture('update-too-fresh.png');
-  assert.deepEqual(await evaluate(posts+".map(c=>c.body)"),[{packageName:'dsh-computer-use-win'}],'The first request leaves the waiting period on');
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='failed'&&!!document.querySelector('[data-wincu-update-retry]')");
+  assert.ok(await evaluate(noteText+".startsWith('有 agent 正在运行')"));
+  assert.equal(await evaluate("document.querySelector('[data-wincu-update-note=failed]').title"),'agents are running','The market’s own words are in the tooltip');
+  // A release younger than the market's waiting period: the same click goes on
+  // with force, with no second question.
+  await recheck("window.market=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'failed',failure:{code:'RELEASE_TOO_FRESH',message:'release age',retryable:true}},{state:'running',progress:{percent:40}},{state:'succeeded',installedVersion:window.bump(window.V)}]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-note-toggle]').click()");
   await until("window.snapshot.value.communityNote==='link'&&!document.querySelector('[data-wincu-community]')");
-  await evaluate("window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'running',progress:{percent:40}},{state:'succeeded',installedVersion:window.bump(window.V)}]});document.querySelector('[data-wincu-update-force]').click()");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
   await until(updateText+".includes('40%')");
   await savePicture('update-running.png');
-  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
-  assert.deepEqual(await evaluate(posts+".map(c=>c.body).at(-1)"),{packageName:'dsh-computer-use-win',force:true});
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'&&document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='manual'");
+  await savePicture('update-dialog-manual.png');
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
+  assert.deepEqual(await evaluate(posts+".map(c=>c.body)"),[{packageName:'dsh-computer-use-win'},{packageName:'dsh-computer-use-win',force:true}],'The first request leaves the waiting period on; a hold sends one forced request');
   assert.equal(await evaluate("document.querySelector('[data-wincu-update=updated] span').title"),'已更新到 v'+await evaluate('window.bump(window.V)'));
   assert.ok(await evaluate(noteText+".includes('托盘')"),'Desktop owns the restart: the page says how');
   await savePicture('update-done.png');
@@ -659,18 +729,63 @@ app.whenReady().then(async()=>{
   await evaluate("window.fakeFetch=window.fakeMarket({installed:window.bump(window.V),latest:window.bump(window.V)});document.querySelector('[data-wincu-update-recheck]').click()");
   await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
   assert.equal(await evaluate(posts+'.length'),1,'Confirming the outcome cannot issue a second install');
-  // dsh web with a market that restarts it: a restart button, no tray note.
+  // dsh web with a market that restarts it: the dialog warns that the task in
+  // progress stops and offers Restart now; no tray note.
   await recheck("window.fakeMarket({runtime:'web',restart:true,installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]})");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
-  await until("!!document.querySelector('[data-wincu-update-restart]')");
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='restart'");
+  assert.ok(await evaluate("document.querySelector('[data-wincu-update-dialog]').textContent.includes('重启会中断正在进行的任务')"));
+  assert.equal(await evaluate("document.activeElement.textContent"),'稍后','A stray Enter must not restart DSH');
   assert.equal(await evaluate(noteText),'');
-  await evaluate("document.querySelector('[data-wincu-update-restart]').click()");
+  await savePicture('update-dialog-restart.png');
+  // A scheduled version check must not overwrite the verified install with a
+  // stale or unavailable registry/market result.
+  await evaluate("window.fakeFetch=window.fakeMarket({absent:true,installed:window.V,latest:null});window.__wcuUpdateTest.check()");
+  assert.equal(await evaluate("document.querySelector('[data-wincu-update-dialog]').dataset.wincuUpdateDialog"),'restart');
+  // Recreate just the UI's update state as on a reload. The market still owns
+  // the original operation. Poll it, and never send another install request.
+  await evaluate("window.__wcuUpdateTest.reset({keepReceipt:true});window.fakeFetch=window.fakeMarket({runtime:'web',restart:true,installed:window.V,latest:window.bump(window.V),operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]});window.__wcuUpdateTest.check()");
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='restart'");
+  assert.equal(await evaluate(posts+'.length'),1,'Recovering confirmation must not submit another update');
+  // DSH's outer Settings layer also closes on Escape. Only the confirmation
+  // should close, and its reminder can reopen it.
+  await evaluate("window.outerEscape=0;document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented)window.outerEscape++;});document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));void 0");
+  await until("!document.querySelector('[data-wincu-update-dialog]')&&document.querySelector('[data-wincu-update-restart]')?.textContent==='重启以完成更新'");
+  assert.equal(await evaluate('window.outerEscape'),0,'Escape must not close the surrounding DSH settings');
+  await evaluate("window.__wcuUpdateTest.reset({keepReceipt:true});window.fakeFetch=window.fakeMarket({runtime:'web',restart:true,installed:window.bump(window.V),latest:window.bump(window.V),operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]});window.__wcuUpdateTest.check()");
+  await until("!!document.querySelector('[data-wincu-update-restart]')");
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-dialog]')"),false,'An explicitly dismissed confirmation stays closed after reload');
+  await evaluate("window.__wcuRestartWaitMs=300;document.querySelector('[data-wincu-update-restart]').click()");
+  await until("!!document.querySelector('[data-wincu-update-restart-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-restart-now]').click()");
   await until("window.fetchCalls.some(c=>c.method==='POST'&&c.url==='/dsh-market/api/v1/restart')");
+  // Still open after the wait: DSH did not restart, and the dialog says how to by hand.
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='failed'");
+  assert.ok(await evaluate("document.querySelector('[data-wincu-update-dialog]').textContent.includes('DSH 没有重启')&&document.querySelector('[data-wincu-update-dialog]').textContent.includes('dsh web')"));
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
+  // DSH Desktop: the market does not restart a host it does not supervise, so
+  // the plugin's own route does, and the dialog says DSH opens again.
+  await recheck("window.fakeMarket({pluginRestart:true,installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V)}]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='restart'");
+  await evaluate("window.__wcuRestartWaitMs=60000;document.querySelector('[data-wincu-update-restart-now]').click()");
+  await until("window.fetchCalls.some(c=>c.method==='POST'&&c.url==='/dsh-computer-use-win/api/restart'&&c.headers['x-wcu-request']==='1')");
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='restarting'");
+  assert.ok(await evaluate("document.querySelector('[data-wincu-update-dialog]').textContent.includes('稍后会自动重新打开')"));
+  assert.equal(await evaluate("window.fetchCalls.some(c=>c.method==='POST'&&c.url==='/dsh-market/api/v1/restart')"),false);
+  await savePicture('update-dialog-restarting.png');
+  await evaluate("document.querySelector('[data-wincu-update-dialog]').close()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
   // A market that only needs the page reloaded offers that, and no restart note.
   await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V),outcome:{refreshRequired:true,restartRequired:false}}]})");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='refresh'");
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
   await until("!!document.querySelector('[data-wincu-update-refresh]')");
   assert.ok(await evaluate(updateText+".startsWith('已更新')"));
   assert.equal(await evaluate(noteText),'');
@@ -678,19 +793,119 @@ app.whenReady().then(async()=>{
   await recheck("window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'succeeded',installedVersion:window.bump(window.V),outcome:{refreshRequired:false,restartRequired:false}}]})");
   await until("!!document.querySelector('[data-wincu-update-now]')");
   await evaluate("document.querySelector('[data-wincu-update-now]').click()");
-  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'&&document.querySelector('[data-wincu-update-dialog]')?.dataset.wincuUpdateDialog==='done'");
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button').click()");
+  await until("!document.querySelector('[data-wincu-update-dialog]')");
   assert.equal(await evaluate(updateText),'已更新');
   assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-refresh],[data-wincu-update-restart]')"),false);
   // A newer version already on disk is an update waiting for the restart.
   await recheck("window.fakeMarket({installed:window.bump(window.V),latest:window.bump(window.V),available:false})");
   await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
   assert.equal(await evaluate("document.querySelector('[data-wincu-update=updated] span').title"),'已更新到 v'+await evaluate('window.bump(window.V)'));
+  // Progress: the step the market reports, the bytes while the package
+  // downloads, and Stop update until the market starts replacing the files.
+  // The plugin is asked first whether its folder can be replaced.
+  await recheck("window.market=window.fakeMarket({ready:'free',installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'running',progress:{phase:null}},{state:'running',progress:{phase:'resolving'}},{state:'running',progress:{phase:'downloading',downloaded:131072,size:524288}},{state:'running',progress:{phase:'downloading',downloaded:393216,size:524288}},{state:'running',progress:{phase:'linking'}},{state:'running',progress:{phase:'linking'}},{state:'succeeded',installedVersion:window.bump(window.V)}]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("window.seenStages=[];window.stageWatch=setInterval(()=>{const s=document.querySelector('[data-wincu-update-stage]')?.dataset.wincuUpdateStage;if(s&&window.seenStages.at(-1)!==s)window.seenStages.push(s);},20);document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update-stage=download] [data-wincu-update-bytes]')?.textContent.trim()==='384 KB / 512 KB'");
+  assert.ok(await evaluate("(b=>!!b&&!b.disabled&&b.textContent==='停止更新')(document.querySelector('[data-wincu-update-stop]'))"),'Stop update is offered while the package downloads');
+  assert.equal(await evaluate("document.querySelector('[data-wincu-update-stage] [role=progressbar]').getAttribute('aria-valuenow')"),'75','The bar shows the bytes');
+  await savePicture('update-progress-download.png');
+  await until("!!document.querySelector('[data-wincu-update-stage=install]')");
+  assert.ok(await evaluate("(b=>b.disabled&&b.title.includes('不能停止'))(document.querySelector('[data-wincu-update-stop]'))"),'Stop is unavailable while the market replaces the files, and says why');
+  assert.ok(await evaluate("document.querySelector('[data-wincu-update-stage=install]').textContent.startsWith('正在安装')"));
+  await savePicture('update-progress-install.png');
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
+  await evaluate("clearInterval(window.stageWatch);document.querySelector('[data-wincu-update-dialog] button')?.click()");
+  assert.ok(await evaluate("(s=>['resolve','download','install'].every((x,i,a)=>s.includes(x)&&(i===0||s.indexOf(x)>s.indexOf(a[i-1]))))(window.seenStages)"),'Steps in order: '+await evaluate("window.seenStages.join(',')"));
+  assert.ok(await evaluate("(c=>{const ready=c.findIndex(x=>x.url==='/dsh-computer-use-win/api/update-ready'),post=c.findIndex(x=>x.method==='POST'&&x.url==='/dsh-market/api/v1/updates');return ready>=0&&ready<post})(window.fetchCalls)&&window.market.o.readyHeader==='1'"),'The folder check comes before the update request');
+  // Stop update while the package downloads: a cancel the market cannot take
+  // yet (pnpm not started) is sent again, the market stops, and the plugin is
+  // the version it was.
+  await recheck("window.market=window.fakeMarket({ready:'free',cancelStatus:[400,200],installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'running',progress:{phase:'downloading',downloaded:65536,size:524288}},...Array(40).fill({state:'running',progress:{phase:'downloading',downloaded:65536,size:524288}})]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("!!document.querySelector('[data-wincu-update-stage=download] [data-wincu-update-stop]:not(:disabled)')");
+  await evaluate("document.querySelector('[data-wincu-update-stop]').click()");
+  await until("document.querySelector('[data-wincu-update-note=stopped]')?.textContent==='已停止更新，插件还是 v'+window.V+'。'&&!!document.querySelector('[data-wincu-update-now]')");
+  assert.equal(await evaluate("window.market.o.cancels"),2,'The cancel is sent again once the market can take it');
+  assert.equal(await evaluate("window.__wcuUpdateTest.state().failure"),null,'A stop is not a failure');
+  await savePicture('update-stopped.png');
+  // A stop that comes as the market begins replacing the files is not sent:
+  // the update finishes, and the page says why it went on.
+  await recheck("window.market=window.fakeMarket({ready:'free',installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'running',progress:{phase:'downloading',downloaded:65536,size:524288}},{state:'running',progress:{phase:'linking'}},{state:'running',progress:{phase:'linking'}},{state:'running',progress:{phase:'linking'}},{state:'succeeded',installedVersion:window.bump(window.V)}]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("!!document.querySelector('[data-wincu-update-stage=download] [data-wincu-update-stop]:not(:disabled)')");
+  await evaluate("document.querySelector('[data-wincu-update-stop]').click()");
+  await until("document.querySelector('[data-wincu-update-stop-late]')?.textContent.startsWith('已经开始安装')");
+  await until("document.querySelector('[data-wincu-update]')?.dataset.wincuUpdate==='updated'");
+  await evaluate("document.querySelector('[data-wincu-update-dialog] button')?.click()");
+  assert.equal(await evaluate("window.market.o.cancels??0"),0,'No cancel reaches the market once the swap began');
+  // Stop update while waiting for the market to pick up the release: nothing
+  // was sent to the market.
+  await recheck("window.market=window.fakeMarket({ready:'free',installed:window.V,latest:window.V,npm:window.bump(window.V),available:false,operations:[]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("window.__wcuUpdateSyncMs=200;window.fetchCalls=[];document.querySelector('[data-wincu-update-now]').click()");
+  await until("!!document.querySelector('[data-wincu-update-note=syncing] [data-wincu-update-stop]:not(:disabled)')");
+  await evaluate("document.querySelector('[data-wincu-update-stop]').click()");
+  await until("!!document.querySelector('[data-wincu-update-note=stopped]')&&!!document.querySelector('[data-wincu-update-now]')");
+  assert.equal(await evaluate(posts+".length"),0,'Stopping while the market catches up sends no update');
+  await evaluate("window.__wcuUpdateSyncMs=40;void 0");
+  // Something holds the plugin's folder: the update is not started, so the
+  // plugin cannot be left half replaced, and the market is not offered (it
+  // would meet the same folder).
+  await recheck("window.market=window.fakeMarket({ready:'locked',installed:window.V,latest:window.bump(window.V),available:true,operations:[]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("window.fetchCalls=[];document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update-failure=UPDATE_LOCKED]')?.textContent.startsWith('插件的文件夹正被别的程序占用')&&!!document.querySelector('[data-wincu-update-retry]')");
+  assert.equal(await evaluate(posts+".length"),0,'A held plugin folder starts no update');
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-fallback]')"),false);
+  await savePicture('update-locked.png');
+  // An update that fails: the page offers the plugin market's Installed tab,
+  // through the market's own client service, searched for this plugin.
+  await evaluate("window.marketRenders=[];window.ctx.reflect={get:name=>name==='market'?{version:1,render:props=>{window.marketRenders.push(props);return React.createElement('div',{'data-fake-market-panel':props.preferredSubsectionId},'market panel')}}:undefined};void 0");
+  const failingMarket="window.market=window.fakeMarket({ready:'free',installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'failed',failure:{code:'UPDATE_FAILED',message:'pnpm exited 1',retryable:true}}]})";
+  await recheck(failingMarket);
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update-fallback]')?.textContent.includes('市场收录新版本比 npm 晚一些')&&document.querySelector('[data-wincu-update-failure=UPDATE_FAILED]').title==='pnpm exited 1'");
+  await savePicture('update-failed-fallback.png');
+  await evaluate("document.querySelector('[data-wincu-open-market]').click()");
+  await until("document.querySelector('[data-wincu-market-dialog] [data-fake-market-panel]')?.dataset.fakeMarketPanel==='installed:dsh-computer-use-win'&&document.querySelector('[data-wincu-market-dialog]').open");
+  await savePicture('update-market-dialog.png');
+  await evaluate("window.fetchCalls=[];document.querySelector('[data-wincu-market-close]').click()");
+  await until("!document.querySelector('[data-wincu-market-dialog]')&&window.fetchCalls.some(c=>c.url==='/dsh-market/api/v1/updates?name=dsh-computer-use-win&force=1')");
+  // Without that service: the market's settings entry, then its Installed tab.
+  await evaluate("window.ctx.reflect=undefined;window.marketNav=0;window.marketTab=0;document.getElementById('fake-nav').insertAdjacentHTML('beforeend','<button class=\"x_navCell_2\" id=\"fake-market-nav\"><svg></svg><span>插件市场</span></button>');document.getElementById('fake-market-nav').onclick=()=>{window.marketNav++;document.body.insertAdjacentHTML('beforeend','<div id=\"fake-market\"><button id=\"fake-installed\">已安装</button></div>');document.getElementById('fake-installed').onclick=()=>window.marketTab++;};void 0");
+  await recheck(failingMarket);
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("!!document.querySelector('[data-wincu-open-market]')");
+  await evaluate("document.querySelector('[data-wincu-open-market]').click()");
+  await until("window.marketNav===1&&window.marketTab===1");
+  await evaluate("document.getElementById('fake-market-nav').remove();document.getElementById('fake-market').remove();void 0");
+  // Neither: the page says where to go.
+  await recheck(failingMarket);
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("!!document.querySelector('[data-wincu-open-market]')");
+  await evaluate("document.querySelector('[data-wincu-open-market]').click()");
+  await until("document.querySelector('[data-wincu-market-missing]')?.textContent.includes('设置 → 插件市场 → 已安装')");
+  // A failure after which the market no longer lists the plugin: the page
+  // says how to get it back, and offers no fallback that cannot help.
+  await recheck("window.market=window.fakeMarket({ready:'free',removeOnFailure:true,installed:window.V,latest:window.bump(window.V),available:true,operations:[{state:'failed',failure:{code:'UPDATE_FAILED',message:'EPERM',retryable:true}}]})");
+  await until("!!document.querySelector('[data-wincu-update-now]')");
+  await evaluate("document.querySelector('[data-wincu-update-now]').click()");
+  await until("document.querySelector('[data-wincu-update-failure=PLUGIN_REMOVED]')?.textContent.startsWith('这次没有更新成功，插件市场还把插件从 DSH 里移除了')");
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-update-fallback]')"),false);
   await evaluate("window.__wcuUpdateTest.reset();window.fetchCalls=[];window.fakeFetch=null;window.__wcuUpdateTest.check()");
   await until("window.__wcuUpdateTest.state().phase==='unknown'");
   await evaluate("window.fakeFetch=window.fakeMarket({installed:window.V,latest:window.bump(window.V),available:true,operations:[]});window.root.render(React.createElement('span',null,'closed'))");
   await evaluate("window.renderPage('zh')");
   await until("!!document.querySelector('[data-wincu-update-now]')");
-  await evaluate("window.selectDesktop=value=>{const s=document.getElementById('wincu-page-desktopTarget');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(s,value);s.dispatchEvent(new Event('change',{bubbles:true}))};window.selectDesktop('hyperv')");
+  await evaluate("window.selectDesktop=value=>document.getElementById('wincu-page-desktopTarget-'+value).click();window.selectDesktop('hyperv')");
   await until("!!document.getElementById('wincu-page-hypervVm')");
   assert.equal(await evaluate("document.getElementById('wincu-page-browserAttachUser').disabled"),true,'An isolated task cannot attach to the host browser');
   await evaluate("window.setOverlayInput('hypervVm','Wincu fixture VM');window.clickButton('保存更改')");
@@ -698,20 +913,41 @@ app.whenReady().then(async()=>{
   await evaluate("window.previousFetch=window.fakeFetch;window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:200,body:{ok:true}}:window.previousFetch(call);window.clickButton('配置连接')");
   await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.includes('连接已配置')");
   assert.equal(await evaluate("window.fetchCalls.filter(call=>call.url==='/dsh-computer-use-win/api/hyperv'&&call.method==='POST').length"),1,'Credential setup starts only after the explicit action');
-  await evaluate("window.selectDesktop('background');window.clickButton('保存更改')");
-  await until("window.snapshot.value.desktopTarget==='background'&&document.body.textContent.includes('沿用本机账号')");
-  assert.ok(await evaluate("['browserVisible','browserSignIn'].every(key=>{const control=document.getElementById('wincu-page-'+key);return control.disabled&&!control.checked})"),'Private desktop has no interactive browser or saved sign-in');
-  assert.equal(await evaluate("document.getElementById('wincu-page-browserAttachUser').disabled"),true);
-  assert.equal(await evaluate("!!document.getElementById('wincu-page-hypervVm')"),false);
-  await evaluate("window.selectDesktop('current');window.clickButton('保存更改')");
-  await until("window.snapshot.value.desktopTarget==='current'&&!document.getElementById('wincu-page-hypervVm')");
-  assert.ok(await evaluate("['browserVisible','browserSignIn'].every(key=>!document.getElementById('wincu-page-'+key).disabled)"),'Interactive browser controls return on the current desktop');
+  // The Hyper-V choice explains itself and lists its setup steps; a result
+  // names the step that fixes it, in its tone, with Windows' words in the tooltip.
+  assert.equal(await evaluate("document.querySelector('[data-wincu-desktop-hint]').textContent.startsWith('在 Hyper-V 虚拟机里操作')"),true);
+  assert.equal(await evaluate("document.querySelectorAll('[data-wincu-hyperv-steps] li').length"),6);
+  assert.equal(await evaluate("document.querySelector('[data-wincu-hyperv-steps] li:nth-child(2) code').textContent"),'Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)');
+  await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:500,body:{ok:false,error:'WCU_HYPERV_PERMISSION: add your Windows account to the Hyper-V Administrators group, then sign out and back in.'}}:window.previousFetch(call);window.clickButton('配置连接')");
+  await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.includes('见第 2 步')");
+  assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'error|1','The step to fix is marked');
+  assert.ok(await evaluate("document.querySelector('[data-wincu-hyperv-result]').title.startsWith('WCU_HYPERV_PERMISSION')"));
+  await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:200,body:{ok:true,missing:'WCU_HYPERV_NODE_REQUIRED'}}:window.previousFetch(call);window.clickButton('配置连接')");
+  await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.startsWith('登录信息已保存。还差第 3 步')");
+  assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'warning|2');
+  await evaluate("window.selectDesktop('quiet')");
+  await until("document.querySelector('[data-wincu-desktop-hint]').textContent.includes('照常用电脑')&&document.querySelectorAll('[data-wincu-quiet-notes] li').length===4&&!document.querySelector('[data-wincu-hyperv-steps]')");
+  // Low disruption's notes start folded under 更多说明, like 更多选项 below, and open from it.
+  assert.equal(await evaluate("(d=>[d.localName,d.open,d.querySelector('summary').textContent,d.querySelector('li').checkVisibility()].join('|'))(document.querySelector('[data-wincu-quiet-notes]'))"),'details|false|更多说明|false','The Low disruption notes start folded');
+  await evaluate("document.querySelector('[data-wincu-quiet-notes] summary').click()");
+  await until("document.querySelector('[data-wincu-quiet-notes]').open&&[...document.querySelectorAll('[data-wincu-quiet-notes] li')].every(li=>li.checkVisibility())");
+  await evaluate("window.selectDesktop('hyperv')");
+  await until("!!document.querySelector('[data-wincu-hyperv-steps]')&&!document.querySelector('[data-wincu-hyperv-result]')");
+  await evaluate("window.selectDesktop('fast');window.clickButton('保存更改')");
+  await until("window.snapshot.value.desktopTarget==='fast'&&document.querySelector('[data-wincu-desktop-hint]').textContent.includes('按 Esc 停止')");
+  assert.equal(await evaluate("!!document.querySelector('[data-wincu-quiet-notes]')||!!document.getElementById('wincu-page-hypervVm')"),false);
+  assert.ok(await evaluate("['browserVisible','browserSignIn','browserAttachUser'].every(key=>!document.getElementById('wincu-page-'+key).disabled)"),'Both local modes keep every browser control');
+  await savePicture('work-mode-fast.png');
+  // A choice saved before 0.6.3 (current or background desktop) reads as Low disruption.
+  await evaluate("window.snapshot={...window.snapshot,value:{...window.snapshot.value,desktopTarget:'background'}};for(const fn of window.listeners)fn()");
+  await until("document.getElementById('wincu-page-desktopTarget-quiet').checked&&document.querySelectorAll('[data-wincu-quiet-notes] li').length===4");
+  await savePicture('work-mode-quiet.png');
   await evaluate("window.renderPage('en')");
   await until("document.body.textContent.includes('Press Esc to stop')");
   await evaluate("window.snapshot={...window.snapshot,writable:false};for(const fn of window.listeners)fn()");
   await until("document.getElementById('wincu-page-tool-click').disabled");
   if((process.env.WCU_SETTINGS_TEST_API||'modern')==='modern'){assert((await evaluate('window.remoteMutations'))>10);assert((await evaluate('window.acceptedViews'))>10);}
-  const report={passed:true,hintAbovePointer:true,api:process.env.WCU_SETTINGS_TEST_API||'modern',navigation:'settings.section/computer-use',compatibilityCard:true,atomicSave:true,draft:true,discard:true,errorPreservesValue:true,readOnly:true,preview:true,noSettingsResumeButton:true,allToolsDefault:true,outerPresets:['lite','full','lazy','custom'],lazySaveAndRemount:true,customSelectionPreserved:true,toolsCollapsedByDefault:true,individualAndGroupSelection:true,emptySelection:true,restoreAllTools:true,shortcutRecording:true,shortcutCombination:true,shortcutCancelAndBlurCleanup:true,shortcutClearDraft:true,restoreDefaultEsc:true,externalLinkButtons:true,cursorIndicatorIndependent:true,cursorIndicatorSaved:true,remoteVisibilityDefault:true,remoteVisibilitySaveAndRestore:true,themes:['light','dark'],nativeControlContrast:contrasts,languages:['zh','en'],physicalInputSent:false,screenshot:path.join(process.env.WCU_SETTINGS_TEST_ROOT,'settings-page.png')};
+  const report={passed:true,hintAbovePointer:true,api:process.env.WCU_SETTINGS_TEST_API||'modern',navigation:'settings.section/computer-use',compatibilityCard:true,atomicSave:true,draft:true,discard:true,errorPreservesValue:true,readOnly:true,preview:true,noSettingsResumeButton:true,allToolsDefault:true,outerPresets:['lite','full','lazy','custom'],lazySaveAndRemount:true,customSelectionPreserved:true,toolsCollapsedByDefault:true,quietNotesCollapsedByDefault:true,updateProgressSteps:true,updateStop:true,updateStopNotDuringSwap:true,updateFolderCheck:true,updateMarketFallback:true,updatePluginRemoved:true,individualAndGroupSelection:true,emptySelection:true,restoreAllTools:true,shortcutRecording:true,shortcutCombination:true,shortcutCancelAndBlurCleanup:true,shortcutClearDraft:true,restoreDefaultEsc:true,externalLinkButtons:true,cursorIndicatorIndependent:true,cursorIndicatorSaved:true,remoteVisibilityDefault:true,remoteVisibilitySaveAndRestore:true,themes:['light','dark'],nativeControlContrast:contrasts,languages:['zh','en'],physicalInputSent:false,screenshot:path.join(process.env.WCU_SETTINGS_TEST_ROOT,'settings-page.png')};
   fs.writeFileSync(path.join(process.env.WCU_SETTINGS_TEST_ROOT,'results.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report));win.destroy();app.quit();
 }).catch(error=>{console.error(error.stack);app.exit(1)});

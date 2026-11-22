@@ -7,7 +7,7 @@ import {DEFAULT_SETTINGS,TOOL_NAMES,normalizeSettings} from '../mcp/settings.mjs
 
 export async function runSettingsMatrix({settings,namespace,liveFile,documentPath,until,root}){
   const cases={
-    desktopTarget:['background','hyperv','current'],hypervVm:['Wincu test VM',''],
+    desktopTarget:['fast','hyperv','quiet'],hypervVm:['Wincu test VM',''],
     browserFirst:[false,true],browserVisible:[false,true],browserApp:['chrome','edge','firefox','default'],browserSignIn:[true,false],browserAttachUser:[true,false],
     progressOverlayEnabled:[false,true],progressOverlayMode:['summary','source'],progressOverlayOpacity:[20,100,60],progressOverlayWidth:[240,1600,360],progressOverlayHeight:[160,1600,240],
     progressOverlayPosition:['top-left','bottom-left','bottom-right','custom','top-right'],progressOverlayX:[-500,500,80],progressOverlayY:[-500,500,80],progressOverlayLocked:[false,true],progressLockShortcut:['Ctrl+Alt+P',''],progressPreviewToken:[1,0],

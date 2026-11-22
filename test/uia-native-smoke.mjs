@@ -30,6 +30,8 @@ try{
   const target={nativeWindowHandle:state.hwnd};
   const tree=await call('accessibility_tree',{...target,detailLevel:'full',maxDepth:5});
   assert.equal(tree.targetResponsive,true);assert.ok(tree.nodeCount>=3,JSON.stringify(tree));
+  assert.ok(Number.isInteger(tree.countedDepth) && tree.countedDepth > 0 && tree.countedDepth <= 5);
+  assert.equal(tree.structuralDepth,tree.countedDepth,'Native window levels all count toward maxDepth');
   const find=await call('find',{...target,query:'native needle'});assert.ok(find.results.length>0);assert.ok(find.results[0].patterns.includes('Value'));
   const info=await call('element_info',{...target,elementId:find.results[0].id,detailLevel:'full'});assert.equal(info.element.value,'native needle');
   const stale=await client.call('windows_computer_use_element_info',{...target,elementId:'uia:rt:42-999999999'});assert.equal(stale.isError,true);assert.match(stale.content[0].text,/stale/);

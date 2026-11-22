@@ -1,19 +1,19 @@
 {
-  "version": "0.6.2",
+  "version": "0.6.3",
   "measurement": "JSON.stringify({tools: tools/list.tools}); instructions measured separately; no token estimate",
   "modes": [
     {
       "mode": "full",
       "tools": 26,
-      "utf16CodeUnits": 27350,
-      "utf8Bytes": 27350,
+      "utf16CodeUnits": 28270,
+      "utf8Bytes": 28270,
       "instructionsUtf16CodeUnits": 2881
     },
     {
       "mode": "lite",
       "tools": 12,
-      "utf16CodeUnits": 13305,
-      "utf8Bytes": 13305,
+      "utf16CodeUnits": 13639,
+      "utf8Bytes": 13639,
       "instructionsUtf16CodeUnits": 2881
     },
     {

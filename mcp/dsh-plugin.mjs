@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_SETTINGS, normalizeSettings, enabledToolsForSettings, toolSelectionKey, repairStaleSettings } from './settings.mjs';
 import {createSettingsFields} from './settings-schema.mjs';
-import { atomicJson, atomicJsonAsync, DEFAULT_POWERSHELL } from './takeover.mjs';
+import { atomicJson, atomicJsonAsync } from './takeover.mjs';
 import { installActivity } from './activity.mjs';
 import { systemLocale } from './overlay-strings.mjs';
 import { randomBytes } from 'node:crypto';
@@ -15,7 +15,9 @@ import { installHostPolicy } from './policy.mjs';
 import { settingsMode,findOwnEntry,bridgeSupport,bridgeDiagnostics } from './host-compat.mjs';
 import { installCallLog, createDiagnosticsHandler, exportDiagnostics, DIAGNOSTICS_ROUTE, readInstallSpec } from './diagnostics.mjs';
 import { createHypervSetupHandler, HYPERV_ROUTE } from './hyperv-relay.mjs';
-import { backgroundDesktopArgs, startBackgroundDesktop } from './background-desktop.mjs';
+import { createRestartHandler, RESTART_ROUTE } from './restart.mjs';
+import { createUpdateReadyHandler, UPDATE_READY_ROUTE } from './update-guard.mjs';
+import { backgroundRequestFile, startBackgroundDesktop } from './background-desktop.mjs';
 
 export const name = 'windows-computer-use';
 export const inject = ['tools'];
@@ -45,7 +47,7 @@ Object.defineProperty(Config,'~standard',{value:{...validation,validate(input){
   let result=validation.validate(input),repaired=[];
   if(result.issues){
     const repair=repairStaleSettings(input);
-    if(repair.repaired.length){const retry=validation.validate(repair.value);if(!retry.issues){result=retry;repaired=repair.repaired;}}
+    if(repair.repaired.length||repair.migrated){const retry=validation.validate(repair.value);if(!retry.issues){result=retry;repaired=repair.repaired;}}
   }
   if(!result.issues){
     try { normalizeSettings(result.value); } catch(error) { return {issues:[{message:error.message}]}; }
@@ -135,15 +137,11 @@ export function readDshLocale(settings) {
 export function bridgeConfig(config = {}, runtime = {}) {
   const settings = normalizeSettings(config);
   const isolated = settings.desktopTarget === 'hyperv';
-  const background = settings.desktopTarget === 'background';
-  if (background && !runtime.backgroundName) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the background desktop is not ready.');
-  const browser = background ? { ...settings, browserVisible:false, browserSignIn:false } : settings;
   const entry = fileURLToPath(new URL(isolated ? './hyperv-relay.mjs' : './server.mjs', import.meta.url));
   return {
-    serverName: 'wincu', transport: 'stdio', command: background ? DEFAULT_POWERSHELL : process.execPath,
-    args: background ? [...backgroundDesktopArgs(runtime.backgroundName),
-      '-Executable', process.execPath, '-EntryPath', entry] : [entry],
-    env: { ELECTRON_RUN_AS_NODE: '1', WCU_IMAGE_MODE: 'file', WCU_BROWSER_ATTACH_USER: browser.browserAttachUser?'1':'0', WCU_BROWSER_HEADLESS: browser.browserVisible?'0':'1', WCU_BROWSER_APP: browser.browserApp, WCU_BROWSER_SIGNIN: browser.browserSignIn?'1':'0', WCU_TOOL_MODE: settings.toolPreset==='lazy'?'lazy':settings.mode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(browser),
+    serverName: 'wincu', transport: 'stdio', command: process.execPath, args: [entry],
+    env: { ELECTRON_RUN_AS_NODE: '1', WCU_IMAGE_MODE: 'file', WCU_BROWSER_ATTACH_USER: settings.browserAttachUser?'1':'0', WCU_BROWSER_HEADLESS: settings.browserVisible?'0':'1', WCU_BROWSER_APP: settings.browserApp, WCU_BROWSER_SIGNIN: settings.browserSignIn?'1':'0', WCU_TOOL_MODE: settings.toolPreset==='lazy'?'lazy':settings.mode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(settings),
+      ...(runtime.backgroundFile && !isolated ? {WCU_BACKGROUND_FILE:runtime.backgroundFile} : {}),
       ...(runtime.approvalSecret ? {WCU_APPROVAL_SECRET: runtime.approvalSecret,WCU_APPROVAL_LEDGER:runtime.approvalLedger, WCU_HOST_PID: String(process.pid),WCU_HOST_EXECUTABLE:process.execPath, WCU_HOST_PORTS: (runtime.hostPorts ?? []).join('|'), WCU_HOST_PORT_FILE:runtime.hostPortFile, WCU_USER_TABS_FILE:runtime.userTabsFile} : {}),
       ...(runtime.configFile ? { WCU_CONFIG_FILE: runtime.configFile, WCU_STATE_FILE: runtime.stateFile } : {}),
       ...(runtime.activityFile ? {WCU_ACTIVITY_FILE:runtime.activityFile}: {}),
@@ -161,7 +159,7 @@ export async function apply(ctx, config) {
   // Without the pipe the directory falls back to the PID rule; never block loading.
   const releaseControlDir=await holdControlDir(root).catch(error=>{ctx.logger.warn('dsh-computer-use-win: control directory pipe unavailable: %s',error?.message??error);return ()=>{};});
   ctx.effect(()=>releaseControlDir);
-  const runtime = { configFile: path.join(root,'settings.json'), stateFile: path.join(root,'state.json'), activityFile:path.join(root,'activity.json'), layoutFile:path.join(root,'overlay-layout.json'), userTabsFile:path.join(root,'user-tabs.json'), getLocale: () => getLocale() };
+  const runtime = { configFile: path.join(root,'settings.json'), stateFile: path.join(root,'state.json'), backgroundFile: path.join(root,'background-desktop.json'), activityFile:path.join(root,'activity.json'), layoutFile:path.join(root,'overlay-layout.json'), userTabsFile:path.join(root,'user-tabs.json'), getLocale: () => getLocale() };
   runtime.approvalSecret = randomBytes(32).toString('base64url');
   runtime.approvalLedger=path.join(root,'approval-grants.json');
   runtime.hostPorts = [];
@@ -209,6 +207,14 @@ export async function apply(ctx, config) {
       }); }
       catch (error) { owner.logger.warn('dsh-computer-use-win: the Hyper-V setup route is unavailable: %s', error?.message ?? error); return () => {}; }
     });
+    if (typeof owner.webServer.register === 'function') owner.effect(() => {
+      try { return owner.webServer.register({ kind: 'exact', path: RESTART_ROUTE, handler: createRestartHandler({ logger: owner.logger }) }); }
+      catch (error) { owner.logger.warn('dsh-computer-use-win: the restart route is unavailable: %s', error?.message ?? error); return () => {}; }
+    });
+    if (typeof owner.webServer.register === 'function') owner.effect(() => {
+      try { return owner.webServer.register({ kind: 'exact', path: UPDATE_READY_ROUTE, handler: createUpdateReadyHandler({ logger: owner.logger }) }); }
+      catch (error) { owner.logger.warn('dsh-computer-use-win: the update check route is unavailable: %s', error?.message ?? error); return () => {}; }
+    });
   });
   installHostPolicy(ctx, runtime);
   // The MCP server polls these files until DSH has closed its connection, which
@@ -233,7 +239,7 @@ export async function apply(ctx, config) {
   if (liveAdapters.size > 1) ctx.logger.warn('dsh-computer-use-win: %d entries of this plugin run in one profile, and DSH keeps only one set of mcp__wincu tools. Remove the extra entry from dsh.profile.bundles in the profile package.json or from its cordis.patch.yml.', liveAdapters.size);
   let desired = normalizeSettings(config), desiredJson = JSON.stringify(desired), desiredKey = toolSelectionKey(desired), lastWrittenConfigJson = desiredJson;
   let runningSelection, connection, stopped = false;
-  const desktopRoute = settings => JSON.stringify([settings.desktopTarget, settings.desktopTarget === 'hyperv' ? settings.hypervVm : '']);
+  const desktopRoute = settings => JSON.stringify(settings.desktopTarget === 'hyperv' ? ['hyperv', settings.hypervVm] : ['local', '']);
   let runningDesktop;
   runtime.desktopRoutePending = () => runningDesktop !== desktopRoute(desired);
   runtime.usesGuestLoopback = () => desired.desktopTarget === 'hyperv';
@@ -263,31 +269,55 @@ export async function apply(ctx, config) {
   };
   ctx.effect(() => () => { clearTimeout(localeRefresh); localeRefresh = undefined; });
   let updates = Promise.resolve();
+  // Low disruption opens the apps DSH starts on a hidden desktop of this
+  // Windows session. The desktop belongs to this adapter, not to the server,
+  // so its apps outlive an MCP restart (DSH restarts MCP for tool and browser
+  // settings). It opens when the server first asks for it (a request file next
+  // to backgroundFile, which then holds its name) and closes with DSH or when
+  // the virtual machine is chosen; closing it ends the apps on it.
   let backgroundOwner;
+  const backgroundRequest = backgroundRequestFile(runtime.backgroundFile);
   const closeBackground = () => {
     const owner = backgroundOwner;
     backgroundOwner = undefined;
+    try { rmSync(runtime.backgroundFile, { force: true }); } catch {}
     return owner?.dispose();
   };
-  async function prepareBridge(settings) {
-    if (settings.desktopTarget !== 'background') return bridgeConfig(settings, runtime);
-    if (!backgroundOwner) {
-      const owner = startBackgroundDesktop(error => {
-        if (backgroundOwner !== owner) return;
-        backgroundOwner = undefined;
-        runningSelection = undefined;
-        logError(error);
-      });
-      backgroundOwner = owner;
+  const openBackground = () => {
+    const owner = startBackgroundDesktop(error => {
+      if (backgroundOwner !== owner) return;
+      void closeBackground();
+      logError(error);
+    });
+    backgroundOwner = owner;
+    owner.ready.then(() => {
+      if (backgroundOwner === owner) atomicJson(runtime.backgroundFile, { name: owner.name });
+    }).catch(error => {
+      if (backgroundOwner !== owner) return;
+      backgroundOwner = undefined;
+      try { atomicJson(runtime.backgroundFile, { error: String(error?.message ?? error).slice(0, 400), at: Date.now() }); } catch {}
+      logError(error);
+    });
+  };
+  async function prepareBridge(settings) { return bridgeConfig(settings, runtime); }
+  // A settings change starts a new bridge rather than updating the running one.
+  // cordis 4.0 (DSH Desktop 2.0) drops the promise of the restart that
+  // Fiber.update() begins, so a desktop that cannot start, such as a VM whose
+  // connection is not configured yet, rejected it unhandled, and DSH's
+  // fail-loud handler then quit the host. Awaiting the new bridge keeps the
+  // failure on this path, where it is logged and retried.
+  async function replaceBridge(options) {
+    const previous = connection;
+    connection = undefined;
+    if (previous) {
+      try { await previous.dispose(); } catch (error) { logError(error); }
+      // Unloading finishes after dispose() returns, and the bridge's server
+      // name is free only then.
+      try { await previous.await(); } catch {}
     }
-    const owner = backgroundOwner;
-    try { await owner.ready; }
-    catch (error) {
-      if (backgroundOwner === owner) await closeBackground();
-      throw error;
-    }
-    if (backgroundOwner !== owner) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the desktop owner exited during startup.');
-    return bridgeConfig({ ...settings, failOnStartupError:true }, { ...runtime, backgroundName:owner.name });
+    if (stopped) return;
+    connection = ctx.plugin(bridge, options);
+    await connection;
   }
   let saveOverlayPatch, settingsSource = 'entry', namespaceScope, layoutId, layoutStatKey = '', layoutSaving = false, layoutRetry = { id: undefined, at: 0, delay: 0 };
   let selectionPending=0,selectionRetry={at:0,delay:0};
@@ -335,12 +365,12 @@ export async function apply(ctx, config) {
       if (required) nextConfig.failOnStartupError = true;
       const nextBridge = await prepareBridge(nextConfig);
       if (stopped) return;
+      // The virtual machine cannot reach the hidden desktop's apps: choosing it
+      // closes them, whether or not the machine connects.
+      if (latest.desktopTarget === 'hyperv') await closeBackground();
       runningSelection = runningDesktop = undefined;
-      await connection.update(nextBridge, true);
-      await connection.await();
-      if (latest.desktopTarget === 'background' && !backgroundOwner) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the desktop owner exited during reconnect.');
+      await replaceBridge(nextBridge);
       runningSelection = latestSelection; runningDesktop = desktopRoute(latest);selectionRetry={at:0,delay:0};
-      if (latest.desktopTarget !== 'background' && desired.desktopTarget !== 'background') await closeBackground();
     }catch(error){
       const delay=Math.min((selectionRetry.delay||250)*2,60000);selectionRetry={at:Date.now()+delay,delay};throw error;
     }finally{selectionPending--;}
@@ -381,6 +411,12 @@ export async function apply(ctx, config) {
           }
         }
       }catch(error){if(error.code!=='ENOENT')logError(error);}
+      try {
+        if (existsSync(backgroundRequest)) {
+          rmSync(backgroundRequest, { force: true });
+          if (!backgroundOwner && desired.desktopTarget !== 'hyperv' && !stopped) openBackground();
+        }
+      } catch (error) { logError(error); }
       // Older validators keep plain values rather than volatile references.
       // The Loader still commits the validated raw options for those hosts.
       // The raw entry still holds any value the validator reset; reset it here too.
@@ -435,7 +471,6 @@ export async function apply(ctx, config) {
     connection = ctx.plugin(bridge, options);
     return connection;
   }).then(() => {
-    if (initial.desktopTarget === 'background' && !backgroundOwner && !stopped) throw new Error('WCU_BACKGROUND_DESKTOP_UNAVAILABLE: the desktop owner exited during startup.');
     runningSelection = initialSelection;
     runningDesktop = desktopRoute(initial);
   }).finally(() => { firstBridgeStartupMs = Math.round(performance.now() - startupAt); });

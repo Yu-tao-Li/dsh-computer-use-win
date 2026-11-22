@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 $tokens=$null; $parseErrors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/windows-uia.ps1'),[ref]$tokens,[ref]$parseErrors)
 if($parseErrors.Count){throw ($parseErrors | Out-String)}
-foreach($name in @('Get-Prop','Invoke-Safe','Convert-Rect','Get-WindowProcessId','Get-RootWindow','Get-RootWindowAt','Get-WorkWindow','Set-WorkWindow','Resolve-InputWindow','Start-Input','Assert-PointOnTarget','Complete-Input','Assert-InFront','Assert-InputProcess','Assert-NativeInputTarget','Test-InputWindow','Invoke-Guarded','Get-KeyDestination','Get-ControlTypeName')) {
+foreach($name in @('Get-Prop','Invoke-Safe','Convert-Rect','Get-WindowProcessId','Get-RootWindow','Get-RootWindowAt','Get-WorkWindow','Set-WorkWindow','Resolve-InputWindow','Start-Input','Assert-PointOnTarget','Complete-Input','Complete-BorrowedInput','Stop-InputHold','Assert-InFront','Assert-InputProcess','Assert-NativeInputTarget','Test-InputWindow','Invoke-Guarded','Get-KeyDestination','Get-ControlTypeName')) {
   $f=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
   if($null -eq $f){throw "missing function $name"}
   . ([scriptblock]::Create($f.Extent.Text))

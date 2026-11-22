@@ -5,6 +5,7 @@
 const zh = {
   // Takeover banner.
   indicatorDefault: 'DSH 正在控制电脑',
+  indicatorFast: 'DSH 正在前台操作，请别动鼠标键盘',
   stopHint: '停止',
   // Overlay header and status words.
   headerWorking: 'DSH · 第 {0} 步 · {1}',
@@ -83,6 +84,7 @@ const zh = {
 
 const en = {
   indicatorDefault: 'DSH is controlling your computer',
+  indicatorFast: 'DSH is working in the foreground. Leave the mouse and keyboard alone',
   stopHint: 'Stop',
   headerWorking: 'DSH · Step {0} · {1}',
   headerDone: 'DSH · Done · {0} steps{1}',
@@ -154,6 +156,7 @@ const en = {
 
 const ru = {
   indicatorDefault: 'DSH управляет компьютером',
+  indicatorFast: 'DSH работает на переднем плане. Не трогайте мышь и клавиатуру',
   stopHint: 'Стоп',
   headerWorking: 'DSH · шаг {0} · {1}',
   headerDone: 'DSH · готово · шагов: {0}{1}',
@@ -266,8 +269,9 @@ export function formatText(template, ...values) {
 // current language: an unchanged default follows the language.
 const DEFAULT_INDICATOR_TEXTS = new Set(Object.values(OVERLAY_STRINGS).map(table => table.indicatorDefault));
 export const isDefaultIndicatorText = text => !String(text ?? '').trim() || DEFAULT_INDICATOR_TEXTS.has(String(text).trim());
-export function indicatorText(text, locale) {
-  return isDefaultIndicatorText(text) ? overlayStrings(locale).indicatorDefault : text;
+// Under Foreground the default banner asks the user to leave the input alone.
+export function indicatorText(text, locale, fast = false) {
+  return isDefaultIndicatorText(text) ? overlayStrings(locale)[fast ? 'indicatorFast' : 'indicatorDefault'] : text;
 }
 
 // The words the C# helper draws itself; it receives them with every command.
