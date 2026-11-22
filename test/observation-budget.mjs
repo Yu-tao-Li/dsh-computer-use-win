@@ -23,7 +23,11 @@ function window(variant = 0) {
   if (variant) panes.push(node('uia:rt:42-new', 'Button', 'Added later', 1));
   return node('uia:rt:42', 'Window', 'Fixture window', 0, panes, { nativeWindowHandle: 4242, processId: 7 });
 }
-const treeResult = (variant = 0) => ({ ok: true, scope: 'active_window', viewMode: 'control', includeOffscreen: false, detailLevel: 'compact', nodeCount: 761, truncated: false, durationMs: 12, tree: window(variant), treeTimeoutMs: 5000, targetResponsive: true });
+const depths = { countedDepth: 3, structuralDepth: 4 };
+const treeResult = (variant = 0) => ({ ok: true, scope: 'active_window', viewMode: 'control', includeOffscreen: false, detailLevel: 'compact', nodeCount: 761, ...depths, truncated: false, durationMs: 12, tree: window(variant), treeTimeoutMs: 5000, targetResponsive: true });
+function assertDepths({ countedDepth, structuralDepth }, expected = depths) {
+  assert.deepEqual({ countedDepth, structuralDepth }, expected);
+}
 
 // Summary: id, type, name and states only.
 const summary = summarizeTree(window());
@@ -63,9 +67,11 @@ assert.ok(bytesOf(tight) <= 4000, 'cut result fits: ' + bytesOf(tight));
 assert.equal(saved.at(-1).tree.children.length, 40, 'the saved copy is the whole original result');
 assert.equal(saved.length, 1, 'only a cut saves a file');
 const oversizedName = '观察'.repeat(2000);
-const oversizedRoot = { ...treeResult(), tree: { ...window(), name: oversizedName, children:[] } };
+const rootDepths = { countedDepth: 0, structuralDepth: 0 };
+const oversizedRoot = { ...treeResult(), ...rootDepths, tree: { ...window(), name: oversizedName, children:[] } };
 const rootPointer = await budgetTree(oversizedRoot, 2000, { save });
 assert.ok(bytesOf(rootPointer) <= 2000 && rootPointer.budget.steps.includes('fileOnly'));
+assertDepths(rootPointer, rootDepths);
 assert.equal(saved.at(-1).tree.name, oversizedName, 'the oversize root is still accessible from its file');
 
 // OCR: word boxes, then the joined text, then lines; the file holds them all.
@@ -163,6 +169,10 @@ try {
   assert.equal(other.delta.fallback, 'targetChanged', 'another detail level is another view');
   const snapshot = data(await call('snapshot', { nativeWindowHandle: 4242, detailLevel: 'summary', includeScreenshot: false }));
   assert.equal(snapshot.detailLevel, 'summary');
+  const budgetedSnapshot = data(await call('snapshot', { nativeWindowHandle: 4242, maxBytes: 4000, includeScreenshot: false }));
+  assert.deepEqual(budgetedSnapshot.budget.steps, ['summary', 'actionable', 'cut']);
+  for (const result of [plain, brief, budgeted, start, delta, other, snapshot, budgetedSnapshot]) assertDepths(result);
+  assert.equal(brief.tree.children[0].depth, undefined, 'summary depth stays at the result level');
   const words = data(await call('ocr', { nativeWindowHandle: 4242, maxBytes: 4000 }));
   assert.deepEqual(words.budget.steps, ['noWordBoxes', 'noJoinedText', 'cutLines']);
   assert.equal(data(await call('ocr', { nativeWindowHandle: 4242 })).lines[0].words.length, 8);
@@ -174,6 +184,7 @@ try {
   const boundedDelta = data(boundedResponse);
   assert.ok(Buffer.byteLength(boundedResponse.content[0].text) <= 2000, 'tree delta cannot bypass maxBytes');
   assert.equal(boundedDelta.delta.fallback, 'maxBytes');
+  assertDepths(boundedDelta);
   assert.equal(JSON.parse(await readFile(boundedDelta.budget.fullResultPath,'utf8')).tree.children.at(-1).name, oversizedName);
   assert.equal(data(await call('accessibility_tree', { nativeWindowHandle:4242, treeDeltaBase:boundedDelta.treeId })).delta.fallback, 'truncated', 'a reduced tree is not a complete delta baseline');
   assert.match((await call('accessibility_tree', { nativeWindowHandle: 4242, treeDeltaBase: 'yesterday' })).content[0].text, /INVALID_ARGUMENTS/);

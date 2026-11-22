@@ -314,6 +314,8 @@ Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定
 - **重读时只要变化。** 用 `accessibility_tree` 传 `treeDeltaBase:"start"` 取得树和 `treeId`。重读同一目标时，把这个 ID 传给 `treeDeltaBase`，就会收到新增、删除和变化的控件，以及新的 `treeId`。要比较控件的值，用 `detailLevel:"full"`。找不到基准、窗口或视图参数变了、任一树被截断，或变化超过 40% 时，会退回树结果并说明 `delta.fallback` 的原因。增量本身超出 `maxBytes` 也会回退，再按预算缩减。预算缩减后的树不能作为增量基准。
 - **给 OCR 设预算。** `ocr` 的 `maxBytes` 同样从 2,000 起。超出时先省掉逐词坐标，再省掉与逐行结果重复的合并文本，最后从末尾截行。截断或仅返回文件时，`budget.fullResultPath` 指向完整结果。
 
+Windows UI Automation 的树与快照在顶层返回 `countedDepth`（计入 `maxDepth` 的最大层数）和 `structuralDepth`（从根算起的最大实际层数），两者都描述精简、截断或生成增量前后端读到的树。
+
 只想确认某个控件有没有变化，用 `find` 定点查找，或用 `wait_for` 等待目标状态。参数与返回值见 [MCP 工具说明](docs/wiki/mcp-tools.md#accessibility_tree)。
 
 ### 8. 常见问题
@@ -684,6 +686,8 @@ The Chromium lane reads and operates same-origin, cross-origin and nested iframe
 - **Set a tree byte budget.** `maxBytes` starts at 2,000 and limits the UTF-8 JSON response. Screenshots are separate. Over the limit, the tool summarizes the tree first, then keeps actionable controls and their ancestors, then cuts the tree by level. If it cuts the tree, `budget.fullResultPath` points to the complete result. If the remaining content still cannot fit, the response gives the file path.
 - **Read just the changes.** Pass `treeDeltaBase:"start"` to `accessibility_tree` to get a tree and `treeId`. Pass that ID as `treeDeltaBase` when reading the same target again to get added, removed and changed controls and a new `treeId`. Use `detailLevel:"full"` to compare control values. A missing baseline, a different window or view settings, a truncated tree, or more than 40% of nodes changing falls back to a tree with the reason in `delta.fallback`. A delta over `maxBytes` also falls back to a tree reduced to fit the budget. A tree reduced by the budget cannot serve as a delta baseline.
 - **Set an OCR byte budget.** `ocr` also accepts `maxBytes` starting at 2,000. Over the limit, it drops word boxes first, then the combined text that repeats the lines, and finally lines from the end. If it cuts lines or returns only a file reference, `budget.fullResultPath` points to the complete result.
+
+Windows UI Automation trees and snapshots report `countedDepth` (the deepest level counted against `maxDepth`) and `structuralDepth` (the deepest actual level below the root) for the tree read by the backend before summarizing, trimming or computing a delta.
 
 To check whether one control changed, use `find` to locate it or `wait_for` to wait for the target state. See the [MCP tool reference](docs/wiki/mcp-tools.md#accessibility_tree) for arguments and results.
 

@@ -53,6 +53,8 @@ try{
     const names=node=>node?[node.name,...(node.children||[]).flatMap(names)]:[];
     const defaults=await call(client,'accessibility_tree',{nativeWindowHandle:ready.hwnd});
     assert.equal(defaults.webContent?.state,'ready');assert.ok(names(defaults.tree).includes('Fixture action'),'Default depth misses the page');
+    assert.ok(Number.isInteger(defaults.countedDepth) && defaults.countedDepth <= 6, 'Counted depth follows maxDepth');
+    assert.ok(Number.isInteger(defaults.structuralDepth) && defaults.structuralDepth > defaults.countedDepth, 'Chromium layout panes increase structural depth');
     const brokenLane=await makeClient(path.join(import.meta.dirname,'..'),powershell,'failed-agent',{
       WCU_BROWSER_LANE:'on',WCU_BROWSER_APP:'edge',WCU_BROWSER_EXE:process.execPath,
       WCU_BROWSER_PROFILE:path.join(artifacts,'failed-agent-profile'),WCU_BROWSER_SIGNIN:'0',
@@ -83,6 +85,8 @@ try{
     assert.equal(bounded.nodeCount,3);assert.equal(bounded.truncationReason,'maxNodes');
     const snap=await call(client,'snapshot',{...target,includeScreenshot:false,maxNodes:30,maxDepth:6});
     assert.equal(snap.targetResponsive,true);
+    assert.ok(Number.isInteger(snap.countedDepth) && snap.countedDepth <= 6);
+    assert.ok(Number.isInteger(snap.structuralDepth) && snap.structuralDepth >= snap.countedDepth);
     const budget=await call(client,'accessibility_tree',{...target,maxNodes:3000,maxDepth:12,treeTimeoutMs:100});
     assert.equal(budget.truncationReason,'timeBudget');assert.equal(budget.targetResponsive,true);
     const expected=pongs.length+1;

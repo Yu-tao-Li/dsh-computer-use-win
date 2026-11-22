@@ -111,6 +111,8 @@ Cheaper reads ([#97](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/97
 
 If a delta exceeds `maxBytes`, `delta.fallback: "maxBytes"` accompanies a tree reduced to fit the budget. A tree reduced by the budget is an incomplete baseline. A later delta based on it falls back with `truncated`. If a single node or the remaining OCR metadata still cannot fit, `budget.steps` includes `fileOnly` and `budget.fullResultPath` points to the complete result.
 
+Windows UI Automation results from `accessibility_tree` and `snapshot` include two top-level depths. `countedDepth` is the greatest depth charged against `maxDepth`. `structuralDepth` is the greatest actual level, as in each node's `depth` field, with the root at 0. The two values match in desktop scope. Both are 0 when the backend returns only the root or no tree. They describe the tree returned by the backend before `summary`, `maxBytes` or delta shaping and remain available even when the response carries only the complete result's file path. Browser outlines do not carry these fields.
+
 ### list_windows
 
 List top-level windows visible to Windows UI Automation, in Z order. Minimized windows are listed too, with `minimized: true` and `isOffscreen: true` and without a bounding box (Windows parks them at -32000,-32000); activate_window, or any input with that window as target, restores them. When more windows exist than `maxWindows`, the result has `truncated: true`. Windows on DSH's hidden desktop (see Launch an application) follow the user's, marked `desktop: "background"`, with a one-line `hiddenDesktop` note.

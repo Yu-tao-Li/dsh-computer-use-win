@@ -92,8 +92,8 @@ export async function spill(result, dir = SPILL_DIR) {
 // Even a single root name or auxiliary metadata can exceed the whole budget.
 // In that case the file is the only complete result that fits the contract.
 export function observationFileResult(result, maxBytes, fullResultPath) {
-  const { ok, action, scope, treeId, delta } = result;
-  return { ok, action, scope, treeId, ...(delta?.fallback ? { delta:{ base:delta.base, fallback:delta.fallback } } : {}),
+  const { ok, action, scope, treeId, delta, countedDepth, structuralDepth } = result;
+  return { ok, action, scope, treeId, countedDepth, structuralDepth, ...(delta?.fallback ? { delta:{ base:delta.base, fallback:delta.fallback } } : {}),
     truncated:true, truncationReason:'maxBytes', budget:{ maxBytes, steps:[...(result.budget?.steps??[]),'fileOnly'], fullResultPath,
       hint:'Read fullResultPath for the result.' } };
 }

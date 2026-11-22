@@ -2938,6 +2938,9 @@ function Convert-Tree {
     return $null
   }
   if ($Count.Value -ge $MaxNodes -and $null -eq $Traversal.reason) { $Traversal.reason = "maxNodes" }
+  # Only count nodes kept in the result, after the Gecko leaf filter.
+  $Traversal.countedDepth = [Math]::Max([int]$Traversal['countedDepth'], $Level)
+  $Traversal.structuralDepth = [Math]::Max([int]$Traversal['structuralDepth'], $Depth)
   $info["children"] = @($childrenOut.ToArray())
   $script:ObservationOwner = $previousOwner
   return $info
@@ -3916,7 +3919,7 @@ function Get-TreeResult {
   $cache = New-ElementCacheRequest $detailLevel
   $isGecko = ($null -ne $window -and $window.className -eq 'MozillaWindowClass')
   $walker = New-Object System.Windows.Automation.TreeWalker -ArgumentList (Get-ViewCondition $viewMode $includeOffscreen -SkipOffscreenFilter:$isGecko)
-  $traversal = @{watch=$stopwatch; budgetMs=$budgetMs; cache=$cache; walker=$walker; reason=$null; error=$null; browserLayout=($Scope -ne 'desktop'); pruneGeckoOffscreen=($isGecko -and -not $includeOffscreen)}
+  $traversal = @{watch=$stopwatch; budgetMs=$budgetMs; cache=$cache; walker=$walker; reason=$null; error=$null; browserLayout=($Scope -ne 'desktop'); pruneGeckoOffscreen=($isGecko -and -not $includeOffscreen); countedDepth=0; structuralDepth=0}
   $tree = $null
   $count = 0
   $pages = $null
@@ -3947,6 +3950,7 @@ function Get-TreeResult {
   $result = [ordered]@{
     ok = $true; scope = $Scope; viewMode = $viewMode; includeOffscreen = $includeOffscreen
     detailLevel = $detailLevel; nodeCount = $count; truncated = ($null -ne $traversal.reason)
+    countedDepth = $traversal.countedDepth; structuralDepth = $traversal.structuralDepth
     durationMs = [int]$stopwatch.ElapsedMilliseconds; tree = $tree
     treeTimeoutMs = $budgetMs; targetResponsive = $responsive
   }
