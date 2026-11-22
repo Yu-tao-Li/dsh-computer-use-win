@@ -1188,7 +1188,7 @@ function Get-HelperCacheDir {
         foreach($sid in @($identity.User,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
           $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
         }
-        if ($PSVersionTable.PSEdition -eq 'Core') { [void][IO.FileSystemAclExtensions]::CreateDirectory($dir,$acl) }
+        if ($PSVersionTable.PSEdition -eq 'Core') { [IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($dir),$acl) }
         else { [void][IO.Directory]::CreateDirectory($dir,$acl) }
       } finally { $identity.Dispose() }
     }

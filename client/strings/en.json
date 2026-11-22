@@ -300,6 +300,7 @@
   "modeQuietNote2": "Steps that need the mouse and keyboard borrow them briefly, right away: the window flashes forward and back, and your keys and clicks meanwhile are held, then replayed.",
   "modeQuietNote3": "DSH waits a moment while you hold a key or button, have input-method text not yet committed, or use a full-screen app.",
   "modeQuietNote4": "Quitting DSH closes the apps on the hidden desktop; anything unsaved there is lost.",
+  "moreNotes": "More details",
   "modeFast": "Foreground",
   "modeFastHint": "For when you step away: DSH keeps its window in front and uses the mouse and keyboard directly, the fastest way. Press Esc to stop.",
   "modeVm": "Virtual machine",

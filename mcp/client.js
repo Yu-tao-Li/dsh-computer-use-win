@@ -622,6 +622,7 @@ window.__ModuleLoader__.load({
     "modeQuietNote2": "必须用鼠标键盘的步骤马上做，只借一下：窗口闪到前面再退回去，你这期间按的键和鼠标动作先存住，随后原样补上。",
     "modeQuietNote3": "你正按着键、拼音还没上屏或在用全屏程序时，DSH 等一下再借。",
     "modeQuietNote4": "退出 DSH 时，后台桌面里的程序会一起关闭，没保存的内容会丢失。",
+    "moreNotes": "更多说明",
     "modeFast": "前台操作",
     "modeFastHint": "适合你暂时不用电脑时：DSH 把窗口放在最前面，直接用鼠标键盘，最快；按 Esc 停止。",
     "modeVm": "虚拟机",
@@ -951,6 +952,7 @@ window.__ModuleLoader__.load({
     "modeQuietNote2": "Steps that need the mouse and keyboard borrow them briefly, right away: the window flashes forward and back, and your keys and clicks meanwhile are held, then replayed.",
     "modeQuietNote3": "DSH waits a moment while you hold a key or button, have input-method text not yet committed, or use a full-screen app.",
     "modeQuietNote4": "Quitting DSH closes the apps on the hidden desktop; anything unsaved there is lost.",
+    "moreNotes": "More details",
     "modeFast": "Foreground",
     "modeFastHint": "For when you step away: DSH keeps its window in front and uses the mouse and keyboard directly, the fastest way. Press Esc to stop.",
     "modeVm": "Virtual machine",
@@ -1187,6 +1189,7 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] input[role=switch]:checked:after{transform:translateX(16px)}
       [data-wincu-settings] .wcu-field .wcu-text{width:min(190px,100%)}
       [data-wincu-settings] .wcu-detail>summary{padding:10px 0 8px}
+      [data-wincu-settings] .wcu-detail>.wcu-notice{margin-top:2px}
       [data-wincu-settings] .wcu-tool-detail{margin:12px 0 0;border:.5px solid var(--wcu-line-strong);border-radius:var(--dsw-radius-md,12px);padding:0 14px}
       [data-wincu-settings] .wcu-shortcut-value{flex-wrap:wrap;align-content:center;gap:2px;padding:4px;font-size:12px;line-height:1.4;color:var(--wcu-muted);text-align:center}
       [data-wincu-settings] .wcu-shortcut-value .wcu-key{min-width:22px;height:20px;padding:0 5px;font-size:10.5px}
@@ -1852,13 +1855,15 @@ window.__ModuleLoader__.load({
                 h('div',{className:'wcu-tool-grid'},...entries.map(([name])=>h('label',{className:'wcu-tool-item',key:name,title:'windows_computer_use_'+name},h('input',{type:'checkbox',id:idPrefix+'-tool-'+name,'data-wincu-tool':name,checked:draft.enabledTools.includes(name),disabled:customDisabled,onChange:e=>selectTools([name],e.target.checked)}),h('span',null,h('strong',null,t('tool_'+name)),h('small',null,t('toolHint_'+name)))))));})))),
         h('section',{className:'wcu-section','aria-labelledby':idPrefix+'-desktop-title'},
           head(idPrefix+'-desktop-title','workMode',null),
-          // Each mode says in one line when it fits; the one chosen keeps its
-          // notes or, for the virtual machine, its setup steps in view.
+          // Each mode says in one line when it fits. Low disruption's notes
+          // fold under More details; the virtual machine keeps its setup steps
+          // in view.
           item(picture(arts.desktop(draft.desktopTarget)),
             h('div',{className:'wcu-segment wcu-presets wcu-desktops',role:'radiogroup','aria-labelledby':idPrefix+'-desktop-title'},...DESKTOP_OPTIONS.map(([value,label])=>h('label',{key:value},
               h('input',{type:'radio',name:idPrefix+'-desktopTarget',id:idPrefix+'-desktopTarget-'+value,value,checked:draft.desktopTarget===value,disabled,onChange:()=>change('desktopTarget',value)}),t(label)))),
             h('p',{className:'wcu-hint','data-wincu-desktop-hint':true},t((DESKTOP_OPTIONS.find(([value])=>value===draft.desktopTarget)??DESKTOP_OPTIONS[0])[2]))),
-          draft.desktopTarget==='quiet'&&h('div',{className:'wcu-notice','data-wincu-quiet-notes':true},h('ul',null,...[1,2,3,4].map(n=>h('li',{key:n},t('modeQuietNote'+n))))),
+          draft.desktopTarget==='quiet'&&h('details',{className:'wcu-detail','data-wincu-quiet-notes':true},h('summary',null,t('moreNotes')),
+            h('div',{className:'wcu-notice'},h('ul',null,...[1,2,3,4].map(n=>h('li',{key:n},t('modeQuietNote'+n)))))),
           draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
             h('strong',null,t('hypervSetup')),
             h('ol',null,...[1,2,3,4,5,6].map(n=>h('li',{key:n,'data-tone':hypervMessage&&hypervMessage.step===n?hypervMessage.tone:undefined},t('hypervStep'+n),

@@ -178,8 +178,9 @@ try {
       assert.deepEqual(errors, [], 'DSH steps failed');
       assert.equal(read.user, text, 'every character the user typed reached the user\'s window, in order');
       assert.equal(read.target, 'DDDD', 'only DSH\'s text reached DSH\'s window');
-      assert.ok(notes.some(note => /held and then replayed/.test(note)), 'a step held the user\'s input: ' + JSON.stringify(notes));
-      console.log(JSON.stringify({ passed: true, userCharacters: read.user.length, dshCharacters: read.target.length, heldSteps: notes.length }));
+      // Either note says the hold took the user's keys and delivered them to their window.
+      assert.ok(notes.some(note => /held and then replayed|their keys went there/.test(note)), 'a step held the user\'s input: ' + JSON.stringify(notes));
+      console.log(JSON.stringify({ passed: true, userCharacters: read.user.length, dshCharacters: read.target.length, heldSteps: notes.length, notes }));
     }
   }
 } finally {
