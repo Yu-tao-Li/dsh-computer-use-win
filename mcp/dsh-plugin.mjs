@@ -16,6 +16,7 @@ import { settingsMode,findOwnEntry,bridgeSupport,bridgeDiagnostics } from './hos
 import { installCallLog, createDiagnosticsHandler, exportDiagnostics, DIAGNOSTICS_ROUTE, readInstallSpec } from './diagnostics.mjs';
 import { createHypervSetupHandler, HYPERV_ROUTE } from './hyperv-relay.mjs';
 import { createRestartHandler, RESTART_ROUTE } from './restart.mjs';
+import { createUpdateReadyHandler, UPDATE_READY_ROUTE } from './update-guard.mjs';
 import { backgroundRequestFile, startBackgroundDesktop } from './background-desktop.mjs';
 
 export const name = 'windows-computer-use';
@@ -209,6 +210,10 @@ export async function apply(ctx, config) {
     if (typeof owner.webServer.register === 'function') owner.effect(() => {
       try { return owner.webServer.register({ kind: 'exact', path: RESTART_ROUTE, handler: createRestartHandler({ logger: owner.logger }) }); }
       catch (error) { owner.logger.warn('dsh-computer-use-win: the restart route is unavailable: %s', error?.message ?? error); return () => {}; }
+    });
+    if (typeof owner.webServer.register === 'function') owner.effect(() => {
+      try { return owner.webServer.register({ kind: 'exact', path: UPDATE_READY_ROUTE, handler: createUpdateReadyHandler({ logger: owner.logger }) }); }
+      catch (error) { owner.logger.warn('dsh-computer-use-win: the update check route is unavailable: %s', error?.message ?? error); return () => {}; }
     });
   });
   installHostPolicy(ctx, runtime);

@@ -2,6 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, statSync } from 'node:fs';
 import { mkdir, writeFile, rename, unlink } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_SETTINGS, normalizeSettings } from './settings.mjs';
@@ -21,6 +22,11 @@ async function readControl(file) {
   }
 }
 const helperScript = fileURLToPath(new URL('../scripts/windows-takeover.ps1', import.meta.url));
+// Child processes start in the user's home folder, never inside this package.
+// A process whose working folder is inside the plugin (or one of its child
+// folders) keeps the plugin market from replacing the package, and a failed
+// replacement can cost the plugin its place in the profile (update-guard.mjs).
+export const WORK_DIR = os.homedir();
 export const DEFAULT_POWERSHELL=process.platform==='win32'
   ? path.win32.join(process.env.SystemRoot||process.env.WINDIR||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe')
   : 'powershell.exe';
@@ -373,7 +379,7 @@ export class TakeoverControl {
       const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-File', windowsScript(helperScript), '-CancelEvent', this.eventName];
       if (this.testMode) args.push('-TestMode');
       const helperEnv={...process.env};delete helperEnv.WCU_APPROVAL_SECRET;delete helperEnv.WCU_APPROVAL_LEDGER;
-      const child = this.child = spawn(this.powershell, args, { cwd: path.dirname(helperScript), env:windowsEnv(helperEnv,Object.keys(helperEnv).filter(name=>name.startsWith('WCU_'))), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      const child = this.child = spawn(this.powershell, args, { cwd: WORK_DIR, env:windowsEnv(helperEnv,Object.keys(helperEnv).filter(name=>name.startsWith('WCU_'))), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       const startupFailure = error => {
         clearTimeout(deadline);
         reject(error);

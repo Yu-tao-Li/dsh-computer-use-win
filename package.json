@@ -33,6 +33,7 @@
     "mcp/settings-schema.mjs",
     "mcp/settings.mjs",
     "mcp/takeover.mjs",
+    "mcp/update-guard.mjs",
     "scripts/windows-uia.ps1",
     "scripts/background-desktop.ps1",
     "scripts/hyperv-desktop.ps1",

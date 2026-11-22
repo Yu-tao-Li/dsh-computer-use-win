@@ -4056,7 +4056,10 @@ function Invoke-LaunchApp {
   $before = @(Get-NativeWindowList -MaxWindows 1000 | ForEach-Object { $_.ToArray() } | ForEach-Object { $_.nativeWindowHandle })
   if ($background) {
     [void](Test-Failsafe)
-    $working = if ($directory) { $directory } else { [IO.Directory]::GetCurrentDirectory() }
+    # Without a folder of its own the app starts in the user's profile folder,
+    # never in this plugin's: an app whose working folder is inside the plugin
+    # keeps the plugin market from replacing it (mcp/update-guard.mjs).
+    $working = if ($directory) { $directory } else { [Environment]::GetFolderPath('UserProfile') }
     $appPid = [WindowsComputerUseNative]::StartBackgroundProgram($resolved.target,$arguments,$working)
     if ($waitMs) { Start-Sleep -Milliseconds $waitMs }
     $observed = @(Get-NativeWindowList -MaxWindows 1000 | ForEach-Object { $_.ToArray() } | Where-Object { $before -notcontains $_.nativeWindowHandle -and $_.processId -eq $appPid })

@@ -7,7 +7,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { TakeoverControl, STOPPED, IN_WSL, linuxPath, windowsEnv, windowsScript, DEFAULT_POWERSHELL } from './takeover.mjs';
+import { TakeoverControl, STOPPED, IN_WSL, linuxPath, windowsEnv, windowsScript, DEFAULT_POWERSHELL, WORK_DIR } from './takeover.mjs';
 import { backgroundDesktopArgs, backgroundRequestFile, startBackgroundDesktop } from './background-desktop.mjs';
 import { TOOL_NAMES,LITE_TOOL_NAMES,normalizeEnabledTools,browserRoutingInstructions } from './settings.mjs';
 import { BrowserLane } from './browser.mjs';
@@ -927,7 +927,9 @@ function backendEnv(env) {
 
 function spawnBackend(desk = 'current', desktopName) {
   const options = {
-    cwd: pluginRoot,
+    // Outside the plugin, so the market can replace it (update-guard.mjs); apps
+    // the backend starts without a folder of their own start here too.
+    cwd: WORK_DIR,
     // Under WSL the backend reads the WCU_ variables only when WSLENV names them (#79).
     env: backendEnv({ ...process.env, WCU_CANCEL_EVENT: takeover.helperDisabled ? '' : takeover.eventName, WCU_READY_EVENT: takeover.helperDisabled ? '' : takeover.eventName+'-ready' }),
     stdio: ["pipe", "pipe", "pipe"],

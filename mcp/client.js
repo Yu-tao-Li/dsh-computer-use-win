@@ -601,6 +601,24 @@ window.__ModuleLoader__.load({
     "updateRestarting": "DSH 正在退出，稍后会自动重新打开。",
     "updateRestartingShort": "正在重启…",
     "updateRestartFailed": "DSH 没有重启。",
+    "updateStagePrepare": "正在准备更新…",
+    "updateStageCheck": "正在确认插件文件可以替换…",
+    "updateStageResolve": "正在查找安装包…",
+    "updateStageDownload": "正在下载安装包…",
+    "updateStageInstall": "正在安装…",
+    "updateStop": "停止更新",
+    "updateStopping": "正在停止…",
+    "updateStopInstallTitle": "插件市场正在替换插件文件，中途打断会弄坏插件，所以这一步不能停止。",
+    "updateStopLate": "已经开始安装，来不及停止了，稍等就好。",
+    "updateStopUnsupported": "这个版本的插件市场不支持中途停止，更新会继续。",
+    "updateStopped": "已停止更新，插件还是 v{version}。",
+    "updateLocked": "插件的文件夹正被别的程序占用，现在更新会失败，还可能弄坏插件，所以没有开始。请退出 DSH 再重新打开（后台桌面里的程序也会一起关掉），并关掉打开着这个文件夹的资源管理器或终端窗口，然后点“重试”。",
+    "updatePluginRemoved": "这次没有更新成功，插件市场还把插件从 DSH 里移除了。请退出 DSH 再重新打开，在插件市场搜索 dsh-computer-use-win 重新安装。",
+    "updateMarketFallback": "也可以在插件市场里更新：市场收录新版本比 npm 晚一些，可能要过一阵才看得到 v{version}。",
+    "updateOpenMarket": "打开插件市场的“已安装”",
+    "updateMarketManual": "没找到插件市场：请在 DSH 的“设置 → 插件市场 → 已安装”里更新。",
+    "updateMarketTitle": "插件市场",
+    "updateClose": "关闭",
     "report": "反馈问题",
     "reportTitle": "把诊断信息保存到下载文件夹，并打开下载文件夹和 GitHub 新建问题页面",
     "reportRunning": "导出中…",
@@ -931,6 +949,24 @@ window.__ModuleLoader__.load({
     "updateRestarting": "DSH is quitting and will open again shortly.",
     "updateRestartingShort": "Restarting…",
     "updateRestartFailed": "DSH did not restart.",
+    "updateStagePrepare": "Preparing the update…",
+    "updateStageCheck": "Checking that the plugin's files can be replaced…",
+    "updateStageResolve": "Finding the package…",
+    "updateStageDownload": "Downloading the package…",
+    "updateStageInstall": "Installing…",
+    "updateStop": "Stop update",
+    "updateStopping": "Stopping…",
+    "updateStopInstallTitle": "The plugin market is replacing the plugin's files. Interrupting would break the plugin, so this step cannot be stopped.",
+    "updateStopLate": "Installing has already begun and can no longer be stopped; it will finish shortly.",
+    "updateStopUnsupported": "This version of the plugin market cannot stop an update midway, so the update continues.",
+    "updateStopped": "Update stopped. The plugin is still v{version}.",
+    "updateLocked": "Another program is using the plugin's folder, so an update would fail and could break the plugin; it was not started. Quit and reopen DSH (this also closes the apps on the hidden desktop), close any File Explorer or terminal window open in that folder, then choose Retry.",
+    "updatePluginRemoved": "The update did not finish, and the plugin market also removed the plugin from DSH. Quit and reopen DSH, then search the plugin market for dsh-computer-use-win and install it again.",
+    "updateMarketFallback": "You can also update it in the plugin market, which lists new versions some time after npm, so v{version} may take a while to appear there.",
+    "updateOpenMarket": "Open Installed in the plugin market",
+    "updateMarketManual": "The plugin market was not found: update it under Settings → Plugin Market → Installed in DSH.",
+    "updateMarketTitle": "Plugin market",
+    "updateClose": "Close",
     "report": "Report a problem",
     "reportTitle": "Save diagnostics to your Downloads folder, then open that folder and GitHub's new-issue page",
     "reportRunning": "Exporting…",
@@ -1050,6 +1086,24 @@ window.__ModuleLoader__.load({
       @keyframes wcu-spin{to{transform:rotate(360deg)}}
       @media (prefers-reduced-motion:reduce){[data-wincu-settings] .wcu-spinner{animation:none}}
       [data-wincu-settings] .wcu-update-note{margin:6px 0 0;font-size:12px;line-height:1.5}
+      [data-wincu-settings] .wcu-update-note p{margin:0}
+      [data-wincu-settings] .wcu-update-note p+p{margin-top:4px}
+      [data-wincu-settings] .wcu-update-progress{margin:8px 0 0;padding:10px 12px 12px;border-radius:var(--dsw-radius-md,12px);background:var(--wcu-sunken);border:.5px solid var(--wcu-line);color:var(--wcu-muted)}
+      [data-wincu-settings] .wcu-update-progress-row{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12.5px;line-height:1.5}
+      [data-wincu-settings] .wcu-update-progress-row>span{min-width:0}
+      [data-wincu-settings] .wcu-update-bytes{font-variant-numeric:tabular-nums;white-space:nowrap}
+      [data-wincu-settings] .wcu-progress{position:relative;height:4px;margin-top:8px;border-radius:999px;background:color-mix(in srgb,var(--wcu-muted) 22%,transparent);overflow:hidden}
+      [data-wincu-settings] .wcu-progress>span{position:absolute;top:0;bottom:0;left:0;width:34%;border-radius:inherit;background:var(--wcu-accent);animation:wcu-indeterminate 1.3s ease-in-out infinite}
+      [data-wincu-settings] .wcu-progress[data-determinate]>span{animation:none;transition:width .3s}
+      @keyframes wcu-indeterminate{from{left:-34%}to{left:100%}}
+      @media (prefers-reduced-motion:reduce){[data-wincu-settings] .wcu-progress:not([data-determinate])>span{animation:none;width:100%;opacity:.45}}
+      [data-wincu-settings] .wcu-update-progress-note{margin:8px 0 0;font-size:12px;line-height:1.5}
+      [data-wincu-settings] .wcu-link-button{padding:0;border:0;background:none;color:var(--dsw-alias-label-link,#71a7ff);font:inherit;cursor:pointer}
+      [data-wincu-settings] .wcu-link-button:hover{text-decoration:underline}
+      [data-wincu-settings] dialog.wcu-dialog.wcu-market-dialog{width:min(980px,calc(100vw - 32px));height:min(760px,calc(100vh - 48px));padding:0;display:flex;flex-direction:column;overflow:hidden}
+      [data-wincu-settings] dialog.wcu-dialog.wcu-market-dialog:not([open]){display:none}
+      [data-wincu-settings] .wcu-market-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:.5px solid var(--wcu-line)}
+      [data-wincu-settings] .wcu-market-body{flex:1;min-height:0;overflow:auto}
       [data-wincu-settings] .wcu-header-actions{display:flex;gap:4px;align-items:center;margin-left:auto}
       [data-wincu-settings] .wcu-header-actions[data-compact]{gap:0;padding:1px;border:.5px solid var(--wcu-line-strong);border-radius:8px;background:transparent}
       [data-wincu-settings] .wcu-project-icon{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:0 8px;height:28px;color:var(--wcu-muted);border-radius:6px;font-size:12px;text-decoration:none;white-space:nowrap}
@@ -1403,7 +1457,7 @@ window.__ModuleLoader__.load({
       const source=found?.source==='npm'?'market':'help';
       // A newer version already on disk is an update waiting for a restart.
       const phase=compareVersions(installed,PLUGIN_VERSION)>0?'updated':compareVersions(latest,installed)>0?'available':latest?'latest':'unknown';
-      updateStore.set({phase,source,installed,latest,failure:null,waiting:null,checkedAt:Date.now(),restartRequired:phase==='updated',refreshRequired:false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
+      updateStore.set({phase,source,installed,latest,failure:null,waiting:null,notice:null,marketMissing:false,stage:null,bytes:null,stoppable:false,stopping:false,checkedAt:Date.now(),restartRequired:phase==='updated',refreshRequired:false,runtime:updateMarket?.runtime??null,restartSupported:source==='market'&&updateMarket?.restart?.supported===true&&typeof updateMarket.endpoints?.restart==='string'});
       if(phase==='updated')void probeRestart();
     }
     // Checks run on their own: once per DSH start, and again when the settings
@@ -1419,23 +1473,64 @@ window.__ModuleLoader__.load({
       })().finally(()=>{updateChecking=undefined;updateStore.set({checking:false});});
       return updateChecking;
     }
-    function failUpdate(failure){updateStore.set({phase:'failed',percent:null,waiting:null,failure:{code:String(failure?.code||'UPDATE_FAILED'),message:String(failure?.message||'').slice(0,300),retryable:failure?.retryable!==false}});}
+    function failUpdate(failure){updateStore.set({phase:'failed',percent:null,waiting:null,stage:null,bytes:null,stoppable:false,stopping:false,stopLate:false,stopUnsupported:false,notice:null,failure:{code:String(failure?.code||'UPDATE_FAILED'),message:String(failure?.message||'').slice(0,300),retryable:failure?.retryable!==false}});}
+    // Stop update. Each run has its own flag, and `wake` ends the wait it is in.
+    let updateRun=null;
+    const nap=(run,ms)=>new Promise(resolve=>{let timer;const done=()=>{clearTimeout(timer);if(run.wake===done)run.wake=null;resolve();};timer=setTimeout(done,ms);run.wake=done;});
+    // The step the market reports. pnpm resolves, downloads, then links (it
+    // swaps the plugin's folder) and builds; before pnpm starts, the market
+    // prepares. A stop is sent only before the swap: one during it leaves the
+    // old build half removed, and the market then drops the plugin.
+    function marketStage(operation){
+      const phase=operation?.state==='running'?operation.progress?.phase:null;
+      return phase==='resolving'?'resolve':phase==='downloading'?'download':phase==='linking'||phase==='building'?'install':'prepare';
+    }
+    // The public update API has no cancel. The market's own Cancel button posts
+    // here, and it stops pnpm.
+    async function cancelMarket(){
+      try{const {status}=await requestJson('/dsh-market/cancel',{method:'POST',body:{},timeoutMs:10000});return status===200?'sent':status===404||status===405?'unsupported':'retry';}
+      catch{return 'retry';}
+    }
     // One market operation: the request, then its progress until it ends.
-    async function runUpdateOperation(market,force){
+    async function runUpdateOperation(market,force,run){
       const {status,data}=await requestJson(market.endpoints.updates,{method:'POST',body:{packageName:UPDATE_PACKAGE,...(force?{force:true}:{})},timeoutMs:30000});
       let operation=data?.operation;
       if(status!==202||!operation?.operationId)return {failure:data?.failure??{code:status===409?'OPERATION_BUSY':'UPDATE_FAILED',message:data?.error||('HTTP '+status),retryable:status===409}};
       const id=operation.operationId,deadline=Date.now()+15*60000;
+      let swapping=false,cancel=null;
+      const poll=async()=>{
+        const polled=await requestJson(market.endpoints.operations+'?operationId='+encodeURIComponent(id),{timeoutMs:15000}).catch(()=>null);
+        if(polled?.status===404)return false;
+        if(polled?.data?.operation?.operationId===id)operation=polled.data.operation;
+        return true;
+      };
+      const show=()=>{
+        const stage=marketStage(operation);
+        // Once the swap begins the operation stays unstoppable, a rollback included.
+        if(stage==='install')swapping=true;
+        const progress=operation.progress??{},size=Number(progress.size),done=Number(progress.downloaded);
+        const bytes=!swapping&&stage==='download'&&size>0&&Number.isFinite(done)?{done:Math.max(0,Math.min(size,done)),total:size}:null;
+        const percent=bytes?Math.round(bytes.done/bytes.total*100):Number.isFinite(progress.percent)?Math.max(0,Math.min(100,Math.round(progress.percent))):null;
+        const stopping=run.stop&&!swapping&&cancel!=='unsupported';
+        updateStore.set({waiting:null,stage:swapping?'install':stage,bytes,percent,stoppable:!swapping&&cancel!=='unsupported',stopping,stopLate:run.stop&&swapping&&cancel!=='sent',stopUnsupported:run.stop&&cancel==='unsupported'});
+      };
+      show();
       while(!UPDATE_TERMINAL.includes(operation.state)){
         if(Date.now()>deadline)return {failure:{code:'UPDATE_STATUS_UNKNOWN'}};
-        await new Promise(resolve=>setTimeout(resolve,1000));
-        const polled=await requestJson(market.endpoints.operations+'?operationId='+encodeURIComponent(id),{timeoutMs:15000}).catch(()=>null);
-        if(polled?.status===404)return {failure:{code:'UPDATE_STATUS_UNKNOWN'}};
-        if(polled?.data?.operation?.operationId===id)operation=polled.data.operation;
-        const percent=operation.progress?.percent;
-        updateStore.set({percent:Number.isFinite(percent)?Math.max(0,Math.min(100,Math.round(percent))):null});
+        const cancelling=()=>run.stop&&!swapping&&cancel!=='sent'&&cancel!=='unsupported';
+        if(cancelling()){
+          // A fresh read right before the request: the cancel has to land before the swap.
+          if(!await poll())return {failure:{code:'UPDATE_STATUS_UNKNOWN'}};
+          show();
+          if(!swapping&&operation.state==='running')cancel=await cancelMarket();
+          show();
+        }
+        await nap(run,cancelling()?300:500);
+        if(!await poll())return {failure:{code:'UPDATE_STATUS_UNKNOWN'}};
+        show();
       }
-      if(operation.state!=='succeeded')return {failure:operation.failure??{code:operation.state==='cancelled'?'UPDATE_CANCELLED':'UPDATE_FAILED'}};
+      if(operation.state==='cancelled')return {cancelled:true};
+      if(operation.state!=='succeeded')return {failure:operation.failure??{code:'UPDATE_FAILED'}};
       return {operation};
     }
     // Tests shorten both waits below.
@@ -1443,15 +1538,36 @@ window.__ModuleLoader__.load({
     // The market runs one install at a time. A busy market is waited for
     // (every 5 s, up to 3 minutes) rather than reported.
     const UPDATE_BUSY_TRIES=36;
-    async function runWhenFree(market,force){
-      let result=await runUpdateOperation(market,force);
+    async function runWhenFree(market,force,run){
+      let result=await runUpdateOperation(market,force,run);
       for(let tries=0;result.failure?.code==='OPERATION_BUSY'&&tries<UPDATE_BUSY_TRIES;tries++){
-        updateStore.set({waiting:'busy'});
-        await new Promise(resolve=>setTimeout(resolve,updateWaitMs(5000)));
-        result=await runUpdateOperation(market,force);
+        updateStore.set({waiting:'busy',stoppable:true});
+        await nap(run,updateWaitMs(5000));
+        if(run.stop)return {stopped:true};
+        result=await runUpdateOperation(market,force,run);
       }
       updateStore.set({waiting:null});
       return result;
+    }
+    // Before the market swaps the plugin's folder, nothing may hold it open; the
+    // plugin checks by renaming it away and back (mcp/update-guard.mjs).
+    const UPDATE_READY_ROUTE='/dsh-computer-use-win/api/update-ready';
+    async function checkReplaceable(){
+      try{
+        const {status,data}=await requestJson(UPDATE_READY_ROUTE,{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:70000});
+        if(status===200&&data?.ready===true)return {};
+        if(status===200&&data?.ready===false)return {failure:{code:'UPDATE_LOCKED',message:String(data.code||''),retryable:true}};
+        // A host that serves no plugin routes updates as before.
+        if(status===404)return {};
+        return {failure:{code:'UPDATE_CHECK_FAILED',message:data?.error||('HTTP '+status),retryable:true}};
+      }catch{return {failure:{code:'UPDATE_CHECK_FAILED',retryable:true}};}
+    }
+    // A failed or stopped run can leave the market without the plugin (it drops
+    // one whose old files were already half replaced); the page then says how
+    // to get it back.
+    async function withInstallState(market,failure){
+      try{const {status}=await requestJson(market.endpoints.updates+'?name='+UPDATE_PACKAGE+'&force=1',{timeoutMs:30000});if(status===404)return {code:'PLUGIN_REMOVED',message:failure?.message,retryable:false};}catch{}
+      return failure;
     }
     // The market installs from its own registry, a mirror in some regions, which
     // can trail npm by a few minutes after a release. A click waits for it
@@ -1460,9 +1576,14 @@ window.__ModuleLoader__.load({
     async function startUpdate(){
       const state=updateStore.state,market=updateMarket;
       if(!market||state.source!=='market'||state.checking||!['available','failed'].includes(state.phase))return;
-      updateStore.set({phase:'updating',percent:null,failure:null,waiting:null});
+      const run={stop:false,wake:null},before=state.installed;
+      updateRun=run;
+      updateStore.set({phase:'updating',percent:null,failure:null,waiting:null,stage:'prepare',bytes:null,stoppable:true,stopping:false,stopLate:false,stopUnsupported:false,notice:null});
+      // Back to Update, saying the plugin is as it was.
+      const stopped=()=>updateStore.set({phase:'available',percent:null,waiting:null,stage:null,bytes:null,stoppable:false,stopping:false,stopLate:false,stopUnsupported:false,notice:{kind:'stopped',version:before}});
       try{
         const [checked,target]=await Promise.all([marketPackage(market),latestNpmVersion()]);
+        if(run.stop)return stopped();
         if(!target)return failUpdate({code:'NPM_CHECK_FAILED'});
         let found=checked;
         for(let checks=0;;checks++){
@@ -1471,13 +1592,26 @@ window.__ModuleLoader__.load({
           if(checks>0&&!found)return failUpdate({code:'UPDATE_FAILED'});
           // Another source, or a market ahead of npm, does not change by waiting.
           if((found&&(found.source!=='npm'||compareVersions(found.latestVersion,target)>0))||checks>=UPDATE_SYNC_CHECKS)return failUpdate({code:'MARKET_NOT_SYNCED'});
-          if(checks>0){updateStore.set({waiting:'sync'});await new Promise(resolve=>setTimeout(resolve,updateWaitMs(15000)));}
+          if(checks>0){updateStore.set({waiting:'sync'});await nap(run,updateWaitMs(15000));if(run.stop)return stopped();}
           found=await marketPackage(market,{fresh:true});
+          if(run.stop)return stopped();
         }
-        updateStore.set({waiting:null});
-        let result=await runWhenFree(market,false);
-        if(UPDATE_HOLD_CODES.includes(result.failure?.code))result=await runWhenFree(market,true);
-        if(result.failure)return failUpdate(result.failure);
+        updateStore.set({waiting:null,stage:'check'});
+        const ready=await checkReplaceable();
+        if(run.stop)return stopped();
+        if(ready.failure)return failUpdate(ready.failure);
+        updateStore.set({stage:'prepare'});
+        let result=await runWhenFree(market,false,run);
+        if(UPDATE_HOLD_CODES.includes(result.failure?.code)&&!run.stop)result=await runWhenFree(market,true,run);
+        if(result.stopped)return stopped();
+        if(result.cancelled){
+          // The plugin must be as it was before; the market says what it has now.
+          const now=await marketPackage(market,{fresh:true});
+          if(now&&compareVersions(now.installedVersion,before)===0)return stopped();
+          if(!now)return failUpdate(await withInstallState(market,{code:'UPDATE_CANCELLED'}));
+          return settleUpdateCheck({found:now,latest:target});
+        }
+        if(result.failure)return failUpdate(await withInstallState(market,result.failure));
         const {operation}=result;
         // The API asks each client to compare the installed version with the
         // version it offered before it reports success or offers a restart.
@@ -1486,9 +1620,40 @@ window.__ModuleLoader__.load({
         if(compareVersions(operation.installedVersion,target)>0&&!(compareVersions(await latestNpmVersion(),operation.installedVersion)>=0))return failUpdate({code:'UPDATE_STATUS_UNKNOWN'});
         const restartRequired=operation.outcome?.restartRequired===true;
         if(restartRequired)await probeRestart();
-        updateStore.set({phase:'updated',installed:operation.installedVersion,percent:null,restartRequired,refreshRequired:operation.outcome?.refreshRequired===true,dialog:true,restartFailed:false});
+        updateStore.set({phase:'updated',installed:operation.installedVersion,percent:null,stage:null,bytes:null,stoppable:false,stopping:false,restartRequired,refreshRequired:operation.outcome?.refreshRequired===true,dialog:true,restartFailed:false});
       }catch{failUpdate({code:'UPDATE_STATUS_UNKNOWN'});}
+      finally{if(updateRun===run)updateRun=null;}
     }
+    function stopUpdate(){
+      const run=updateRun,state=updateStore.state;
+      if(!run||run.stop||state.phase!=='updating'||!state.stoppable)return;
+      run.stop=true;
+      updateStore.set({stopping:true});
+      run.wake?.();
+    }
+    // The fallback when this button cannot update: the market's own panel on
+    // its Installed tab, searched for this plugin (market.render, the market's
+    // public client service). Without that service, its entry in the settings
+    // navigation and then its Installed tab.
+    let pageCtx=null;
+    function marketService(){
+      try{const market=pageCtx?.reflect?.get?.('market');return market&&typeof market.render==='function'?market:null;}catch{return null;}
+    }
+    const MARKET_LABELS=['插件市场','Plugin Market'],MARKET_INSTALLED=['已安装','Installed'];
+    function openMarketInstalled(){
+      if(marketService()){updateStore.set({marketDialog:true});return true;}
+      const nav=[...document.querySelectorAll('button[class*="navCell"]')].find(button=>MARKET_LABELS.includes(button.textContent.trim()));
+      if(!nav)return false;
+      nav.click();
+      let tries=0;
+      const timer=setInterval(()=>{
+        const tab=[...document.querySelectorAll('button,[role=tab]')].find(node=>!node.closest('[data-wincu-settings]')&&MARKET_INSTALLED.includes(node.textContent.trim()));
+        if(tab)tab.click();
+        if(tab||++tries>=40)clearInterval(timer);
+      },50);
+      return true;
+    }
+    const formatBytes=value=>value<1024?value+' B':value<1048576?Math.round(value/1024)+' KB':(value/1048576).toFixed(1)+' MB';
     // Who runs "Restart now": the plugin market, which restarts a host nothing
     // supervises, else this plugin, which restarts DSH Desktop (mcp/restart.mjs).
     // null: neither can, and the page says how to restart by hand.
@@ -1656,19 +1821,65 @@ window.__ModuleLoader__.load({
         :h('button',{type:'button',className:'wcu-small','data-wincu-report':'idle',title:t('reportTitle'),onClick:run},t('report'));
       return h(React.Fragment,null,button,state.dialog?h(ReportDialog,{t,dialog:state.dialog,onClose:()=>setState(current=>({...current,dialog:null}))}):null);
     }
-    // The one line below the title, only when an update needs a step from the
-    // user (a restart the market does not run) or did not finish.
+    // While an update runs: the step it is on, a bar (bytes while the package
+    // downloads, moving otherwise), and Stop update until the market starts
+    // replacing the plugin's files.
+    function UpdateProgress({t,state}){
+      const stage=state.waiting==='sync'?'sync':state.waiting==='busy'?'busy':state.stage||'prepare';
+      const text=t({sync:'updateSyncing',busy:'updateBusyWaiting',check:'updateStageCheck',prepare:'updateStagePrepare',resolve:'updateStageResolve',download:'updateStageDownload',install:'updateStageInstall'}[stage]||'updateRunning');
+      const bytes=stage==='download'?state.bytes:null;
+      return h('div',{className:'wcu-update-note wcu-update-progress','data-wincu-update-note':stage==='sync'?'syncing':stage==='busy'?'busy':'progress','data-wincu-update-stage':stage},
+        h('div',{className:'wcu-update-progress-row'},
+          h('span',{role:'status'},text,bytes?h('span',{className:'wcu-update-bytes','data-wincu-update-bytes':true},' '+formatBytes(bytes.done)+' / '+formatBytes(bytes.total)):null),
+          h('button',{type:'button',className:'wcu-small','data-wincu-update-stop':true,disabled:state.stopping||!state.stoppable,title:stage==='install'?t('updateStopInstallTitle'):undefined,onClick:stopUpdate},t(state.stopping?'updateStopping':'updateStop'))),
+        h('div',{className:'wcu-progress',role:'progressbar','aria-label':text,...(bytes?{'aria-valuemin':0,'aria-valuemax':100,'aria-valuenow':state.percent??0,'data-determinate':true}:{})},
+          h('span',{style:bytes?{width:(state.percent??0)+'%'}:undefined})),
+        state.stopLate?h('p',{className:'wcu-update-progress-note','data-wincu-update-stop-late':true},t('updateStopLate')):null,
+        state.stopUnsupported?h('p',{className:'wcu-update-progress-note','data-wincu-update-stop-unsupported':true},t('updateStopUnsupported')):null);
+    }
+    // The market's own panel in a dialog, on its Installed tab, searched for
+    // this plugin. Closing it checks the version again.
+    function MarketDialog({t}){
+      const ref=React.useRef(null);
+      React.useEffect(()=>{
+        const node=ref.current;if(!node)return;
+        const closed=()=>{updateStore.set({marketDialog:false});void checkUpdate({fresh:true});};
+        node.addEventListener('close',closed);
+        try{if(!node.open)node.showModal();}catch{node.setAttribute('open','');}
+        return ()=>node.removeEventListener('close',closed);
+      },[]);
+      const dismiss=()=>{const node=ref.current;if(node&&typeof node.close==='function'&&node.open)node.close();else{updateStore.set({marketDialog:false});void checkUpdate({fresh:true});}};
+      let panel=null;
+      try{panel=marketService()?.render({preferredSubsectionId:'installed:'+UPDATE_PACKAGE})??null;}catch{}
+      return h('dialog',{ref,className:'wcu-dialog wcu-market-dialog','data-wincu-market-dialog':true,'aria-label':t('updateMarketTitle')},
+        h('div',{className:'wcu-market-head'},h('strong',null,t('updateMarketTitle')),h('button',{type:'button',className:'wcu-small','data-wincu-market-close':true,onClick:dismiss},t('updateClose'))),
+        h('div',{className:'wcu-market-body'},panel));
+    }
+    // The one line below the title: the progress of an update, a step it needs
+    // from the user (a restart the market does not run), or why it did not finish.
     function UpdateNote({t}){
       const state=React.useSyncExternalStore(listener=>updateStore.subscribe(listener),()=>updateStore.state);
-      // A wait, for the market to pick up a fresh release or to finish another
-      // install, says why the update takes longer.
-      if(state.phase==='updating'&&state.waiting)return h('p',{className:'wcu-update-note','data-wincu-update-note':state.waiting==='busy'?'busy':'syncing'},t(state.waiting==='busy'?'updateBusyWaiting':'updateSyncing'));
-      if(state.phase==='updated'&&state.restartRequired&&state.restartVia===null)return h('p',{className:'wcu-update-note','data-wincu-update-note':'restart'},t(state.runtime==='web'?'updateRestartWeb':'updateRestartDesktop'));
-      // One plain sentence; the market's own message is in the tooltip.
-      if(state.phase==='failed'&&!['OPERATION_BUSY','UPDATE_STATUS_UNKNOWN'].includes(state.failure?.code))return h('p',{className:'wcu-update-note','data-tone':'error','data-wincu-update-note':'failed',title:state.failure.message||undefined},
-        t(state.failure.code==='AGENTS_RUNNING'?'updateAgentsRunning':state.failure.code==='RESOLVED_VERSION_MISMATCH'?'updateMismatch':state.failure.code==='MARKET_NOT_SYNCED'?'updateMarketWaiting':state.failure.code==='NPM_CHECK_FAILED'?'updateNpmUnavailable':'updateFailedHint')+' ',
-        h('a',{href:t('updateHelpUrl'),target:'_blank',rel:'noopener noreferrer'},t('updateHow')));
-      return null;
+      const dialog=state.marketDialog?h(MarketDialog,{t}):null;
+      const note=(()=>{
+        if(state.phase==='updating')return h(UpdateProgress,{t,state});
+        if(state.phase==='available'&&state.notice?.kind==='stopped')return h('p',{className:'wcu-update-note','data-wincu-update-note':'stopped',role:'status'},fill(t('updateStopped'),{version:state.notice.version??PLUGIN_VERSION}));
+        if(state.phase==='updated'&&state.restartRequired&&state.restartVia===null)return h('p',{className:'wcu-update-note','data-wincu-update-note':'restart'},t(state.runtime==='web'?'updateRestartWeb':'updateRestartDesktop'));
+        // One plain sentence; the market's own message is in the tooltip. When
+        // this button could not update, the market's Installed tab is offered
+        // too; it lists a release some time after npm does.
+        if(state.phase==='failed'&&!['OPERATION_BUSY','UPDATE_STATUS_UNKNOWN'].includes(state.failure?.code)){
+          const code=state.failure.code;
+          const hint={AGENTS_RUNNING:'updateAgentsRunning',RESOLVED_VERSION_MISMATCH:'updateMismatch',MARKET_NOT_SYNCED:'updateMarketWaiting',NPM_CHECK_FAILED:'updateNpmUnavailable',UPDATE_LOCKED:'updateLocked',PLUGIN_REMOVED:'updatePluginRemoved'}[code]||'updateFailedHint';
+          const fallback=!['AGENTS_RUNNING','UPDATE_LOCKED','PLUGIN_REMOVED'].includes(code);
+          return h('div',{className:'wcu-update-note','data-tone':'error','data-wincu-update-note':'failed','data-wincu-update-failure':code,title:state.failure.message||undefined},
+            h('p',null,t(hint)+' ',h('a',{href:t('updateHelpUrl'),target:'_blank',rel:'noopener noreferrer'},t('updateHow'))),
+            fallback?h('p',{'data-wincu-update-fallback':true},fill(t('updateMarketFallback'),{version:state.latest??''})+' ',
+              h('button',{type:'button',className:'wcu-link-button','data-wincu-open-market':true,onClick:()=>{if(!openMarketInstalled())updateStore.set({marketMissing:true});}},t('updateOpenMarket')),
+              state.marketMissing?h('span',{'data-wincu-market-missing':true},' '+t('updateMarketManual')):null):null);
+        }
+        return null;
+      })();
+      return dialog?h(React.Fragment,null,note,dialog):note;
     }
 
     function Card({scope,t,savePatch,as='li',idPrefix='wincu',view}) {
@@ -2043,6 +2254,7 @@ window.__ModuleLoader__.load({
       return ()=>{top.disconnect();for(const observer of layers.values())observer.disconnect();layers.clear();style.remove();for(const button of document.querySelectorAll('[data-wincu-nav]'))button.removeAttribute('data-wincu-nav');};
     }
     function apply(ctx) {
+      pageCtx=ctx;ctx.effect(()=>()=>{if(pageCtx===ctx)pageCtx=null;});
       ctx.effect(()=>ctx.locale.register(NS,dictionaries));
       ctx.effect(()=>watchNavIcon([dictionaries.zh.nav,dictionaries.en.nav]));
       // One update check per DSH start, a few seconds in, so it never competes
@@ -2050,7 +2262,7 @@ window.__ModuleLoader__.load({
       ctx.effect(()=>{
         const delay=Number.isFinite(globalThis.__wcuUpdateDelayMs)?globalThis.__wcuUpdateDelayMs:8000;
         // Tests set the delay; they also get a way back to a fresh, unchecked state.
-        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,waiting:null,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restartVia:undefined,restarting:false,restartFailed:false,dialog:false,restartRequired:false,refreshRequired:false});}};
+        if(Number.isFinite(globalThis.__wcuUpdateDelayMs))globalThis.__wcuUpdateTest={check:()=>checkUpdate(),state:()=>updateStore.state,reset:()=>{updateMarket=undefined;updateChecking=undefined;updateStore.set({phase:'idle',checking:false,waiting:null,checkedAt:undefined,failure:null,percent:null,installed:undefined,latest:undefined,source:undefined,runtime:null,restartSupported:false,restartVia:undefined,restarting:false,restartFailed:false,dialog:false,restartRequired:false,refreshRequired:false,stage:null,bytes:null,stoppable:false,stopping:false,stopLate:false,stopUnsupported:false,notice:null,marketDialog:false,marketMissing:false});}};
         if(updateStarted||delay<0||typeof setTimeout!=='function'||typeof fetch!=='function')return ()=>{};
         updateStarted=true;
         const timer=setTimeout(()=>{void checkUpdate();},delay);
