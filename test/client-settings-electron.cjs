@@ -915,7 +915,7 @@ app.whenReady().then(async()=>{
   assert.equal(await evaluate("window.fetchCalls.filter(call=>call.url==='/dsh-computer-use-win/api/hyperv'&&call.method==='POST').length"),1,'Credential setup starts only after the explicit action');
   // The Hyper-V choice explains itself and lists its setup steps; a result
   // names the step that fixes it, in its tone, with Windows' words in the tooltip.
-  assert.equal(await evaluate("document.querySelector('[data-wincu-desktop-hint]').textContent.startsWith('在 Hyper-V 虚拟机里操作')"),true);
+  assert.equal(await evaluate("document.querySelector('[data-wincu-desktop-hint]').textContent.startsWith('在 Hyper-V 或开了 WinRM')"),true);
   assert.equal(await evaluate("document.querySelectorAll('[data-wincu-hyperv-steps] li').length"),6);
   assert.equal(await evaluate("document.querySelector('[data-wincu-hyperv-steps] li:nth-child(2) code').textContent"),'Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)');
   await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:500,body:{ok:false,error:'WCU_HYPERV_PERMISSION: add your Windows account to the Hyper-V Administrators group, then sign out and back in.'}}:window.previousFetch(call);window.clickButton('配置连接')");
@@ -925,6 +925,17 @@ app.whenReady().then(async()=>{
   await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:200,body:{ok:true,missing:'WCU_HYPERV_NODE_REQUIRED'}}:window.previousFetch(call);window.clickButton('配置连接')");
   await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.startsWith('登录信息已保存。还差第 3 步')");
   assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'warning|2');
+  // Remote Windows (WinRM) backend selector, setup steps, host command, and step highlight.
+  await evaluate("document.getElementById('wincu-page-vmBackend-winrm').click()");
+  await until("!!document.getElementById('wincu-page-remoteHost')");
+  await evaluate("window.setOverlayInput('remoteHost','192.168.56.10:5985');window.clickButton('保存更改')");
+  await until("window.snapshot.value.vmBackend==='winrm'&&window.snapshot.value.remoteHost==='192.168.56.10:5985'");
+  assert.equal(await evaluate("(code=>code.includes('192.168.56.10')&&!code.includes(':5985'))(document.querySelector('[data-wincu-hyperv-steps] li:nth-child(4) code').textContent)"),true,'TrustedHosts command strips :port');
+  await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:500,body:{ok:false,error:'WCU_REMOTE_TRUST: add this address to WinRM TrustedHosts on this PC'}}:window.previousFetch(call);window.clickButton('配置连接')");
+  await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.includes('见第 4 步')");
+  assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'error|3');
+  await evaluate("document.getElementById('wincu-page-vmBackend-hyperv').click()");
+  await until("!!document.getElementById('wincu-page-hypervVm')");
   await evaluate("window.selectDesktop('quiet')");
   await until("document.querySelector('[data-wincu-desktop-hint]').textContent.includes('照常用电脑')&&document.querySelectorAll('[data-wincu-quiet-notes] li').length===4&&!document.querySelector('[data-wincu-hyperv-steps]')");
   // Low disruption's notes start folded under 更多说明, like 更多选项 below, and open from it.

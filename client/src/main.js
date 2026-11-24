@@ -305,9 +305,28 @@ window.__ModuleLoader__.load({
     const KEPT_FOLDER='%LOCALAPPDATA%\\dsh-computer-use-win\\agent-browser';
     // Hyper-V Administrators by its SID, so the line works in every Windows language.
     const HYPERV_GROUP_COMMAND='Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)';
+    const WINRM_GUEST_COMMAND='Enable-PSRemoting -Force -SkipNetworkProfileCheck';
     // A connection result names the setup step that fixes it: [message, step].
     const HYPERV_ISSUES={WCU_HYPERV_UNAVAILABLE:['hypervErrUnavailable',1],WCU_HYPERV_PERMISSION:['hypervErrPermission',2],WCU_HYPERV_VM_UNAVAILABLE:['hypervErrVmState',3],WCU_HYPERV_NODE_REQUIRED:['hypervMissingNode',3],
       WCU_HYPERV_DESKTOP_REQUIRED:['hypervMissingDesktop',4],WCU_HYPERV_VM_UNKNOWN:['hypervErrVmUnknown',5],WCU_HYPERV_VM_REQUIRED:['hypervVmRequired',5],WCU_HYPERV_SIGNIN_FAILED:['hypervErrSignIn',6]};
+    const WINRM_ISSUES={WCU_REMOTE_UNREACHABLE:['winrmErrUnreachable',1],WCU_HYPERV_NODE_REQUIRED:['hypervMissingNodeRemote',2],WCU_HYPERV_DESKTOP_REQUIRED:['hypervMissingDesktopRemote',2],
+      WCU_REMOTE_HOST_REQUIRED:['winrmHostRequired',3],WCU_REMOTE_TRUST:['winrmErrTrust',4],WCU_REMOTE_CLIENT:['winrmErrClient',4],WCU_REMOTE_SIGNIN_FAILED:['winrmErrSignIn',5]};
+    function isValidRemoteHost(text){
+      const s=String(text||'').trim();
+      if(!s||s.startsWith('-')||/[\u0000-\u001f\s]/.test(s))return false;
+      let h,p;const b=s.match(/^\[([0-9A-Fa-f:]+)\](?::(\d+))?$/);
+      if(b){h=b[1];p=b[2];if(!h.includes(':'))return false;}
+      else{const m=s.match(/^([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)(?::(\d+))?$/);if(!m)return false;h=m[1];p=m[2];}
+      if(p!==undefined){const n=Number(p);if(!Number.isInteger(n)||n<1||n>65535)return false;}
+      return true;
+    }
+    function trustedHostValue(text,fallback){
+      const s=String(text||'').trim();
+      if(!s)return fallback;
+      const b=s.match(/^\[([0-9A-Fa-f:]+)\](?::\d+)?$/);
+      if(b)return b[1];
+      return s.replace(/:\d+$/,'')||fallback;
+    }
     // Work modes: [value, label, one-line hint]. Saved choices from before 0.6.3
     // (the current or the background desktop) read as Low disruption.
     const DESKTOP_OPTIONS=[['quiet','modeQuiet','modeQuietHint'],['fast','modeFast','modeFastHint'],['hyperv','modeVm','modeVmHint']];
@@ -968,7 +987,7 @@ window.__ModuleLoader__.load({
       // the switches off, and choosing another browser turns them back.
       const change = (field,value) => {const next={...draft,[field]:value};
         if(field==='desktopTarget'&&value==='hyperv')next.browserAttachUser=false;
-        if(field==='desktopTarget'||field==='hypervVm')setHypervMessage('');
+        if(field==='desktopTarget'||field==='hypervVm'||field==='vmBackend'||field==='remoteHost')setHypervMessage('');
         // Choosing Custom starts with every tool checked: the user unchecks what
         // to leave out and saves. A Custom selection already saved stays as saved.
         if(field==='toolPreset'&&value==='custom'&&draft.toolPreset!=='custom')next.enabledTools=saved.toolPreset==='custom'?saved.enabledTools:[...allToolNames];
@@ -1039,7 +1058,10 @@ window.__ModuleLoader__.load({
         if(!validIndicator(normalized)){setMessage(t('invalid'));setTone('error');return;}
         if(!validOverlay(normalized,lockKey)){setMessage(t('invalidOverlay'));setTone('error');return;}
         if(lockKey&&lockKey===normalized.stopShortcut){setMessage(t('shortcutConflict'));setTone('error');return;}
-        if(normalized.desktopTarget==='hyperv'&&(!normalized.hypervVm.trim()||normalized.hypervVm.trim().startsWith('-'))){setMessage(t('hypervVmRequired'));setTone('error');return;}
+        if(normalized.desktopTarget==='hyperv'){
+          if(normalized.vmBackend==='winrm'){if(!isValidRemoteHost(normalized.remoteHost)){setMessage(t('winrmHostRequired'));setTone('error');return;}}
+          else if(!normalized.hypervVm.trim()||normalized.hypervVm.trim().startsWith('-')){setMessage(t('hypervVmRequired'));setTone('error');return;}
+        }
         const patch=Object.fromEntries(Object.keys(defaults).filter(key=>!equal(normalized[key],saved[key])).map(key=>[key,normalized[key]]));
         if(Object.keys(patch).length===0){setDirty(false);setMessage(t('saved'));setTone('success');return;}
         if(await run(patch,'saved'))setDirty(false);
@@ -1048,9 +1070,10 @@ window.__ModuleLoader__.load({
       // in the tooltip.
       const configureHyperv = async () => {
         setHypervConfiguring(true);setHypervMessage('');
+        const issues=saved.vmBackend==='winrm'?WINRM_ISSUES:HYPERV_ISSUES;
         try {
           const {status,data}=await requestJson('/dsh-computer-use-win/api/hyperv',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:165000});
-          const detail=String(data?.error||''),issue=HYPERV_ISSUES[data?.ok?data.missing:detail.match(/^WCU_HYPERV_[A-Z_]+/)?.[0]];
+          const detail=String(data?.error||''),issue=issues[data?.ok?data.missing:detail.match(/^WCU_(?:HYPERV|REMOTE)_[A-Z_]+/)?.[0]];
           setHypervMessage(data?.cancelled?{text:t('reportCancelledConnection')}
             :data?.ok?(issue?{text:t(issue[0]),tone:'warning',step:issue[1]}:{text:t('hypervReady'),tone:'success'})
             :issue?{text:t(issue[0]),tone:'error',step:issue[1],detail}
@@ -1126,17 +1149,32 @@ window.__ModuleLoader__.load({
             h('p',{className:'wcu-hint','data-wincu-desktop-hint':true},t((DESKTOP_OPTIONS.find(([value])=>value===draft.desktopTarget)??DESKTOP_OPTIONS[0])[2]))),
           draft.desktopTarget==='quiet'&&h('details',{className:'wcu-detail','data-wincu-quiet-notes':true},h('summary',null,t('moreNotes')),
             h('div',{className:'wcu-notice'},h('ul',null,...[1,2,3,4].map(n=>h('li',{key:n},t('modeQuietNote'+n)))))),
-          draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
-            hypervProbe?.available===false&&['home-edition','not-enabled'].includes(hypervProbe.reason)&&h('p',{'data-wincu-hyperv-unavailable':hypervProbe.reason,'data-tone':'warning'},
-              t(hypervProbe.reason==='home-edition'?'hypervHomeEdition':'hypervErrUnavailable'),' ',
-              button('hypervUseQuiet',{className:'wcu-small',disabled,onClick:()=>change('desktopTarget','quiet')})),
-            h('strong',null,t('hypervSetup')),
-            h('ol',null,...[1,2,3,4,5,6].map(n=>h('li',{key:n,'data-tone':hypervMessage&&hypervMessage.step===n?hypervMessage.tone:undefined},t('hypervStep'+n),
-              n===2&&h('span',{className:'wcu-address'},h('code',null,HYPERV_GROUP_COMMAND),h(CopyButton,{text:HYPERV_GROUP_COMMAND,t})),
-              n===5&&h('input',{className:'wcu-control',id:idPrefix+'-hypervVm','aria-label':t('hypervVm'),placeholder:t('hypervVm'),type:'text',maxLength:120,value:draft.hypervVm,disabled,onChange:e=>change('hypervVm',e.target.value)}),
-              n===6&&h('div',{className:'wcu-hyperv-action'},
-                button(hypervConfiguring?'hypervConfiguring':'hypervConfigure',{className:'wcu-small',disabled:disabled||hypervConfiguring||saved.desktopTarget!=='hyperv'||!saved.hypervVm||draft.hypervVm.trim()!==saved.hypervVm,onClick:configureHyperv}),
-                hypervMessage&&h('span',{role:'status','data-wincu-hyperv-result':hypervMessage.tone||'info','data-tone':hypervMessage.tone,title:hypervMessage.detail||undefined},hypervMessage.text))))))),
+          draft.desktopTarget==='hyperv'&&(()=>{
+            const winrmHostCommand="Start-Service WinRM; Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '"+trustedHostValue(draft.remoteHost,t('remoteHostPlaceholder'))+"' -Concatenate -Force";
+            return h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
+              h('div',{className:'wcu-segment',role:'radiogroup','aria-label':t('workMode'),style:{marginBottom:'8px'}},
+                ...[['hyperv','vmBackendHyperv'],['winrm','vmBackendWinrm']].map(([value,label])=>h('label',{key:value},
+                  h('input',{type:'radio',name:idPrefix+'-vmBackend',id:idPrefix+'-vmBackend-'+value,value,checked:draft.vmBackend===value,disabled,onChange:()=>change('vmBackend',value)}),t(label)))),
+              draft.vmBackend==='hyperv'&&hypervProbe?.available===false&&['home-edition','not-enabled'].includes(hypervProbe.reason)&&h('p',{'data-wincu-hyperv-unavailable':hypervProbe.reason,'data-tone':'warning'},
+                t(hypervProbe.reason==='home-edition'?'hypervHomeEdition':'hypervErrUnavailable'),' ',
+                hypervProbe.reason==='home-edition'&&h(React.Fragment,null,button('vmUseWinrm',{className:'wcu-small',disabled,onClick:()=>change('vmBackend','winrm')}),' '),
+                button('hypervUseQuiet',{className:'wcu-small',disabled,onClick:()=>change('desktopTarget','quiet')})),
+              h('strong',null,t('hypervSetup')),
+              draft.vmBackend==='winrm'
+                ?h('ol',null,...[1,2,3,4,5].map(n=>h('li',{key:n,'data-tone':hypervMessage&&hypervMessage.step===n?hypervMessage.tone:undefined},t('winrmStep'+n),
+                  n===1&&h('span',{className:'wcu-address'},h('code',null,WINRM_GUEST_COMMAND),h(CopyButton,{text:WINRM_GUEST_COMMAND,t})),
+                  n===3&&h('input',{className:'wcu-control',id:idPrefix+'-remoteHost','aria-label':t('remoteHost'),placeholder:t('remoteHost'),type:'text',maxLength:255,value:draft.remoteHost,disabled,onChange:e=>change('remoteHost',e.target.value)}),
+                  n===4&&h('span',{className:'wcu-address'},h('code',null,winrmHostCommand),h(CopyButton,{text:winrmHostCommand,t})),
+                  n===5&&h('div',{className:'wcu-hyperv-action'},
+                    button(hypervConfiguring?'hypervConfiguring':'hypervConfigure',{className:'wcu-small',disabled:disabled||hypervConfiguring||saved.desktopTarget!=='hyperv'||saved.vmBackend!=='winrm'||!saved.remoteHost||draft.remoteHost.trim()!==saved.remoteHost,onClick:configureHyperv}),
+                    hypervMessage&&h('span',{role:'status','data-wincu-hyperv-result':hypervMessage.tone||'info','data-tone':hypervMessage.tone,title:hypervMessage.detail||undefined},hypervMessage.text)))))
+                :h('ol',null,...[1,2,3,4,5,6].map(n=>h('li',{key:n,'data-tone':hypervMessage&&hypervMessage.step===n?hypervMessage.tone:undefined},t('hypervStep'+n),
+                  n===2&&h('span',{className:'wcu-address'},h('code',null,HYPERV_GROUP_COMMAND),h(CopyButton,{text:HYPERV_GROUP_COMMAND,t})),
+                  n===5&&h('input',{className:'wcu-control',id:idPrefix+'-hypervVm','aria-label':t('hypervVm'),placeholder:t('hypervVm'),type:'text',maxLength:120,value:draft.hypervVm,disabled,onChange:e=>change('hypervVm',e.target.value)}),
+                  n===6&&h('div',{className:'wcu-hyperv-action'},
+                    button(hypervConfiguring?'hypervConfiguring':'hypervConfigure',{className:'wcu-small',disabled:disabled||hypervConfiguring||saved.desktopTarget!=='hyperv'||saved.vmBackend!=='hyperv'||!saved.hypervVm||draft.hypervVm.trim()!==saved.hypervVm,onClick:configureHyperv}),
+                    hypervMessage&&h('span',{role:'status','data-wincu-hyperv-result':hypervMessage.tone||'info','data-tone':hypervMessage.tone,title:hypervMessage.detail||undefined},hypervMessage.text))))));
+          })()),
         h('section',{className:'wcu-section','data-wincu-browser-policy':true,'aria-labelledby':idPrefix+'-browser-title'},
           head(idPrefix+'-browser-title','browserTitle','browserInfo'),
           h('div',{className:'wcu-grid'},
