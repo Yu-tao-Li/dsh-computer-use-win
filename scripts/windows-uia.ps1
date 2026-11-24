@@ -380,6 +380,26 @@ public static class WindowsComputerUseNative {
     return sent;
   }
 
+  // Send a press and release in one atomic batch so process termination cannot
+  // leave a modifier key stuck down (#99).
+  public static uint TapKey(byte vk) {
+    INPUT[] inputs = new INPUT[2];
+    inputs[0].type = 1; // INPUT_KEYBOARD
+    inputs[0].U.ki.wVk = vk;
+    inputs[0].U.ki.dwExtraInfo = new IntPtr((long)(ulong)InputMarker);
+    inputs[1].type = 1; // INPUT_KEYBOARD
+    inputs[1].U.ki.wVk = vk;
+    inputs[1].U.ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[1].U.ki.dwExtraInfo = new IntPtr((long)(ulong)InputMarker);
+    int size = Marshal.SizeOf(typeof(INPUT));
+    uint sent = SendInput(2, inputs, size);
+    if (sent == 1) {
+      INPUT[] up = new INPUT[] { inputs[1] };
+      SendInput(1, up, size);
+    }
+    return sent;
+  }
+
   public const uint KEYEVENTF_UNICODE = 0x0004;
 
   // Synthesize the text as Unicode key events (KEYEVENTF_UNICODE). No clipboard
@@ -718,11 +738,9 @@ public static class WcuInputHold {
       // (VK_PACKET, all characters on one code) never repeats.
       bool repeat = down && vk != 0xE7 && !Replaying.Contains(vk);
       if (State == Holding) {
+        if (up && Keys.Remove(vk)) { Add(vk, scan, flags, true); return true; }
         if (overdue || vk == 0x1B) return false;
-        if (up) {
-          if (Keys.Remove(vk)) { Add(vk, scan, flags, true); return true; }
-          PreHeld.Remove(vk); return false;
-        }
+        if (up) { PreHeld.Remove(vk); return false; }
         // A key pressed before the hold: its repeats are dropped, its release passes.
         if (PreHeld.Contains(vk) || (repeat && !Keys.Contains(vk))) { PreHeld.Add(vk); return true; }
         Keys.Add(vk); KeyCount++; Add(vk, scan, flags, false); return true;
@@ -747,6 +765,7 @@ public static class WcuInputHold {
       int button = Button(message, mouseData);
       // A click of the user's own picks the window: the guard ends.
       if (State == Guarding) { if (button != 0 && Down(message)) State = Idle; return false; }
+      if (State == Holding && button != 0 && !Down(message) && Buttons.Remove(button)) { AddMouse(message, mouseData); return true; }
       if (State != Holding || overdue) return false;
       if (message == 0x200) {
         // A mouse moves the pointer by a distance; remote control, pens and touch place it.
@@ -819,8 +838,10 @@ public static class WcuInputHold {
   static string notice;
   public const string GuardNote = "This window stays in front for now; if the user types before your next step, the foreground goes back to their window first.";
 
-  public sealed class UserInput { public bool Held, Fullscreen; public int Notification; public long Foreground; }
+  public sealed class UserInput { public bool Held, Fullscreen; public int Notification; public long Foreground; public string[] HeldKeys; }
   static readonly int[] Watched = { 0x01, 0x02, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x5B, 0x5C };
+  static readonly int[] DiagnosticVks = { 0x01, 0x02, 0x04, 0x05, 0x06, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C, 0x1B };
+  static readonly string[] DiagnosticNames = { "LButton", "RButton", "MButton", "XButton1", "XButton2", "LShift", "RShift", "LCtrl", "RCtrl", "LAlt", "RAlt", "LWin", "RWin", "Esc" };
   static bool AnyHeld() { foreach (int key in Watched) if ((GetAsyncKeyState(key) & 0x8000) != 0) return true; return false; }
   // SHQueryUserNotificationState: 2 busy, 3 Direct3D full screen, 4 presentation mode.
   // Windows also reports busy for a maximized window on a monitor without a taskbar (#100):
@@ -837,6 +858,11 @@ public static class WcuInputHold {
   public static UserInput UserState() {
     var state = new UserInput();
     state.Held = AnyHeld();
+    var heldKeys = new System.Collections.Generic.List<string>();
+    for (int i = 0; i < DiagnosticVks.Length; i++) {
+      if ((GetAsyncKeyState(DiagnosticVks[i]) & 0x8000) != 0) heldKeys.Add(DiagnosticNames[i]);
+    }
+    state.HeldKeys = heldKeys.ToArray();
     IntPtr fg = WindowsComputerUseNative.GetForegroundWindow();
     state.Foreground = fg.ToInt64();
     int value;
@@ -1604,8 +1630,7 @@ function Set-WindowForeground {
   }
   try {
     if ($env:WCU_CANCEL_EVENT) { [WindowsComputerUseNative]::ThrowIfCancelled() }
-    [void][WindowsComputerUseNative]::keybd_event([WindowsComputerUseNative]::VK_MENU, 0, 0, [UIntPtr]([uint64][WindowsComputerUseNative]::InputMarker))
-    [void][WindowsComputerUseNative]::keybd_event([WindowsComputerUseNative]::VK_MENU, 0, [WindowsComputerUseNative]::KEYEVENTF_KEYUP, [UIntPtr]([uint64][WindowsComputerUseNative]::InputMarker))
+    [void][WindowsComputerUseNative]::TapKey([WindowsComputerUseNative]::VK_MENU)
     if ($env:WCU_CANCEL_EVENT) { [WindowsComputerUseNative]::ThrowIfCancelled() }
     [WindowsComputerUseNative]::SetForegroundWindow($ptr) | Out-Null
     Start-Sleep -Milliseconds 120
@@ -4215,7 +4240,7 @@ function Invoke-Action {
     "launch_app" { return (Invoke-LaunchApp $inputObject) }
     "input_state" {
       $state = [WcuInputHold]::UserState()
-      return [ordered]@{ ok = $true; action = 'input_state'; held = $state.Held; fullscreen = $state.Fullscreen; notification = $state.Notification; foreground = $state.Foreground }
+      return [ordered]@{ ok = $true; action = 'input_state'; held = $state.Held; heldKeys = @($state.HeldKeys); fullscreen = $state.Fullscreen; notification = $state.Notification; foreground = $state.Foreground }
     }
     "health" {
       $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen

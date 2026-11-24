@@ -42,7 +42,10 @@ $core.Reset(100,200); $core.State=[WcuInputHold]::Holding
 # Remote control types without DSH's marker: those keys are the user's too.
 Check ($core.Key(0x42,0x30,0x10,0,$false,$false,$false,$false)) 'A remote-control key is held'
 Check ($core.Key(0x42,0x30,0x10,0,$true,$false,$false,$false)) 'and its release'
-Check (-not $core.Key(0x43,0x2E,0,0,$false,$false,$false,$true)) 'An overdue hold lets input through'
+Check ($core.Key(0x43,0x2E,0,0,$false,$false,$false,$false)) 'A key pressed before overdue is held'
+Check ($core.Key(0x43,0x2E,0,0,$true,$false,$false,$true)) 'Its release is held even when overdue'
+Check ($core.Queue[$core.Queue.Count - 1].Key -and $core.Queue[$core.Queue.Count - 1].Vk -eq 0x43 -and $core.Queue[$core.Queue.Count - 1].Up) 'The queued release matches the held press'
+Check (-not $core.Key(0x44,0x20,0,0,$false,$false,$false,$true)) 'An overdue hold lets input through'
 
 # Mouse: a move shifts the user's point by its distance; presses are held there.
 $core.Reset(100,200); $core.State=[WcuInputHold]::Holding
@@ -59,6 +62,13 @@ Check ($events[0].X -eq 110 -and $events[0].Y -eq 205 -and $events[0].MouseFlags
 Check ($events[2].MouseFlags -eq 0x800 -and $events[2].MouseData -eq -120) 'The wheel keeps its direction'
 Check ($core.Mouse(0x200,700,400,500,300,0,1,0,$false)) 'A remote-control move is held'
 Check ($core.X -eq 700 -and $core.Y -eq 400) 'Remote control places the point'
+# Mouse overdue release matching (#99): held press still gets its release queued.
+$core.Reset(100,200); $core.State=[WcuInputHold]::Holding
+Check ($core.Mouse(0x204,500,300,500,300,0,0,0,$false)) 'A right press is held'
+Check ($core.Mouse(0x205,500,300,500,300,0,0,0,$true)) 'Its release is held even when overdue'
+$rightEvents = $core.Queue.ToArray()
+Check ($rightEvents.Count -eq 2 -and $rightEvents[1].MouseFlags -eq 0x0010) 'The overdue right release is queued'
+Check (-not $core.Mouse(0x201,500,300,500,300,0,0,0,$true)) 'A fresh overdue press passes'
 
 # What a replay sends: DSH's replay marker, the key's flags; VK_PACKET as Unicode.
 $k=New-Object WcuInputHold+Held; $k.Key=$true; $k.Vk=0x25; $k.Scan=0x4B; $k.Flags=1; $k.Up=$true
@@ -104,6 +114,7 @@ Check (-not [WcuInputHold]::LooksFullscreen(2, ([Convert]::ToInt32('96000000', 1
 # What the server reads before borrowing, and a hook pair that comes and goes.
 $state=[WcuInputHold]::UserState()
 Check ($null -ne $state -and $state.Notification -ge 0) 'The user state reads'
+Check ($null -ne $state.HeldKeys -and $state.HeldKeys -is [string[]]) 'HeldKeys is a string array'
 Check ($null -eq [WcuInputHold]::End($null)) 'Ending without a hold says nothing'
 $begun=[WcuInputHold]::Begin(0)
 try {

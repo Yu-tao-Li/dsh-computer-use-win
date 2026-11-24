@@ -5,23 +5,23 @@
     "helpers":  {
                     "native":  {
                                    "file":  "wcu-native-netfx.dll",
-                                   "sourceHash":  "f46a6ead0a5f9d9f",
-                                   "sha256":  "7140119e23c622f2d0e3717fe92941d799d28a16f446e853aa9fb128c12c4cec"
+                                   "sourceHash":  "bd20702793dd102b",
+                                   "sha256":  "4fab0824d8350c65d8a390690434e14f2449fdef0f3834288ed11d8fd7f5e731"
                                },
                     "ocr":  {
                                 "file":  "wcu-ocr-netfx.dll",
                                 "sourceHash":  "4be4c00822f73e47",
-                                "sha256":  "e8aa106044bea8d8920fff912cc2c8d98b16468bf08f0f27cbfbe277161a010e"
+                                "sha256":  "a51fdd12052899a0b5d40637771f5fc8b34231f1d85e4a2ed35e68d56c824e85"
                             },
                     "clipboard":  {
                                       "file":  "wcu-clipboard-netfx.dll",
                                       "sourceHash":  "2549f15ffe4931db",
-                                      "sha256":  "6586f1378b569018e6959e80cc9f9ca2aece680aa4328780ad04203991781c86"
+                                      "sha256":  "9192c17403b60b0957ee4c42eb618c525e6b380900b1589fbdd14e8ed3a8097b"
                                   },
                     "takeover":  {
                                      "file":  "wcu-takeover-netfx.dll",
                                      "sourceHash":  "77bedd3e62e8cbbd",
-                                     "sha256":  "244973d514a871d9e710cb68916822a8d819becf764bcabf645ab9e8c9a5fbe4"
+                                     "sha256":  "5432c70976bd2c483c4c70b577a6626cddf69aa89a0e73f3717f46b8faf668b9"
                                  }
                 }
 }
