@@ -2140,7 +2140,7 @@ window.__ModuleLoader__.load({
           draft.desktopTarget==='quiet'&&h('details',{className:'wcu-detail','data-wincu-quiet-notes':true},h('summary',null,t('moreNotes')),
             h('div',{className:'wcu-notice'},h('ul',null,...[1,2,3,4].map(n=>h('li',{key:n},t('modeQuietNote'+n)))))),
           draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
-            hypervProbe?.available===false&&h('p',{'data-wincu-hyperv-unavailable':hypervProbe.reason||'not-enabled','data-tone':'warning'},
+            hypervProbe?.available===false&&['home-edition','not-enabled'].includes(hypervProbe.reason)&&h('p',{'data-wincu-hyperv-unavailable':hypervProbe.reason,'data-tone':'warning'},
               t(hypervProbe.reason==='home-edition'?'hypervHomeEdition':'hypervErrUnavailable'),' ',
               button('hypervUseQuiet',{className:'wcu-small',disabled,onClick:()=>change('desktopTarget','quiet')})),
             h('strong',null,t('hypervSetup')),

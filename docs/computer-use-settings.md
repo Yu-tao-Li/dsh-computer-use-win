@@ -34,6 +34,8 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
 
 在 **工作方式** 选 **虚拟机**，设置页会列出下面的配置步骤，只需做一次：
 
+选 **虚拟机** 时，设置页先只读检查这台电脑能否使用 Hyper-V：Windows 家庭版或还没打开 Hyper-V 时会直接说明，家庭版还能一键改用 **少打扰**。
+
 1. 打开 Hyper-V：在“启用或关闭 Windows 功能”里勾选 Hyper-V 并重启。Windows 家庭版没有 Hyper-V。
 2. 允许你的账户管理 Hyper-V：以管理员身份打开 PowerShell，运行 `Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)`，再注销后重新登录。DSH 没有以管理员身份运行时，Windows 只让“Hyper-V Administrators”组的成员查询和连接虚拟机；这个组用 SID 指定，任何语言的 Windows 都一样。
 3. 在 Hyper-V 管理器里新建一台 Windows 10 或 11 虚拟机，并在里面安装 Node.js 22 或更新版本。
@@ -122,6 +124,8 @@ Apps on the hidden desktop take UI Automation and window messages only: clicks a
 ### Virtual machine (Hyper-V)
 
 Select **Virtual machine** under **Work mode**. The settings page lists these setup steps; they are needed once:
+
+When **Virtual machine** is selected, the settings page first checks, read-only, whether this PC can use Hyper-V: on Windows Home, or with Hyper-V turned off, it says so at once, and on Home it offers a one-click switch to **Low disruption**.
 
 1. Turn on Hyper-V: in “Turn Windows features on or off”, select Hyper-V and restart. Windows Home does not have Hyper-V.
 2. Let your account manage Hyper-V: open PowerShell as administrator, run `Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)`, then sign out and back in. When DSH does not run as administrator, Windows lets only members of the Hyper-V Administrators group query and connect to virtual machines; the SID names that group in every Windows language.
