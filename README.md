@@ -112,7 +112,7 @@ DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示�
 
 #### 2.4 设置页
 
-在左侧打开带鼠标图标的 **电脑操控**。标题旁显示插件版本，右侧有 **检查更新** 或 **更新**，以及 **反馈问题**。**工作方式** 可以选 **少打扰**（默认）、**前台操作** 或 **虚拟机**。少打扰会尽量在后台操作，详细说明默认折叠在 **更多说明** 里。前台操作直接使用鼠标和键盘。虚拟机模式在配置好的 Hyper-V 虚拟机里操作。
+在左侧打开带鼠标图标的 **电脑操控**。标题旁显示插件版本，右侧有 **检查更新** 或 **更新**，以及 **反馈问题**。**工作方式** 可以选 **少打扰**（默认）、**前台操作** 或 **虚拟机**。少打扰会尽量在后台操作，详细说明默认折叠在 **更多说明** 里。前台操作直接使用鼠标和键盘。虚拟机模式支持本地 Hyper-V 虚拟机，或通过远程 Windows（WinRM）连接 VMware、VirtualBox 虚拟机及另一台 Windows 电脑（Windows 家庭版也可使用）。
 
 页面上还能调整工具加载方案、网页与浏览器、接管提示、思考与操作浮窗和停止快捷键。每项左边的小图会随设置变化，说明收在 ⓘ 图标里。顶部的 Star 和 Issue 说明可以折叠，折叠后只留 GitHub 链接和展开箭头，升级后也会保持这个选择。
 
@@ -206,7 +206,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 | 更新 | 标题右侧 GitHub 左边的按钮：平时是“检查更新”，有新版本时变成“更新”，点了才安装，见 1.2 |
 | 反馈问题 | 保存诊断 TXT 到下载文件夹并打开 GitHub 新建问题页面，见 8.4 |
 | 工具加载 | **全部**（26 个，默认）；**精简**（12 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
-| 工作方式 | **少打扰**（默认）：你照常用电脑，任务也不耽搁。能在后台做的都在后台做，DSH 自己打开的程序放在看不见的后台桌面里；必须用鼠标键盘的步骤马上做、只借一下，你这期间按的键和鼠标动作先存住，随后补到你的窗口；只在你按着键、拼音没上屏或在用全屏程序时等一下；**前台操作**：适合你暂时不用电脑时，DSH 把窗口放在最前面，直接用鼠标键盘，按 Esc 停止；**虚拟机**：在一台 Hyper-V 虚拟机里操作，完全不碰你的电脑，设置页列出一次性的配置步骤。见[设置与停止](docs/computer-use-settings.md) |
+| 工作方式 | **少打扰**（默认）：你照常用电脑，任务也不耽搁。能在后台做的都在后台做，DSH 自己打开的程序放在看不见的后台桌面里；必须用鼠标键盘的步骤马上做、只借一下，你这期间按的键和鼠标动作先存住，随后补到你的窗口；只在你按着键、拼音没上屏或在用全屏程序时等一下；**前台操作**：适合你暂时不用电脑时，DSH 把窗口放在最前面，直接用鼠标键盘，按 Esc 停止；**虚拟机**：在一台 Hyper-V 虚拟机或通过远程 Windows（WinRM）连接的 Windows 系统（VMware、VirtualBox 虚拟机或另一台电脑，Windows 家庭版可用）里操作，不碰你本机的桌面与文件，设置页列出一次性的配置步骤。见[设置与停止](docs/computer-use-settings.md) |
 | 优先使用网页控件 | 默认打开。网页能直接读写时在后台完成，不动鼠标、不抢前台；桌面程序和读不到的网页内容再交给电脑操控 |
 | 显示 DSH 浏览器窗口 | 默认打开，能看到 DSH 浏览器在做什么；关掉后它在后台运行，没有窗口 |
 | 浏览器类型 | 默认跟随 Windows 的默认浏览器，也可以选 Edge、Chrome 或 Firefox 系（实验）；默认浏览器不是 Edge 或 Chrome 时，用已安装的 Chrome 或 Edge。选 Firefox 系时先用 Windows 默认的那一个，见 [Firefox 系浏览器](docs/browser-bidi.md) |
@@ -485,7 +485,7 @@ The overlay is locked by default, so the mouse passes through it and it never bl
 
 #### 2.4 Settings page
 
-Open **Computer Use**, the mouse-icon tab on the left (电脑操控 in the Chinese interface). The plugin version is beside the title, with **Check for updates** or **Update** and **Report a problem** on the right. **Work mode** offers **Low disruption** (the default), **Foreground**, and **Virtual machine**. Low disruption works in the background where possible. Its **More details** section starts collapsed. Foreground uses the mouse and keyboard directly. Virtual machine mode works inside a configured Hyper-V VM.
+Open **Computer Use**, the mouse-icon tab on the left (电脑操控 in the Chinese interface). The plugin version is beside the title, with **Check for updates** or **Update** and **Report a problem** on the right. **Work mode** offers **Low disruption** (the default), **Foreground**, and **Virtual machine**. Low disruption works in the background where possible. Its **More details** section starts collapsed. Foreground uses the mouse and keyboard directly. Virtual machine mode works inside a configured Hyper-V VM or over Remote Windows (WinRM) to VMware, VirtualBox, or another Windows PC (including from Windows Home).
 
 The page also lets you choose which tools load and adjust browser options, the takeover indicator, the reasoning and progress overlay, and the stop shortcut. The small illustration beside each setting reflects your selection. Open the ⓘ icon for an explanation. Folding the Star and Issue note leaves a GitHub link and an expand arrow. Your choice survives upgrades.
 
@@ -579,7 +579,7 @@ Change these in **Settings → Computer Use**. Most take effect after you click 
 | Update | The button left of the GitHub link at the top right: Check for updates, or Update when a newer version exists, which installs it only when clicked; see 1.2 |
 | Report a problem | Saves a TXT to Downloads and opens GitHub’s new-issue page; see 8.4 |
 | Tool loading | **All** (26 tools, the default); **Lite** (12 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
-| Work mode | **Low disruption** (the default): keep using your PC and the task keeps going. DSH does what it can in the background and opens the apps it starts on a hidden desktop; steps that need the mouse and keyboard run at once and borrow them briefly, while what you type or click meanwhile is held and then replayed to your window; it waits only while you hold a key, have input-method text not yet committed, or use a full-screen app; **Foreground**: for when you step away; DSH keeps its window in front and uses the mouse and keyboard directly, and Esc stops it; **Virtual machine**: works inside a Hyper-V virtual machine and never touches your PC, with one-time setup steps on the settings page. See [settings and stopping](docs/computer-use-settings.md) |
+| Work mode | **Low disruption** (the default): keep using your PC and the task keeps going. DSH does what it can in the background and opens the apps it starts on a hidden desktop; steps that need the mouse and keyboard run at once and borrow them briefly, while what you type or click meanwhile is held and then replayed to your window; it waits only while you hold a key, have input-method text not yet committed, or use a full-screen app; **Foreground**: for when you step away; DSH keeps its window in front and uses the mouse and keyboard directly, and Esc stops it; **Virtual machine**: works inside a Hyper-V virtual machine or a remote Windows system over WinRM (VMware, VirtualBox, or another Windows PC; works from Windows Home) without touching your host desktop or files, with one-time setup steps on the settings page. See [settings and stopping](docs/computer-use-settings.md) |
 | Prefer web page controls | On by default. Pages it can read and operate directly are handled in the background, without moving the pointer or taking the foreground; desktop apps and page content it cannot read go to Computer Use |
 | Show the DSH browser window | On by default, so you can watch the DSH browser; turn it off to run the browser in the background with no window |
 | Browser type | Follows the Windows default browser, or choose Edge, Chrome or the Firefox family (experimental); when the default is neither Edge nor Chrome, an installed Chrome or Edge is used. The Firefox family starts with the Windows default one; see [Firefox-family browsers](docs/browser-bidi.md) |
