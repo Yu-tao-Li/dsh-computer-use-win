@@ -886,6 +886,34 @@ public static class WcuInputHold {
     return state;
   }
 
+  // After a backend was killed during real input (#99): release modifiers and
+  // mouse buttons that still read as down. Esc and other keys are left alone.
+  public static string[] ReleaseStuck() {
+    var released = new System.Collections.Generic.List<string>();
+    int size = Marshal.SizeOf(typeof(WindowsComputerUseNative.INPUT));
+    int[] keys = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C };
+    string[] keyNames = { "LShift", "RShift", "LCtrl", "RCtrl", "LAlt", "RAlt", "LWin", "RWin" };
+    for (int i = 0; i < keys.Length; i++) {
+      if ((GetAsyncKeyState(keys[i]) & 0x8000) == 0) continue;
+      var input = new WindowsComputerUseNative.INPUT[1];
+      input[0].type = 1;
+      input[0].U.ki.wVk = (ushort)keys[i];
+      bool extended = keys[i] == 0xA3 || keys[i] == 0xA5 || keys[i] == 0x5B || keys[i] == 0x5C;
+      input[0].U.ki.dwFlags = WindowsComputerUseNative.KEYEVENTF_KEYUP | (extended ? 1u : 0u);
+      input[0].U.ki.dwExtraInfo = new IntPtr((long)(ulong)WindowsComputerUseNative.InputMarker);
+      if (WindowsComputerUseNative.SendInput(1, input, size) == 1) released.Add(keyNames[i]);
+    }
+    int[] buttons = { 0x01, 0x02, 0x04, 0x05, 0x06 };
+    uint[] ups = { 0x0004, 0x0010, 0x0040, 0x0100, 0x0100 };
+    int[] data = { 0, 0, 0, 1, 2 };
+    string[] buttonNames = { "LButton", "RButton", "MButton", "XButton1", "XButton2" };
+    for (int i = 0; i < buttons.Length; i++) {
+      if ((GetAsyncKeyState(buttons[i]) & 0x8000) == 0) continue;
+      if (WindowsComputerUseNative.SendMouseEvent(0, 0, ups[i], data[i]) == 1) released.Add(buttonNames[i]);
+    }
+    return released.ToArray();
+  }
+
   // Before DSH's input on the user's desktop: hold the user's input from now
   // on. target: the window DSH works in (0: the one in front). False when the
   // hooks are not there; the step then runs without this protection.
@@ -4241,6 +4269,10 @@ function Invoke-Action {
     "input_state" {
       $state = [WcuInputHold]::UserState()
       return [ordered]@{ ok = $true; action = 'input_state'; held = $state.Held; heldKeys = @($state.HeldKeys); fullscreen = $state.Fullscreen; notification = $state.Notification; foreground = $state.Foreground }
+    }
+    "release_input" {
+      $released = [WcuInputHold]::ReleaseStuck()
+      return [ordered]@{ ok = $true; action = 'release_input'; released = @($released) }
     }
     "health" {
       $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen

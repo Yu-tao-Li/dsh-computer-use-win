@@ -18,6 +18,7 @@ const suites = [
   ['work-modes-live',process.execPath,['test/work-modes-live.mjs']],
   ['work-mode-contract',process.execPath,['test/work-mode-contract.mjs']],
   ['input-hold',powershell,['-NoProfile','-File','test/input-hold.ps1']],
+  ['input-release-sweep',process.execPath,['test/input-release-sweep.mjs']],
   ['input-compose',process.execPath,['test/input-compose.mjs']],
   ['restart-route',process.execPath,['test/restart-route.mjs']],
   ['update-guard',process.execPath,['test/update-guard.mjs']],

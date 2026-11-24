@@ -115,6 +115,7 @@ Check (-not [WcuInputHold]::LooksFullscreen(2, ([Convert]::ToInt32('96000000', 1
 $state=[WcuInputHold]::UserState()
 Check ($null -ne $state -and $state.Notification -ge 0) 'The user state reads'
 Check ($null -ne $state.HeldKeys -and $state.HeldKeys -is [string[]]) 'HeldKeys is a string array'
+Check ($null -ne [WcuInputHold].GetMethod('ReleaseStuck')) 'The release sweep exists'
 Check ($null -eq [WcuInputHold]::End($null)) 'Ending without a hold says nothing'
 $begun=[WcuInputHold]::Begin(0)
 try {

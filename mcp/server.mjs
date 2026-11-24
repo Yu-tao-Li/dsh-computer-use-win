@@ -812,6 +812,22 @@ const backendWaiters = new Map(); // id -> {resolve, reject, timer, proc}
 const pendingToolCalls = new Map(); // MCP request id -> {proc}
 const retiringBackends = new WeakSet();
 const interruptibleActions = INTERRUPTIBLE_ACTIONS;
+// Actions that may send real input (the backend's input-lease list in
+// windows-uia.ps1), plus any call with activate. A backend that dies during
+// one may leave a key or button down (#99); the next backend releases them.
+const REAL_INPUT_ACTIONS = new Set(['launch_app','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','close_window','move_window']);
+const sendsRealInput = (action, args) => REAL_INPUT_ACTIONS.has(action) || args?.activate === true;
+let releaseSweepPending = false;
+function requestReleaseSweep() {
+  if (backgroundDesktop || releaseSweepPending) return;
+  releaseSweepPending = true;
+  setImmediate(() => {
+    releaseSweepPending = false;
+    dispatchBackend('release_input', {}, 10000, undefined, 'current').then(result => {
+      if (result?.released?.length) process.stderr.write(`[wcu] released input left down by a stopped backend: ${result.released.join(', ')}\n`);
+    }, error => process.stderr.write(`[wcu] release sweep failed: ${error.message}\n`));
+  });
+}
 const takeover = new TakeoverControl({ powershell, config: process.env.WCU_SETTINGS_JSON ? JSON.parse(process.env.WCU_SETTINGS_JSON) : {}, onStop(error) {
   const stoppedByUser = error.message === STOPPED;
   for (const request of pendingToolCalls.values()) {
@@ -995,11 +1011,21 @@ function spawnBackend(desk = 'current', desktopName) {
   proc.stdout.on('data', chunk => { if (!invalid) output.push(chunk); });
   proc.stdin.on("error", () => { /* EPIPE when the backend dies; the exit handler fails waiters */ });
   const onDeath = (err) => {
+    if (proc.wcuDeathHandled) return;
+    proc.wcuDeathHandled = true;
+    const interrupted = !proc.wcuKilled && desk === 'current' && [...backendWaiters.values()].some(w => w.proc === proc && w.sent && sendsRealInput(w.action, w.args));
     clearTimeout(proc.wcuReadyTimer);
     if (backends[desk] === proc) backends[desk] = null;
-    if (err) { failBackendWaiters(err, proc); return; }
+    if (err) {
+      failBackendWaiters(err, proc);
+      if (interrupted) requestReleaseSweep();
+      return;
+    }
     // 'exit' can precede the last stderr chunk; wait briefly for the stream.
-    const report = () => failBackendWaiters(backendExitError(proc.exitCode, stderrTail), proc);
+    const report = () => {
+      failBackendWaiters(backendExitError(proc.exitCode, stderrTail), proc);
+      if (interrupted) requestReleaseSweep();
+    };
     if (proc.stderr.readableEnded) { report(); return; }
     const timer = setTimeout(report, 300);
     proc.stderr.once("end", () => { clearTimeout(timer); report(); });
@@ -1026,6 +1052,7 @@ function ensureBackend() {
 
 function killBackend(error = new Error("Backend process stopped"), proc = backends.current) {
   if (proc) {
+    proc.wcuKilled = true;
     clearTimeout(proc.wcuReadyTimer);
     if (backends[proc.wcuDesk] === proc) backends[proc.wcuDesk] = null;
     failBackendWaiters(error, proc);
@@ -1255,9 +1282,11 @@ async function dispatchBackend(action, args = {}, timeoutMs = 30000, request, de
       const error = new Error(`Windows Computer Use backend timed out after ${timeoutMs}ms during ${action}${targetHint}`);
       error.backendTimeout = true;
       reject(error);
+      const interruptedInput = proc.wcuDesk === 'current' && sendsRealInput(action, args);
       // The wedged call may have stalled the backend loop: kill it and
       // respawn lazily on the next call.
       killBackend(new Error("Backend stopped after another action timed out"), proc);
+      if (interruptedInput) requestReleaseSweep();
     };
     backendWaiters.set(id, { resolve, reject, timer: null, onTimeout, timeoutMs, proc, request, action, args, sent: false });
     dispatchNextBackend(proc);
