@@ -14,6 +14,8 @@ const command = () => integer(0, Number.MAX_SAFE_INTEGER, 0, undefined, {draft:f
 export const SETTINGS_SCHEMA = Object.freeze(Object.fromEntries(Object.entries({
   desktopTarget: choice(['quiet','fast','hyperv'], 'quiet', '工作方式 / Work mode'),
   hypervVm: {type:'text',default:'',maxLength:120,allowEmpty:true,description:'Hyper-V 虚拟机名称 / Hyper-V virtual machine name'},
+  vmBackend: choice(['hyperv','winrm'],'hyperv','虚拟机连接方式 / VM connection'),
+  remoteHost: {type:'text',default:'',maxLength:255,allowEmpty:true,description:'远程 Windows 地址 / Remote Windows address'},
   browserFirst: toggle(true, '网页优先使用浏览器通道 / Prefer browser use for web pages'),
   browserVisible: toggle(true, '显示DSH浏览器窗口 / Show the DSH browser'),
   browserApp: choice(BROWSER_APPS, 'default', '使用的浏览器 / Browser'),

@@ -60,6 +60,7 @@ export function normalizeSettings(input = {}) {
   if(value.toolPreset==='auto')value.toolPreset=value.enabledTools.length===TOOL_NAMES.length?'full':'custom';
   if(value.browserApp==='firefox'||value.desktopTarget==='hyperv')value.browserAttachUser=false;
   value.hypervVm=value.hypervVm.trim();
+  value.remoteHost=value.remoteHost.trim();
   value.stopShortcut=normalizeStopShortcut(value.stopShortcut);
   value.progressLockShortcut=normalizeStopShortcut(value.progressLockShortcut);
   if(value.progressLockShortcut&&value.progressLockShortcut===value.stopShortcut)throw new Error('progressLockShortcut must differ from the stop shortcut');
@@ -71,11 +72,13 @@ export function enabledToolsForSettings(input = {}) {
   return [...(['full','lazy'].includes(settings.toolPreset)?TOOL_NAMES:settings.toolPreset==='lite'?LITE_TOOL_NAMES:settings.enabledTools)];
 }
 
+export const vmTargetOf = s => s.vmBackend === 'winrm' ? s.remoteHost : s.hypervVm;
+
 // Both permission and startup state matter when deciding whether to reconnect.
 // Low disruption and Foreground share one server, which reads the mode live.
 export function toolSelectionKey(input = {}) {
   const settings=normalizeSettings(input);
-  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser,desktopTarget:settings.desktopTarget==='hyperv'?'hyperv':'local',hypervVm:settings.desktopTarget==='hyperv'?settings.hypervVm:''});
+  return JSON.stringify({allowed:enabledToolsForSettings(settings),lazy:settings.toolPreset==='lazy',browserFirst:settings.browserFirst,browserVisible:settings.browserVisible,browserApp:settings.browserApp,browserSignIn:settings.browserSignIn,browserAttachUser:settings.browserAttachUser,desktopTarget:settings.desktopTarget==='hyperv'?'hyperv':'local',vmBackend:settings.desktopTarget==='hyperv'?settings.vmBackend:'',vmTarget:settings.desktopTarget==='hyperv'?vmTargetOf(settings):''});
 }
 
 export function browserRoutingInstructions(settings = {}, allowed = enabledToolsForSettings(settings)) {

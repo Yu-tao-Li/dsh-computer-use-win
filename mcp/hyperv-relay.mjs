@@ -9,12 +9,11 @@ import { consumeGrant, mintGrant } from './policy.mjs';
 import { vmBackend } from './vm-backends.mjs';
 
 export const HYPERV_ROUTE = '/dsh-computer-use-win/api/hyperv';
-const defaultBackend = vmBackend('hyperv');
 const pngHeader = Buffer.from('89504e470d0a1a0a', 'hex');
 const ownPng = /^[a-f0-9-]{36}\.png$/;
 let nextSweep = 0;
 
-export function createHypervSetupHandler({ settings, reconnect, setup = defaultBackend.configure, probe = defaultBackend.probe }) {
+export function createHypervSetupHandler({ settings, reconnect, setup = (target, backendId = 'hyperv') => vmBackend(backendId).configure(target), probe = () => vmBackend('hyperv').probe() }) {
   let active = false;
   return async (request, response) => {
     const send = (status, data) => {
@@ -30,11 +29,16 @@ export function createHypervSetupHandler({ settings, reconnect, setup = defaultB
     if (!trustedRequest(request)) return send(403, { ok: false });
     if (active) return send(409, { ok: false });
     const config = settings();
-    if (!config.hypervVm) return send(400, { ok: false, error: 'WCU_HYPERV_VM_REQUIRED' });
+    const backendId = config.vmBackend ?? 'hyperv';
+    const target = backendId === 'winrm' ? config.remoteHost : config.hypervVm;
+    if (!target) return send(400, { ok: false, error: backendId === 'winrm' ? 'WCU_REMOTE_HOST_REQUIRED' : 'WCU_HYPERV_VM_REQUIRED' });
     active = true;
     try {
-      const result = await setup(config.hypervVm);
-      if (result.ok && settings().hypervVm === config.hypervVm) await reconnect?.(config.hypervVm);
+      const result = await setup(target, backendId);
+      const latest = settings();
+      if (result.ok && (latest.vmBackend ?? 'hyperv') === backendId && (backendId === 'winrm' ? latest.remoteHost : latest.hypervVm) === target) {
+        await reconnect?.(target);
+      }
       send(200, result);
     } catch (error) {
       send(500, { ok: false, error: String(error.message || error).slice(0, 400) });
@@ -95,10 +99,11 @@ async function deliverImages(message, outputDir) {
 }
 
 async function relay() {
-  const name = process.env.WCU_HYPERV_VM;
+  const backendId = process.env.WCU_VM_BACKEND || 'hyperv';
+  const target = backendId === 'winrm' ? process.env.WCU_REMOTE_HOST : process.env.WCU_HYPERV_VM;
   const { WCU_APPROVAL_SECRET: hostSecret, WCU_APPROVAL_LEDGER: hostLedger } = process.env;
   const guestSecret = hostSecret ? randomBytes(32).toString('base64url') : '';
-  const worker = defaultBackend.start('Relay', name, { ...process.env, WCU_APPROVAL_SECRET: guestSecret });
+  const worker = vmBackend(backendId).start('Relay', target, { ...process.env, WCU_APPROVAL_SECRET: guestSecret });
   const send = value => process.stdout.write(JSON.stringify(value) + '\n');
   const pending = new Set();
   const usedGrants = new Map();

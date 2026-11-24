@@ -1,6 +1,8 @@
 param(
   [Parameter(Mandatory)][ValidateSet('Relay','Configure','Guest','Probe')][string]$Mode,
+  [ValidateSet('HyperV','WinRM')][string]$Backend = 'HyperV',
   [string]$VMName,
+  [string]$Target,
   [string]$GuestRoot
 )
 $ErrorActionPreference = 'Stop'
@@ -67,6 +69,66 @@ function Connect-Guest($Vm, [pscredential]$Credential) {
   # The GUI user must already have an interactive desktop. PowerShell Direct is
   # used only for staging and transport and has no interactive desktop itself.
   return (New-PSSession -VMId $Vm.Id -Credential $Credential)
+}
+
+function Resolve-Guest {
+  if ($Backend -eq 'HyperV') {
+    $vm = Get-SelectedVm
+    return [pscustomobject]@{ Kind = 'HyperV'; Key = $vm.Id.ToString('D'); Name = $vm.Name; Vm = $vm }
+  }
+  $err = 'WCU_REMOTE_HOST_REQUIRED: enter the remote Windows address (IP or computer name, optional :port) in Computer Use settings.'
+  if ([string]::IsNullOrWhiteSpace($Target) -or $Target.Trim().StartsWith('-') -or ($Target -match '[\x00-\x1f\s]')) { throw $err }
+  $trimmed = $Target.Trim()
+  $remoteHost = $null
+  $port = 5985
+  $portText = $null
+  if ($trimmed -match '^\[([0-9A-Fa-f:]+)\](?::(\d+))?$') {
+    $remoteHost = $Matches[1]
+    $portText = $Matches[2]
+    if (-not $remoteHost.Contains(':')) { throw $err }
+  } elseif ($trimmed -match '^([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)(?::(\d+))?$') {
+    $remoteHost = $Matches[1]
+    $portText = $Matches[2]
+  } else {
+    throw $err
+  }
+  if ($null -ne $portText -and $portText -ne '') {
+    $parsed = 0
+    if (-not [int]::TryParse($portText, [ref]$parsed) -or $parsed -lt 1 -or $parsed -gt 65535) { throw $err }
+    $port = $parsed
+  }
+  $canonical = if ($remoteHost.Contains(':')) { "[$remoteHost]:$port" } else { "${remoteHost}:$port" }
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical.ToLowerInvariant()))
+    $hex = [BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant().Substring(0, 32)
+  } finally {
+    $sha.Dispose()
+  }
+  return [pscustomobject]@{ Kind = 'WinRM'; Key = ('winrm-' + $hex); Name = $canonical; Host = $remoteHost; Port = $port }
+}
+
+function Connect-Target($Guest, [pscredential]$Credential) {
+  if ($Guest.Kind -eq 'HyperV') { return (Connect-Guest $Guest.Vm $Credential) }
+  $option = New-PSSessionOption -OpenTimeout 20000 -OperationTimeout 120000
+  try {
+    return (New-PSSession -ComputerName $Guest.Host -Port $Guest.Port -Credential $Credential -Authentication Negotiate -SessionOption $option -ErrorAction Stop)
+  } catch {
+    $message = [string]$_.Exception.Message
+    $code = $null
+    if ($_.Exception.PSObject.Properties['ErrorCode']) { $code = $_.Exception.ErrorCode }
+    elseif ($_.Exception.InnerException -and $_.Exception.InnerException.PSObject.Properties['ErrorCode']) { $code = $_.Exception.InnerException.ErrorCode }
+    if ($message -match 'TrustedHosts') {
+      throw 'WCU_REMOTE_TRUST: add this address to WinRM TrustedHosts on this PC (see the setup step), then try again.'
+    }
+    if ($code -eq 5 -or $message -match '(?i)access is denied|logon failure') {
+      throw ('WCU_REMOTE_SIGNIN_FAILED: ' + $message)
+    }
+    if ($message -match '(?i)WinRM service') {
+      throw ('WCU_REMOTE_CLIENT: ' + $message)
+    }
+    throw ('WCU_REMOTE_UNREACHABLE: ' + $message)
+  }
 }
 
 function Start-GuestWorker([string]$Root) {
@@ -171,19 +233,20 @@ $remote = $null
 $archive = $null
 $taskName = 'Wincu-Guest-' + [Guid]::NewGuid().ToString('N')
 try {
-  $vm = Get-SelectedVm
+  $guest = Resolve-Guest
   $credentialRoot = Join-Path $env:LOCALAPPDATA 'dsh-computer-use-win\hyperv'
-  $credentialFile = Join-Path $credentialRoot ($vm.Id.ToString('D') + '.credential.xml')
+  $credentialFile = Join-Path $credentialRoot ($guest.Key + '.credential.xml')
   if ($Mode -eq 'Configure') {
-    $credential = Get-Credential -Message "Sign in to the Windows guest $($vm.Name) for Wincu. Use the account already signed in inside this VM."
+    $credential = Get-Credential -Message "Sign in to the Windows guest $($guest.Name) for Wincu. Use the account already signed in inside this VM."
     if ($null -eq $credential) { [Console]::WriteLine('{"cancelled":true}'); exit 0 }
-    try { $session = Connect-Guest $vm $credential }
+    try { $session = Connect-Target $guest $credential }
     catch {
       # PowerShell Direct reports a wrong password, a PIN or a guest that has
       # not finished starting in the system language; the settings page shows
       # one sign-in hint for all of them and keeps this text as the detail.
-      if ($_.Exception.Message -match '^WCU_HYPERV_') { throw }
-      throw ('WCU_HYPERV_SIGNIN_FAILED: ' + $_.Exception.Message)
+      if ($_.Exception.Message -match '^WCU_(HYPERV|REMOTE)_') { throw }
+      if ($guest.Kind -eq 'HyperV') { throw ('WCU_HYPERV_SIGNIN_FAILED: ' + $_.Exception.Message) }
+      throw
     }
     [void][IO.Directory]::CreateDirectory($credentialRoot)
     $credential | Export-Clixml -LiteralPath $credentialFile -Force
@@ -200,7 +263,7 @@ try {
   }
   $credential = Import-Clixml -LiteralPath $credentialFile
   if ($credential -isnot [pscredential]) { throw 'WCU_HYPERV_CONFIG_REQUIRED: configure the connection again.' }
-  $session = Connect-Guest $vm $credential
+  $session = Connect-Target $guest $credential
   $guestInfo = Invoke-Command -Session $session -ArgumentList $taskName -ScriptBlock {
     param($name)
     $ErrorActionPreference = 'Stop'
