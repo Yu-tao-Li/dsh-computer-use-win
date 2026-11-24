@@ -822,15 +822,41 @@ public static class WcuInputHold {
   public sealed class UserInput { public bool Held, Fullscreen; public int Notification; public long Foreground; }
   static readonly int[] Watched = { 0x01, 0x02, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x5B, 0x5C };
   static bool AnyHeld() { foreach (int key in Watched) if ((GetAsyncKeyState(key) & 0x8000) != 0) return true; return false; }
+  // SHQueryUserNotificationState: 2 busy, 3 Direct3D full screen, 4 presentation mode.
+  // Windows also reports busy for a maximized window on a monitor without a taskbar (#100):
+  // with 2, only a window without a title bar that covers its whole monitor counts.
+  public static bool LooksFullscreen(int notification, int style, string className, WindowsComputerUseNative.RECT window, WindowsComputerUseNative.RECT monitor) {
+    if (notification == 3 || notification == 4) return true;
+    if (notification != 2) return false;
+    if ((style & 0x00C00000) == 0x00C00000) return false; // WS_CAPTION
+    if (className == "Progman" || className == "WorkerW" || className == "Shell_TrayWnd" || className == "Shell_SecondaryTrayWnd") return false;
+    return window.left <= monitor.left && window.top <= monitor.top && window.right >= monitor.right && window.bottom >= monitor.bottom;
+  }
   // Whether borrowing now would break what the user is doing: a modifier or a
-  // mouse button down, or a full-screen app or presentation in front
-  // (SHQueryUserNotificationState: 2 busy, 3 Direct3D full screen, 4 presentation mode).
+  // mouse button down, or a full-screen app or presentation in front.
   public static UserInput UserState() {
     var state = new UserInput();
     state.Held = AnyHeld();
+    IntPtr fg = WindowsComputerUseNative.GetForegroundWindow();
+    state.Foreground = fg.ToInt64();
     int value;
-    if (SHQueryUserNotificationState(out value) == 0) { state.Notification = value; state.Fullscreen = value == 2 || value == 3 || value == 4; }
-    state.Foreground = WindowsComputerUseNative.GetForegroundWindow().ToInt64();
+    if (SHQueryUserNotificationState(out value) == 0) {
+      state.Notification = value;
+      if (value == 3 || value == 4) {
+        state.Fullscreen = true;
+      } else if (value == 2 && fg != IntPtr.Zero && WindowsComputerUseNative.IsWindowVisible(fg) && !WindowsComputerUseNative.IsIconic(fg)) {
+        var cls = new System.Text.StringBuilder(128);
+        WindowsComputerUseNative.RECT winRect;
+        IntPtr mon = MonitorFromWindow(fg, 2);
+        var mi = new MONITORINFO();
+        mi.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
+        if (WindowsComputerUseNative.GetClassName(fg, cls, cls.Capacity) > 0 &&
+            WindowsComputerUseNative.GetWindowRect(fg, out winRect) &&
+            mon != IntPtr.Zero && GetMonitorInfo(mon, ref mi)) {
+          state.Fullscreen = LooksFullscreen(value, WindowsComputerUseNative.GetWindowLong(fg, -16), cls.ToString(), winRect, mi.rcMonitor);
+        }
+      }
+    }
     return state;
   }
 
@@ -1035,7 +1061,10 @@ public static class WcuInputHold {
   [DllImport("user32.dll")] static extern bool PostThreadMessage(uint thread, uint message, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] static extern int GetMessage(out Msg message, IntPtr hwnd, uint min, uint max);
   [DllImport("user32.dll")] static extern bool PeekMessage(out Msg message, IntPtr hwnd, uint min, uint max, uint remove);
+  [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public WindowsComputerUseNative.RECT rcMonitor, rcWork; public uint dwFlags; }
   [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+  [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+  [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
   [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
   const uint InstallMessage = 0x8001, UninstallMessage = 0x8002;
   static readonly HookProc keyboardProc = OnKey, mouseProc = OnMouse;

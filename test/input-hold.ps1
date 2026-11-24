@@ -84,6 +84,23 @@ Check (-not $core.Mouse(0x200,10,10,10,10,0,0,0,$false)) 'A move passes the guar
 Check (-not $core.Mouse(0x201,10,10,10,10,0,0,0,$false)) 'The user''s click passes'
 Check ($core.State -eq [WcuInputHold]::Idle) 'and ends the guard'
 
+# Fullscreen heuristic (#100): QUNS_BUSY (2) counts only for a captionless window covering its monitor.
+function New-Rect($l, $t, $r, $b) {
+  $rect = New-Object WindowsComputerUseNative+RECT
+  $rect.left = $l; $rect.top = $t; $rect.right = $r; $rect.bottom = $b
+  return $rect
+}
+$mon = New-Rect -1920 0 0 1080
+$maxSecondary = New-Rect -1931 -11 11 1091
+$smaller = New-Rect -1900 10 -20 1060
+Check (-not [WcuInputHold]::LooksFullscreen(2, 0x15C70000, 'Chrome_WidgetWin_1', $maxSecondary, $mon)) 'Maximized captioned window on secondary monitor is not fullscreen'
+Check ([WcuInputHold]::LooksFullscreen(2, ([Convert]::ToInt32('96000000', 16) -bor 0), 'TestPopup', $mon, $mon)) 'Captionless popup covering monitor on QUNS_BUSY is fullscreen'
+Check (-not [WcuInputHold]::LooksFullscreen(2, ([Convert]::ToInt32('96000000', 16) -bor 0), 'TestPopup', $smaller, $mon)) 'Smaller popup on QUNS_BUSY is not fullscreen'
+Check ([WcuInputHold]::LooksFullscreen(3, 0x15C70000, 'Any', $smaller, $mon)) 'Direct3D fullscreen (3) is always fullscreen'
+Check ([WcuInputHold]::LooksFullscreen(4, 0x15C70000, 'Any', $smaller, $mon)) 'Presentation mode (4) is always fullscreen'
+Check (-not [WcuInputHold]::LooksFullscreen(5, ([Convert]::ToInt32('96000000', 16) -bor 0), 'TestPopup', $mon, $mon)) 'QUNS_ACCEPTS_NOTIFICATIONS (5) is not fullscreen'
+Check (-not [WcuInputHold]::LooksFullscreen(2, ([Convert]::ToInt32('96000000', 16) -bor 0), 'WorkerW', $mon, $mon)) 'Desktop WorkerW covering monitor is not fullscreen'
+
 # What the server reads before borrowing, and a hook pair that comes and goes.
 $state=[WcuInputHold]::UserState()
 Check ($null -ne $state -and $state.Notification -ge 0) 'The user state reads'
