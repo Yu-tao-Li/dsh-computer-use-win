@@ -344,5 +344,7 @@
   "hypervErrVmUnknown": "找不到叫这个名字的虚拟机，核对第 5 步的名称。",
   "hypervErrSignIn": "没能登录虚拟机：确认它已进入桌面，用户名和密码正确（第 4、6 步）。",
   "hypervBusy": "另一次连接配置正在进行。",
+  "hypervHomeEdition": "这台电脑是 Windows 家庭版，不带 Hyper-V，虚拟机方式用不了。可以改用“少打扰”：DSH 打开的程序放进本机后台桌面，必须用鼠标键盘时只短暂借用。",
+  "hypervUseQuiet": "改用少打扰",
   "reportCancelledConnection": "连接配置已取消。"
 }

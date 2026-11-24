@@ -1,5 +1,5 @@
 param(
-  [Parameter(Mandatory)][ValidateSet('Relay','Configure','Guest')][string]$Mode,
+  [Parameter(Mandatory)][ValidateSet('Relay','Configure','Guest','Probe')][string]$Mode,
   [string]$VMName,
   [string]$GuestRoot
 )
@@ -136,6 +136,25 @@ function Start-GuestWorker([string]$Root) {
     $process.Dispose()
     [IO.File]::WriteAllText((Join-Path $Root 'closed'),'1')
   }
+}
+
+if ($Mode -eq 'Probe') {
+  $edition = ''
+  try {
+    $edition = [string](Get-ItemPropertyValue -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name 'EditionID' -ErrorAction Stop)
+  } catch {
+    try {
+      $props = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name 'EditionID' -ErrorAction SilentlyContinue
+      if ($props) { $edition = [string]$props.EditionID }
+    } catch {}
+  }
+  $homeEdition = $edition -match '^Core'
+  $tools = [bool](Get-Command Get-VM -ErrorAction SilentlyContinue)
+  $service = [bool](Get-Service vmms -ErrorAction SilentlyContinue)
+  $available = $tools -and $service
+  $reason = if ($available) { $null } elseif ($homeEdition) { 'home-edition' } else { 'not-enabled' }
+  [Console]::WriteLine(([ordered]@{ ok = $true; backend = 'hyperv'; available = $available; reason = $reason; edition = $edition } | ConvertTo-Json -Compress))
+  exit 0
 }
 
 if ($Mode -eq 'Guest') {

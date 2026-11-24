@@ -34,6 +34,7 @@ const suites = [
   ['browser-frames',process.execPath,['test/browser-frames.mjs']],
   ['browser-observation',process.execPath,['test/browser-observation.mjs']],
   ['settings-schema',process.execPath,['test/settings-schema.mjs']],
+  ['vm-backends',process.execPath,['test/vm-backends.mjs']],
   ['backend-ready',process.execPath,['test/backend-ready.mjs']],
   ['rpc-protocol',process.execPath,['test/rpc-protocol.mjs']],
   ['catalog-contract',process.execPath,['test/catalog-contract.mjs']],

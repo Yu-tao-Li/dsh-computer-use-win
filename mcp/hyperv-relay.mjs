@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
@@ -7,49 +6,26 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { trustedRequest } from './diagnostics.mjs';
 import { consumeGrant, mintGrant } from './policy.mjs';
+import { vmBackend } from './vm-backends.mjs';
 
 export const HYPERV_ROUTE = '/dsh-computer-use-win/api/hyperv';
-const script = fileURLToPath(new URL('../scripts/hyperv-desktop.ps1', import.meta.url));
-const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+const defaultBackend = vmBackend('hyperv');
 const pngHeader = Buffer.from('89504e470d0a1a0a', 'hex');
 const ownPng = /^[a-f0-9-]{36}\.png$/;
 let nextSweep = 0;
 
-function start(mode, name, env = process.env) {
-  if (process.platform !== 'win32') throw new Error('WCU_HYPERV_UNAVAILABLE: use a native Windows DSH host to run in Hyper-V.');
-  // A saved name controls one exact VM. Nothing from a tool request becomes a command.
-  if (typeof name !== 'string' || !name.trim() || name.startsWith('-') || /[\u0000-\u001f]/.test(name)) {
-    throw new Error('WCU_HYPERV_VM_REQUIRED: choose a local Hyper-V virtual machine in Computer Use settings.');
-  }
-  return spawn(powershell, ['-NoProfile', '-File', script, '-Mode', mode, '-VMName', name], {
-    windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env,
-  });
-}
-
-function configure(name) {
-  return new Promise((resolve, reject) => {
-    const worker = start('Configure', name);
-    let stdout = '', stderr = '';
-    const deadline = setTimeout(() => worker.kill(), 85_000);
-    worker.stdout.setEncoding('utf8').on('data', chunk => { stdout = (stdout + chunk).slice(-8192); });
-    worker.stderr.setEncoding('utf8').on('data', chunk => { stderr = (stderr + chunk).slice(-2048); });
-    worker.once('error', error => { clearTimeout(deadline); reject(error); });
-    worker.once('close', code => {
-      clearTimeout(deadline);
-      if (code !== 0) { reject(new Error(stderr.trim() || 'The Hyper-V connection could not be configured.')); return; }
-      try { resolve(JSON.parse(stdout.trim().split(/\r?\n/).at(-1))); }
-      catch { reject(new Error('Windows did not return a connection result.')); }
-    });
-  });
-}
-
-export function createHypervSetupHandler({ settings, reconnect, setup = configure }) {
+export function createHypervSetupHandler({ settings, reconnect, setup = defaultBackend.configure, probe = defaultBackend.probe }) {
   let active = false;
   return async (request, response) => {
     const send = (status, data) => {
       response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify(data));
     };
+    if (request.method === 'GET') {
+      if (!trustedRequest(request)) return send(403, { ok: false });
+      try { return send(200, await probe()); }
+      catch (error) { return send(500, { ok: false, error: String(error.message || error).slice(0, 400) }); }
+    }
     if (request.method !== 'POST') return send(405, { ok: false });
     if (!trustedRequest(request)) return send(403, { ok: false });
     if (active) return send(409, { ok: false });
@@ -122,7 +98,7 @@ async function relay() {
   const name = process.env.WCU_HYPERV_VM;
   const { WCU_APPROVAL_SECRET: hostSecret, WCU_APPROVAL_LEDGER: hostLedger } = process.env;
   const guestSecret = hostSecret ? randomBytes(32).toString('base64url') : '';
-  const worker = start('Relay', name, { ...process.env, WCU_APPROVAL_SECRET: guestSecret });
+  const worker = defaultBackend.start('Relay', name, { ...process.env, WCU_APPROVAL_SECRET: guestSecret });
   const send = value => process.stdout.write(JSON.stringify(value) + '\n');
   const pending = new Set();
   const usedGrants = new Map();

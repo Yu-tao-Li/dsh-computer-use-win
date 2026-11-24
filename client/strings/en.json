@@ -344,5 +344,7 @@
   "hypervErrVmUnknown": "No virtual machine has this name; check the name in step 5.",
   "hypervErrSignIn": "Could not sign in to the VM: check that it has reached the desktop and that the user name and password are right (steps 4 and 6).",
   "hypervBusy": "Another connection is being configured.",
+  "hypervHomeEdition": "This PC runs Windows Home, which does not include Hyper-V, so virtual machine mode is unavailable. You can use Low disruption instead: apps DSH opens run on a hidden desktop, and the mouse and keyboard are borrowed only briefly.",
+  "hypervUseQuiet": "Use Low disruption",
   "reportCancelledConnection": "Connection setup was cancelled."
 }

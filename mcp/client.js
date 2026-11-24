@@ -666,6 +666,8 @@ window.__ModuleLoader__.load({
     "hypervErrVmUnknown": "找不到叫这个名字的虚拟机，核对第 5 步的名称。",
     "hypervErrSignIn": "没能登录虚拟机：确认它已进入桌面，用户名和密码正确（第 4、6 步）。",
     "hypervBusy": "另一次连接配置正在进行。",
+    "hypervHomeEdition": "这台电脑是 Windows 家庭版，不带 Hyper-V，虚拟机方式用不了。可以改用“少打扰”：DSH 打开的程序放进本机后台桌面，必须用鼠标键盘时只短暂借用。",
+    "hypervUseQuiet": "改用少打扰",
     "reportCancelledConnection": "连接配置已取消。"
   },
   "en": {
@@ -1014,6 +1016,8 @@ window.__ModuleLoader__.load({
     "hypervErrVmUnknown": "No virtual machine has this name; check the name in step 5.",
     "hypervErrSignIn": "Could not sign in to the VM: check that it has reached the desktop and that the user name and password are right (steps 4 and 6).",
     "hypervBusy": "Another connection is being configured.",
+    "hypervHomeEdition": "This PC runs Windows Home, which does not include Hyper-V, so virtual machine mode is unavailable. You can use Low disruption instead: apps DSH opens run on a hidden desktop, and the mouse and keyboard are borrowed only briefly.",
+    "hypervUseQuiet": "Use Low disruption",
     "reportCancelledConnection": "Connection setup was cancelled."
   }
 };
@@ -1256,6 +1260,7 @@ window.__ModuleLoader__.load({
       [data-wincu-settings] .wcu-notice strong{display:block;margin:0 0 2px;font-size:13px;font-weight:600;color:var(--wcu-fg)}
       [data-wincu-settings] .wcu-notice ol,[data-wincu-settings] .wcu-notice ul{margin:0 0 8px;padding-left:20px}
       [data-wincu-settings] .wcu-notice li{margin:2px 0}
+      [data-wincu-settings] .wcu-notice p{margin:0 0 8px}
       [data-wincu-settings] .wcu-address{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:4px 0}
       [data-wincu-settings] .wcu-address code{font:12px/1.5 Consolas,'Cascadia Mono',monospace;color:var(--wcu-fg);background:var(--wcu-control);border:.5px solid var(--wcu-line-strong);border-radius:6px;padding:1px 6px;user-select:all;overflow-wrap:anywhere}
       [data-wincu-settings] .wcu-address button.wcu-small{height:24px;padding:0 8px;border-radius:6px}
@@ -1953,6 +1958,15 @@ window.__ModuleLoader__.load({
       const [recording,setRecording] = React.useState(false), [recordMessage,setRecordMessage] = React.useState('');
       const [noteView,setNoteView] = React.useState(null), [noteSaving,setNoteSaving] = React.useState(false);
       const [hypervConfiguring,setHypervConfiguring] = React.useState(false), [hypervMessage,setHypervMessage] = React.useState('');
+      const [hypervProbe,setHypervProbe] = React.useState(null);
+      React.useEffect(()=>{
+        if(draft.desktopTarget!=='hyperv'||hypervProbe!==null)return;
+        let cancelled=false;
+        requestJson('/dsh-computer-use-win/api/hyperv',{method:'GET',headers:{'x-wcu-request':'1'},timeoutMs:30000})
+          .then(({data})=>{if(!cancelled&&data?.ok)setHypervProbe(data);})
+          .catch(()=>{});
+        return ()=>{cancelled=true;};
+      },[draft.desktopTarget,hypervProbe]);
       const savedKey = JSON.stringify(Object.fromEntries(Object.keys(defaults).map(key=>[key,saved[key]])));
       const visibleBeforeFirefox=React.useRef(null),attachBeforeFirefox=React.useRef(null),prevSaved=React.useRef(saved);
       const liveOverlayKeys=['progressOverlayWidth','progressOverlayHeight','progressOverlayPosition','progressOverlayX','progressOverlayY','progressOverlayLocked','progressOverlayEnabled'];
@@ -2126,6 +2140,9 @@ window.__ModuleLoader__.load({
           draft.desktopTarget==='quiet'&&h('details',{className:'wcu-detail','data-wincu-quiet-notes':true},h('summary',null,t('moreNotes')),
             h('div',{className:'wcu-notice'},h('ul',null,...[1,2,3,4].map(n=>h('li',{key:n},t('modeQuietNote'+n)))))),
           draft.desktopTarget==='hyperv'&&h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
+            hypervProbe?.available===false&&h('p',{'data-wincu-hyperv-unavailable':hypervProbe.reason||'not-enabled','data-tone':'warning'},
+              t(hypervProbe.reason==='home-edition'?'hypervHomeEdition':'hypervErrUnavailable'),' ',
+              button('hypervUseQuiet',{className:'wcu-small',disabled,onClick:()=>change('desktopTarget','quiet')})),
             h('strong',null,t('hypervSetup')),
             h('ol',null,...[1,2,3,4,5,6].map(n=>h('li',{key:n,'data-tone':hypervMessage&&hypervMessage.step===n?hypervMessage.tone:undefined},t('hypervStep'+n),
               n===2&&h('span',{className:'wcu-address'},h('code',null,HYPERV_GROUP_COMMAND),h(CopyButton,{text:HYPERV_GROUP_COMMAND,t})),
