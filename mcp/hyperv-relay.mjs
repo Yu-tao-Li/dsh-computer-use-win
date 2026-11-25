@@ -36,8 +36,8 @@ export function createHypervSetupHandler({ settings, reconnect, setup = (target,
     try {
       const result = await setup(target, backendId);
       const latest = settings();
-      if (result.ok && (latest.vmBackend ?? 'hyperv') === backendId && (backendId === 'winrm' ? latest.remoteHost : latest.hypervVm) === target) {
-        await reconnect?.(target);
+      if (result.ok && !result.missing && (latest.vmBackend ?? 'hyperv') === backendId && (backendId === 'winrm' ? latest.remoteHost : latest.hypervVm) === target) {
+        await reconnect?.(target, backendId);
       }
       send(200, result);
     } catch (error) {

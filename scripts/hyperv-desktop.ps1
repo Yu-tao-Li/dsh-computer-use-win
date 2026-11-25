@@ -121,10 +121,11 @@ function Connect-Target($Guest, [pscredential]$Credential) {
     if ($message -match 'TrustedHosts') {
       throw 'WCU_REMOTE_TRUST: add this address to WinRM TrustedHosts on this PC (see the setup step), then try again.'
     }
-    if ($code -eq 5 -or $message -match '(?i)access is denied|logon failure') {
+    if ($code -in @(5, 1326, -2147024891, -2147023570) -or $message -match '(?i)access is denied|logon failure') {
       throw ('WCU_REMOTE_SIGNIN_FAILED: ' + $message)
     }
-    if ($message -match '(?i)WinRM service') {
+    $localWinrm = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+    if (-not $localWinrm -or $localWinrm.Status -ne 'Running') {
       throw ('WCU_REMOTE_CLIENT: ' + $message)
     }
     throw ('WCU_REMOTE_UNREACHABLE: ' + $message)
@@ -198,6 +199,29 @@ function Start-GuestWorker([string]$Root) {
     $process.Dispose()
     [IO.File]::WriteAllText((Join-Path $Root 'closed'),'1')
   }
+}
+
+$guestCleanup = {
+  param($root,$name)
+  $directory = Join-Path $env:LOCALAPPDATA 'dsh-computer-use-win\hyperv-workers'
+  $owned = Get-Item -LiteralPath $root -Force -ErrorAction SilentlyContinue
+  if (-not $owned -or -not $owned.PSIsContainer -or $name -notmatch '^Wincu-Guest-[0-9a-f]{32}$' -or
+      $owned.FullName -ne [IO.Path]::GetFullPath((Join-Path $directory $name)) -or
+      ($owned.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return }
+  # The worker exits when its lease disappears. Merely aging the lease by a
+  # few seconds leaves it running during the entire cleanup wait.
+  [IO.File]::Delete((Join-Path $owned.FullName 'lease'))
+  $deadline = [DateTime]::UtcNow.AddSeconds(3)
+  while ([IO.File]::Exists((Join-Path $root 'ready')) -and -not [IO.File]::Exists((Join-Path $root 'closed')) -and [DateTime]::UtcNow -lt $deadline) {
+    Start-Sleep -Milliseconds 60
+  }
+  try {
+    $scheduler = New-Object -ComObject 'Schedule.Service'
+    $scheduler.Connect()
+    $scheduler.GetFolder('\').DeleteTask($name,0)
+  } catch {}
+  # Keep guest application data; remove only the worker created for this relay.
+  Remove-Item -LiteralPath $owned.FullName -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 if ($Mode -eq 'Probe') {
@@ -465,25 +489,7 @@ try {
   if ($session) {
     if ($remote) {
       try {
-        Invoke-Command -Session $session -ArgumentList $remote,$taskName -ScriptBlock {
-          param($root,$name)
-          $lease = Join-Path $root 'lease'
-          if ([IO.File]::Exists($lease)) { [IO.File]::SetLastWriteTimeUtc($lease,[DateTime]::UtcNow.AddSeconds(-6)) }
-          $deadline = [DateTime]::UtcNow.AddSeconds(3)
-          while ([IO.File]::Exists((Join-Path $root 'ready')) -and -not [IO.File]::Exists((Join-Path $root 'closed')) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 60 }
-          $scheduler = New-Object -ComObject 'Schedule.Service'
-          $scheduler.Connect()
-          $folder = $scheduler.GetFolder('\')
-          try { $folder.DeleteTask($name,0) } catch {}
-          # Keep guest application data; remove only the worker created for this relay.
-          $directory = Join-Path $env:LOCALAPPDATA 'dsh-computer-use-win\hyperv-workers'
-          $owned = Get-Item -LiteralPath $root -Force -ErrorAction SilentlyContinue
-          if ($owned -and $owned.PSIsContainer -and $name -match '^Wincu-Guest-[0-9a-f]{32}$' -and
-              $owned.FullName -eq [IO.Path]::GetFullPath((Join-Path $directory $name)) -and
-              -not ($owned.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            Remove-Item -LiteralPath $owned.FullName -Recurse -Force -ErrorAction SilentlyContinue
-          }
-        }
+        Invoke-Command -Session $session -ArgumentList $remote,$taskName -ScriptBlock $guestCleanup
       } catch {}
     }
     Remove-PSSession $session

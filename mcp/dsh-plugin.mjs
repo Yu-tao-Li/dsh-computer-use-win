@@ -203,7 +203,7 @@ export async function apply(ctx, config) {
     });
     if (typeof owner.webServer.register === 'function') owner.effect(() => {
       try { return owner.webServer.register({ kind: 'exact', path: HYPERV_ROUTE,
-        handler: createHypervSetupHandler({ settings: () => desired, reconnect: vm => applySettings(desired, desiredJson, vm) }),
+        handler: createHypervSetupHandler({ settings: () => desired, reconnect: (target, backend) => applySettings(desired, desiredJson, { target, backend }) }),
       }); }
       catch (error) { owner.logger.warn('dsh-computer-use-win: the Hyper-V setup route is unavailable: %s', error?.message ?? error); return () => {}; }
     });
@@ -323,7 +323,7 @@ export async function apply(ctx, config) {
   let selectionPending=0,selectionRetry={at:0,delay:0};
   atomicJson(runtime.configFile, desired);
   ctx.effect(() => () => { stopped = true; void closeBackground(); });
-  const isSelectedVm = target => desired.desktopTarget === 'hyperv' && vmTargetOf(desired) === target;
+  const isSelectedVm = ({ target, backend }) => desired.desktopTarget === 'hyperv' && desired.vmBackend === backend && vmTargetOf(desired) === target;
   const applySettings = (next, nextJson, reconnectVm) => {
     const nextSettings = next === desired ? desired : normalizeSettings(next);
     const json = next === desired ? desiredJson : (nextJson ?? JSON.stringify(nextSettings));

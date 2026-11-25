@@ -36,6 +36,7 @@ const suites = [
   ['browser-observation',process.execPath,['test/browser-observation.mjs']],
   ['settings-schema',process.execPath,['test/settings-schema.mjs']],
   ['vm-backends',process.execPath,['test/vm-backends.mjs']],
+  ['winrm-contract',powershell,['-NoProfile','-File','test/winrm-contract.ps1']],
   ['backend-ready',process.execPath,['test/backend-ready.mjs']],
   ['rpc-protocol',process.execPath,['test/rpc-protocol.mjs']],
   ['catalog-contract',process.execPath,['test/catalog-contract.mjs']],
