@@ -287,12 +287,19 @@ try {
       if ($guest.Kind -eq 'HyperV') { throw ('WCU_HYPERV_SIGNIN_FAILED: ' + $_.Exception.Message) }
       throw
     }
+    # Missing Node or a signed-in desktop is a setup step. An interrupted or
+    # failed check must leave the saved connection alone.
+    try { $missing = Invoke-Command -Session $session -ScriptBlock $guestReadiness -ErrorAction Stop | Select-Object -First 1 }
+    catch { throw ('WCU_HYPERV_READINESS_FAILED: could not check the Windows guest. ' + $_.Exception.Message) }
     [void][IO.Directory]::CreateDirectory($credentialRoot)
-    $credential | Export-Clixml -LiteralPath $credentialFile -Force
-    # The credential works. A step still missing inside the guest is reported,
-    # not failed: the relay checks it again on every start.
-    $missing = $null
-    try { $missing = Invoke-Command -Session $session -ScriptBlock $guestReadiness | Select-Object -First 1 } catch {}
+    $pendingCredential = $credentialFile + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+      $credential | Export-Clixml -LiteralPath $pendingCredential
+      if ([IO.File]::Exists($credentialFile)) { [IO.File]::Replace($pendingCredential,$credentialFile,[NullString]::Value) }
+      else { [IO.File]::Move($pendingCredential,$credentialFile) }
+    } finally {
+      Remove-Item -LiteralPath $pendingCredential -ErrorAction SilentlyContinue
+    }
     [Console]::WriteLine((@{ ok = $true; missing = $(if ($missing -match '^WCU_HYPERV_(DESKTOP|NODE)_REQUIRED$') { [string]$missing } else { $null }) } | ConvertTo-Json -Compress))
     exit 0
   }

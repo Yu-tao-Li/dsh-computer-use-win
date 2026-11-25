@@ -1278,6 +1278,7 @@ async function runBackendOnce(action, args, timeoutMs, request, quiet, desk = 'c
 
 async function dispatchBackend(action, args = {}, timeoutMs = 30000, request, desk = 'current') {
   if (releaseSweep && action !== 'release_input' && desk === 'current') await releaseSweep;
+  if (shuttingDown && action !== 'release_input') throw new Error('Backend process stopped');
   if (request?.cancelled) throw new Error(request.takeoverError || 'COMPUTER_USE_CANCELLED');
   if (Number.isFinite(request?.deadlineMs)) {
     const remaining = request.deadlineMs - Date.now();
@@ -1944,9 +1945,20 @@ function installShutdown() {
 function shutdown(code) {
   if (!shuttingDown) {
     process.stdin.pause();
-    killBackends();
-    void ownedHiddenDesktop?.dispose();
-    shuttingDown = Promise.allSettled([takeover.close(), browserLane.shutdown()]).then(() => process.exit(code));
+    const current = backends.current;
+    if (current && backendHadInput(current)) {
+      killBackend(undefined, current);
+      requestReleaseSweep(current);
+    }
+    if (backends.background) killBackend(undefined, backends.background);
+    // Closing stdin after a failed call must not kill its replacement before
+    // it has released any recorded presses.
+    shuttingDown = Promise.resolve(releaseSweep).then(async () => {
+      killBackends();
+      void ownedHiddenDesktop?.dispose();
+      await Promise.allSettled([takeover.close(), browserLane.shutdown()]);
+      process.exit(code);
+    });
   }
   return shuttingDown;
 }

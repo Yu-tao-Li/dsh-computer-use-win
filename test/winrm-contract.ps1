@@ -64,6 +64,21 @@ Assert-ConnectError WCU_REMOTE_TRUST
 $script:failure = 'Access is denied.'
 Assert-ConnectError WCU_REMOTE_SIGNIN_FAILED
 
+function Get-Credential {
+  param($Message)
+  return $fixtureSetup.credential
+}
+function Invoke-Command {
+  [CmdletBinding()]
+  param($Session, $ScriptBlock)
+  if ($fixtureSetup.error) { throw $fixtureSetup.error }
+  if ($fixtureSetup.missing) { return $fixtureSetup.missing }
+}
+function Remove-PSSession {
+  param($Session)
+  $fixtureSetup.closedSessions++
+}
+
 function Start-Sleep {
   param($Milliseconds)
   if ([IO.File]::Exists((Join-Path $script:worker 'lease'))) { throw 'The worker still has a lease during cleanup' }
@@ -80,6 +95,33 @@ $originalLocalData = $env:LOCALAPPDATA
 try {
   $temp = (Get-Item -LiteralPath ([IO.Path]::GetTempPath())).FullName
   $env:LOCALAPPDATA = Join-Path $temp ('wcu-winrm-contract-' + [Guid]::NewGuid().ToString('N'))
+  $script:failure = ''
+  $fixtureSetup = @{ credential = $credential; missing = 'WCU_HYPERV_NODE_REQUIRED'; error = ''; closedSessions = 0 }
+  & $RelayPath -Mode Configure -Backend WinRM -Target 'vm.example.test:55985'
+  if ($LASTEXITCODE -ne 0) { throw 'An expected guest setup step should allow saving the credential' }
+  $credentialRoot = Join-Path $env:LOCALAPPDATA 'dsh-computer-use-win\hyperv'
+  $stored = Get-ChildItem -LiteralPath $credentialRoot -File -Filter '*.credential.xml'
+  if (@($stored).Count -ne 1) { throw 'Expected one saved credential for the configured endpoint' }
+  $savedBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($stored.FullName))
+
+  $fixtureSetup.credential = [pscredential]::new('ReplacementFixtureUser', $fixtureSecret)
+  $fixtureSetup.missing = ''
+  $fixtureSetup.error = 'Fixture remoting channel closed during the readiness check'
+  & $RelayPath -Mode Configure -Backend WinRM -Target 'vm.example.test:55985'
+  if ($LASTEXITCODE -ne 1) { throw 'A failed readiness check must fail configuration' }
+  if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($stored.FullName)) -ne $savedBytes) {
+    throw 'A failed readiness check must preserve the previous credential'
+  }
+  if ($fixtureSetup.closedSessions -ne 2) { throw 'Both configuration sessions must be closed' }
+
+  $fixtureSetup.error = ''
+  & $RelayPath -Mode Configure -Backend WinRM -Target 'vm.example.test:55985'
+  if ($LASTEXITCODE -ne 0 -or (Import-Clixml -LiteralPath $stored.FullName).UserName -ne $fixtureSetup.credential.UserName) {
+    throw 'A successful reconfiguration must replace the credential'
+  }
+  if (@(Get-ChildItem -LiteralPath $credentialRoot -File).Count -ne 1) {
+    throw 'A successful reconfiguration must leave only the current credential'
+  }
   $name = 'Wincu-Guest-' + [Guid]::NewGuid().ToString('N')
   $script:worker = Join-Path $env:LOCALAPPDATA "dsh-computer-use-win\hyperv-workers\$name"
   $foreign = Join-Path $env:LOCALAPPDATA 'unrelated'

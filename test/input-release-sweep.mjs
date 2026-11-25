@@ -1,6 +1,7 @@
 // Release sweep after a backend dies during real input (#99).
 // Uses a fake PowerShell backend and sends zero real input.
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { cp, mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +20,7 @@ const env = {
   WINDOWS_CU_POWERSHELL: process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe',
 };
 
-async function fixture(name, crashOnClick = false) {
+async function fixture(name, { crashOnClick = false, releaseDelay = 0, signal = false } = {}) {
   const dir = path.join(root, name);
   await mkdir(path.join(dir, 'mcp'), { recursive: true });
   await mkdir(path.join(dir, 'scripts'));
@@ -30,8 +31,9 @@ async function fixture(name, crashOnClick = false) {
   assert.ok(server.includes(signature), 'Expected runBackend signature in mcp/server.mjs');
   server = server.replace(
     signature,
-    signature + ' timeoutMs = (action === "click" || (action === "wait" && args.milliseconds === 5000)) ? 1500 : 15000;',
+    signature + ` timeoutMs = ((${!signal} && action === "click") || (action === "wait" && args.milliseconds === 5000)) ? 1500 : 15000;`,
   );
+  if (signal) server += "\nprocess.on('message', () => process.emit('SIGINT'));\n";
   await writeFile(path.join(dir, 'mcp/server.mjs'), server);
 
   const logFile = path.join(dir, 'actions.log');
@@ -44,8 +46,14 @@ async function fixture(name, crashOnClick = false) {
     '  $r=$line|ConvertFrom-Json',
     '  [IO.File]::AppendAllText($log, "$PID $($r.action)`n")',
     "  if($r.action -eq 'click'){[IO.File]::WriteAllText($env:WCU_INPUT_RECOVERY_FILE,'1');" +
-      (crashOnClick ? 'exit 47}' : 'Start-Sleep -Milliseconds 5000}'),
-    "  elseif($r.action -eq 'release_input'){if([IO.File]::ReadAllText($env:WCU_INPUT_RECOVERY_FILE) -ne '1'){throw 'Missing journal'};[IO.File]::Delete($env:WCU_INPUT_RECOVERY_FILE)}",
+      (signal ? '[IO.File]::AppendAllText($log, "$PID press_recorded`n");' : '') +
+      (crashOnClick ? 'exit 47}' : `Start-Sleep -Milliseconds ${signal ? 20000 : 5000}}`),
+    "  elseif($r.action -eq 'release_input'){",
+    ...(releaseDelay ? [`    Start-Sleep -Milliseconds ${releaseDelay}`] : []),
+    "    if([IO.File]::ReadAllText($env:WCU_INPUT_RECOVERY_FILE) -ne '1'){throw 'Missing journal'}",
+    "    [IO.File]::Delete($env:WCU_INPUT_RECOVERY_FILE)",
+    ...(releaseDelay ? ['    [IO.File]::AppendAllText($log, "$PID release_complete`n")'] : []),
+    '  }',
     "  elseif($r.action -eq 'wait'){Start-Sleep -Milliseconds ([int]$r.args.milliseconds)}",
     '  [Console]::WriteLine((@{id=$r.id;ok=$true;held=$false;fullscreen=$false;notification=5;foreground=0;released=@()}|ConvertTo-Json -Compress))',
     '}',
@@ -53,7 +61,8 @@ async function fixture(name, crashOnClick = false) {
   ].join('\n');
   await writeFile(path.join(dir, 'scripts/windows-uia.ps1'), fakeBackend, 'utf8');
 
-  const client = new McpTestClient(process.execPath, [path.join(dir, 'mcp/server.mjs')], { env });
+  const options = signal ? { env, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] } : { env };
+  const client = new McpTestClient(process.execPath, [path.join(dir, 'mcp/server.mjs')], options);
   clients.push(client);
   await client.init();
   return { client, logFile };
@@ -104,7 +113,7 @@ try {
   assert.ok(bNewEntries.length >= 1, 'Replacement backend did not log follow-up wait');
   assert.equal(bNewEntries[0].action, 'wait', 'Non-input timeout must not run release_input');
 
-  const c = await fixture('real-input-crash', true);
+  const c = await fixture('real-input-crash', { crashOnClick: true });
   const crash = await call(c.client, 'click', { x: 1, y: 2 });
   assert.equal(crash.isError, true);
   assert.match(crash.content[0].text, /Backend process exited \(exit code 47\)/);
@@ -114,7 +123,26 @@ try {
   assert.deepEqual(afterCrash.map(entry => entry.action), ['release_input', 'wait']);
   assert.doesNotMatch(c.client.stderr, /Missing journal|release sweep failed/);
 
-  console.log('PASS release sweep runs after real-input timeout and crash, skips non-input timeout; no physical input');
+  const d = await fixture('real-input-crash-on-close', { crashOnClick: true, releaseDelay: 600 });
+  assert.equal((await call(d.client, 'click', { x: 1, y: 2 })).isError, true);
+  const closed = once(d.client.child, 'close', { signal: AbortSignal.timeout(15000) });
+  d.client.child.stdin.end();
+  assert.deepEqual(await closed, [0, null]);
+  assert.deepEqual((await readLog(d.logFile)).map(entry => entry.action), ['click', 'release_input', 'release_complete']);
+
+  const e = await fixture('shutdown-during-input', { releaseDelay: 600, signal: true });
+  const click = call(e.client, 'click', { x: 1, y: 2 }).catch(() => undefined);
+  const started = AbortSignal.timeout(10000);
+  while (!(await readLog(e.logFile)).some(entry => entry.action === 'press_recorded')) {
+    await delay(50, undefined, { signal: started });
+  }
+  const interrupted = once(e.client.child, 'close', { signal: AbortSignal.timeout(15000) });
+  e.client.child.send('interrupt');
+  assert.deepEqual(await interrupted, [130, null]);
+  await click;
+  assert.deepEqual((await readLog(e.logFile)).map(entry => entry.action), ['click', 'press_recorded', 'release_input', 'release_complete']);
+
+  console.log('PASS release sweep handles timeouts, crashes, and server shutdown; no physical input');
 } finally {
   for (const client of clients) client.child.stdin.end();
   await Promise.all(clients.map(async client => {
