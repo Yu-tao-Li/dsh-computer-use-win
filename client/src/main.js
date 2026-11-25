@@ -1070,15 +1070,15 @@ window.__ModuleLoader__.load({
       // in the tooltip.
       const configureHyperv = async () => {
         setHypervConfiguring(true);setHypervMessage('');
-        const issues=saved.vmBackend==='winrm'?WINRM_ISSUES:HYPERV_ISSUES;
+        const remote=saved.vmBackend==='winrm',issues=remote?WINRM_ISSUES:HYPERV_ISSUES,failed=remote?'winrmFailed':'hypervFailed';
         try {
           const {status,data}=await requestJson('/dsh-computer-use-win/api/hyperv',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:165000});
           const detail=String(data?.error||''),issue=issues[data?.ok?data.missing:detail.match(/^WCU_(?:HYPERV|REMOTE)_[A-Z_]+/)?.[0]];
           setHypervMessage(data?.cancelled?{text:t('reportCancelledConnection')}
-            :data?.ok?(issue?{text:t(issue[0]),tone:'warning',step:issue[1]}:{text:t('hypervReady'),tone:'success'})
+            :data?.ok?(issue?{text:t(issue[0]),tone:'warning',step:issue[1]}:{text:t(remote?'winrmReady':'hypervReady'),tone:'success'})
             :issue?{text:t(issue[0]),tone:'error',step:issue[1],detail}
-            :{text:t('hypervFailed')+(detail?' '+detail:status===409?' '+t('hypervBusy'):''),tone:'error'});
-        } catch {setHypervMessage({text:t('hypervFailed'),tone:'error'});}
+            :{text:t(failed)+(detail?' '+detail:status===409?' '+t('hypervBusy'):''),tone:'error'});
+        } catch {setHypervMessage({text:t(failed),tone:'error'});}
         finally {setHypervConfiguring(false);}
       };
       // The support note is a display choice. Save it at once, outside the draft,
@@ -1152,12 +1152,12 @@ window.__ModuleLoader__.load({
           draft.desktopTarget==='hyperv'&&(()=>{
             const winrmHostCommand="Start-Service WinRM; Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '"+trustedHostValue(draft.remoteHost,t('remoteHostPlaceholder'))+"' -Concatenate -Force";
             return h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
-              h('div',{className:'wcu-segment',role:'radiogroup','aria-label':t('workMode'),style:{marginBottom:'8px'}},
+              h('div',{className:'wcu-segment',role:'radiogroup','aria-label':t('vmBackend'),style:{marginBottom:'8px'}},
                 ...[['hyperv','vmBackendHyperv'],['winrm','vmBackendWinrm']].map(([value,label])=>h('label',{key:value},
                   h('input',{type:'radio',name:idPrefix+'-vmBackend',id:idPrefix+'-vmBackend-'+value,value,checked:draft.vmBackend===value,disabled,onChange:()=>change('vmBackend',value)}),t(label)))),
               draft.vmBackend==='hyperv'&&hypervProbe?.available===false&&['home-edition','not-enabled'].includes(hypervProbe.reason)&&h('p',{'data-wincu-hyperv-unavailable':hypervProbe.reason,'data-tone':'warning'},
                 t(hypervProbe.reason==='home-edition'?'hypervHomeEdition':'hypervErrUnavailable'),' ',
-                hypervProbe.reason==='home-edition'&&h(React.Fragment,null,button('vmUseWinrm',{className:'wcu-small',disabled,onClick:()=>change('vmBackend','winrm')}),' '),
+                button('vmUseWinrm',{className:'wcu-small',disabled,onClick:()=>change('vmBackend','winrm')}),' ',
                 button('hypervUseQuiet',{className:'wcu-small',disabled,onClick:()=>change('desktopTarget','quiet')})),
               h('strong',null,t('hypervSetup')),
               draft.vmBackend==='winrm'

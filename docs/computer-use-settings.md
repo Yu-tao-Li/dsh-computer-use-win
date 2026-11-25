@@ -32,9 +32,9 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
 
 ### 虚拟机（Hyper-V）
 
-在 **工作方式** 选 **虚拟机**，设置页会列出下面的配置步骤，只需做一次：
+选 **虚拟机** 时，设置页先只读检查这台电脑能否使用 Hyper-V：Windows 家庭版或还没打开 Hyper-V 时会直接说明，并可一键改用 **远程 Windows（WinRM）** 或 **少打扰**。
 
-选 **虚拟机** 时，设置页先只读检查这台电脑能否使用 Hyper-V：Windows 家庭版或还没打开 Hyper-V 时会直接说明，家庭版还能一键改用 **少打扰**。
+在 **工作方式** 选 **虚拟机**，设置页会列出下面的配置步骤，只需做一次：
 
 1. 打开 Hyper-V：在“启用或关闭 Windows 功能”里勾选 Hyper-V 并重启。Windows 家庭版没有 Hyper-V，可切换到同一设置下的 **远程 Windows（WinRM）** 后端（见下一节），或改用 **少打扰**。
 2. 允许你的账户管理 Hyper-V：以管理员身份打开 PowerShell，运行 `Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)`，再注销后重新登录。DSH 没有以管理员身份运行时，Windows 只让“Hyper-V Administrators”组的成员查询和连接虚拟机；这个组用 SID 指定，任何语言的 Windows 都一样。
@@ -45,11 +45,11 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
 
 **配置连接** 先用这组凭据登录虚拟机，再检查虚拟机里是否已有这个账户登录的桌面、是否装了 Node.js 22 或更新版本。结果会指出该做哪一步：Hyper-V 没打开指向第 1 步，账户没有权限指向第 2 步，找不到虚拟机指向第 5 步，登录失败指向第 4、6 步；凭据可用但虚拟机里还差桌面登录或 Node.js 时，凭据已保存，补上那一步后再点一次 **配置连接** 检查。Windows 的原始提示放在结果的提示框里。
 
-之后浏览器、截图、鼠标和键盘操作都在选定的虚拟机内执行。截图会复制回主机。应用读写虚拟机里的文件，并使用虚拟机安装的软件和运行环境。需要处理主机文件时，先把文件复制或共享到虚拟机。Hyper-V 管理器里的预览窗口可以关闭。要取消操作，用主机 DSH 的停止按钮。连接、登录或启动失败时，本轮操作会暂停。要回到本机操作，选回 **少打扰** 或 **全速**。
+之后浏览器、截图、鼠标和键盘操作都在选定的虚拟机内执行。截图会复制回主机。应用读写虚拟机里的文件，并使用虚拟机安装的软件和运行环境。需要处理主机文件时，先把文件复制或共享到虚拟机。Hyper-V 管理器里的预览窗口可以关闭。要取消操作，用主机 DSH 的停止按钮。连接、登录或启动失败时，本轮操作会暂停。要回到本机操作，选回 **少打扰** 或 **前台操作**。
 
 ### 远程 Windows（WinRM）
 
-适合没有 Hyper-V 的 **Windows 家庭版**、**VMware** / **VirtualBox** 里的 Windows 虚拟机，或同一网络里的 **另一台 Windows 电脑**。在 **工作方式** 选 **虚拟机** 并切到 **远程 Windows（WinRM）** 后，设置页会列出下面 5 步配置：
+适合没有 Hyper-V 的 **Windows 家庭版**、**VMware** / **VirtualBox** 里的 Windows 虚拟机，或同一网络里的 **另一台 Windows 电脑**。这是实验功能：设置、连接和接力已有离线与契约测试，还没在真实的 VMware 或 VirtualBox 虚拟机上走完整个流程，用到问题请在 [#101](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/101) 反馈。在 **工作方式** 选 **虚拟机** 并切到 **远程 Windows（WinRM）** 后，设置页会列出下面 5 步配置：
 
 1. **在目标 Windows 上开启 WinRM**：在目标虚拟机或电脑里用管理员权限打开 PowerShell，运行：
 
@@ -148,9 +148,9 @@ Apps on the hidden desktop take UI Automation and window messages only: clicks a
 
 ### Virtual machine (Hyper-V)
 
-Select **Virtual machine** under **Work mode**. The settings page lists these setup steps; they are needed once:
+When **Virtual machine** is selected, the settings page first checks, read-only, whether this PC can use Hyper-V: on Windows Home, or with Hyper-V turned off, it says so at once and offers a one-click switch to **Remote Windows (WinRM)** or **Low disruption**.
 
-When **Virtual machine** is selected, the settings page first checks, read-only, whether this PC can use Hyper-V: on Windows Home, or with Hyper-V turned off, it says so at once, and on Home it offers a one-click switch to **Low disruption**.
+Select **Virtual machine** under **Work mode**. The settings page lists these setup steps; they are needed once:
 
 1. Turn on Hyper-V: in “Turn Windows features on or off”, select Hyper-V and restart. Windows Home does not have Hyper-V; switch the backend under **Virtual machine** to **Remote Windows (WinRM)** (next section), or use **Low disruption**.
 2. Let your account manage Hyper-V: open PowerShell as administrator, run `Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)`, then sign out and back in. When DSH does not run as administrator, Windows lets only members of the Hyper-V Administrators group query and connect to virtual machines; the SID names that group in every Windows language.
@@ -161,11 +161,11 @@ When **Virtual machine** is selected, the settings page first checks, read-only,
 
 **Configure connection** signs in to the VM with that credential, then checks that the account has a signed-in desktop there and that Node.js 22 or later is installed. The result names the step to look at: step 1 when Hyper-V is off, step 2 when your account lacks permission, step 5 when no VM has that name, steps 4 and 6 when signing in fails. When the credential works but the VM still lacks the signed-in desktop or Node.js, the credential is saved; finish that step and choose **Configure connection** again to check. Windows’ own message is in the result’s tooltip.
 
-Browser work, screenshots, mouse and keyboard actions run in the selected VM. Wincu copies screenshots back to the host, and other application files stay in the VM. You can close the Hyper-V preview window. Use DSH’s Stop button on the host to cancel a task. If the VM is unavailable, the task stops. Select **Low disruption** or **Full speed** to work on the host again.
+Browser work, screenshots, mouse and keyboard actions run in the selected VM. Wincu copies screenshots back to the host, and other application files stay in the VM. You can close the Hyper-V preview window. Use DSH’s Stop button on the host to cancel a task. If the VM is unavailable, the task stops. Select **Low disruption** or **Foreground** to work on the host again.
 
 ### Remote Windows (WinRM)
 
-Use this backend on **Windows Home** (where Hyper-V is not available), with a **VMware** or **VirtualBox** Windows VM, or to control **another Windows PC** on the network. Select **Virtual machine** under **Work mode** and switch to **Remote Windows (WinRM)**; the settings page lists these 5 one-time steps:
+Use this backend on **Windows Home** (where Hyper-V is not available), with a **VMware** or **VirtualBox** Windows VM, or to control **another Windows PC** on the network. It is experimental: setup, connection and relay have offline and contract tests, but the whole flow has not yet been run on a real VMware or VirtualBox VM; please report problems in [#101](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/101). Select **Virtual machine** under **Work mode** and switch to **Remote Windows (WinRM)**; the settings page lists these 5 one-time steps:
 
 1. **Enable WinRM on the target Windows**: open an administrator PowerShell window on the VM or remote PC and run:
 

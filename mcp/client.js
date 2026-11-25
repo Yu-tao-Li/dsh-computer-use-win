@@ -5,7 +5,7 @@ window.__ModuleLoader__.load({
   factory: (require) => {
     const React = require('react'), h = React.createElement;
     const NS = 'windowsComputerUse.settings';
-    const PLUGIN_VERSION = '0.6.3';
+    const PLUGIN_VERSION = '0.6.4';
     const allToolNames = [
   "health",
   "snapshot",
@@ -653,9 +653,10 @@ window.__ModuleLoader__.load({
     "modeFast": "前台操作",
     "modeFastHint": "适合你暂时不用电脑时：DSH 把窗口放在最前面，直接用鼠标键盘，最快；按 Esc 停止。",
     "modeVm": "虚拟机",
-    "modeVmHint": "在 Hyper-V 或开了 WinRM 的虚拟机里操作，不碰你的电脑；先配置一次。",
+    "modeVmHint": "在 Hyper-V 虚拟机或远程 Windows 里操作，不碰你的电脑；先配置一次。",
+    "vmBackend": "连接方式",
     "vmBackendHyperv": "Hyper-V",
-    "vmBackendWinrm": "远程 Windows（WinRM）",
+    "vmBackendWinrm": "远程 Windows（WinRM，实验）",
     "vmUseWinrm": "改用远程 Windows",
     "remoteHost": "远程 Windows 地址",
     "remoteHostPlaceholder": "\u003c地址>",
@@ -671,6 +672,8 @@ window.__ModuleLoader__.load({
     "winrmErrSignIn": "没能登录：确认用户名和密码正确，且这个账户能远程管理那台 Windows。",
     "hypervMissingNodeRemote": "登录信息已保存。还差第 2 步：在那台 Windows 里装 Node.js 22+，然后再点“配置连接”。",
     "hypervMissingDesktopRemote": "登录信息已保存。还差第 2 步：用这个账户登录那台 Windows 的桌面，然后再点“配置连接”。",
+    "winrmReady": "连接已配置，DSH 之后在那台 Windows 里操作。",
+    "winrmFailed": "远程 Windows 的连接没有配置成功。",
     "hypervVm": "虚拟机名称",
     "hypervVmRequired": "请填写虚拟机名称。",
     "hypervSetup": "配置步骤（只需一次）",
@@ -692,7 +695,7 @@ window.__ModuleLoader__.load({
     "hypervErrVmUnknown": "找不到叫这个名字的虚拟机，核对第 5 步的名称。",
     "hypervErrSignIn": "没能登录虚拟机：确认它已进入桌面，用户名和密码正确（第 4、6 步）。",
     "hypervBusy": "另一次连接配置正在进行。",
-    "hypervHomeEdition": "这台电脑是 Windows 家庭版，不带 Hyper-V，虚拟机方式用不了。可以改用“少打扰”：DSH 打开的程序放进本机后台桌面，必须用鼠标键盘时只短暂借用。",
+    "hypervHomeEdition": "这台电脑是 Windows 家庭版，没有 Hyper-V。可以改用“远程 Windows”，连接 VMware、VirtualBox 里的 Windows 或另一台电脑；也可以改用“少打扰”，在本机后台操作。",
     "hypervUseQuiet": "改用少打扰",
     "reportCancelledConnection": "连接配置已取消。"
   },
@@ -1020,9 +1023,10 @@ window.__ModuleLoader__.load({
     "modeFast": "Foreground",
     "modeFastHint": "For when you step away: DSH keeps its window in front and uses the mouse and keyboard directly, the fastest way. Press Esc to stop.",
     "modeVm": "Virtual machine",
-    "modeVmHint": "Works inside a Hyper-V or WinRM-enabled Windows VM and never touches your PC; uses the VM’s own files and apps. Set it up once first.",
+    "modeVmHint": "Works in a Hyper-V VM or a remote Windows and never touches your PC. Set it up once first.",
+    "vmBackend": "Connection",
     "vmBackendHyperv": "Hyper-V",
-    "vmBackendWinrm": "Remote Windows (WinRM)",
+    "vmBackendWinrm": "Remote Windows (WinRM, experimental)",
     "vmUseWinrm": "Use Remote Windows",
     "remoteHost": "Remote Windows address",
     "remoteHostPlaceholder": "\u003caddress>",
@@ -1037,7 +1041,9 @@ window.__ModuleLoader__.load({
     "winrmErrClient": "WinRM is not running on this PC; see step 4.",
     "winrmErrSignIn": "Could not sign in: check the user name and password, and that this account may manage that PC remotely.",
     "hypervMissingNodeRemote": "Sign-in saved. Step 2 is left: install Node.js 22 or later there, then choose Configure connection again.",
-    "hypervMissingDesktopRemote": "Sign-in saved. Step 2 is left: sign in to that PC's desktop with this account, then choose Configure connection again.",
+    "hypervMissingDesktopRemote": "Sign-in saved. Step 2 is left: sign in to that PC’s desktop with this account, then choose Configure connection again.",
+    "winrmReady": "Connection configured. DSH now works in the remote Windows.",
+    "winrmFailed": "The Remote Windows connection could not be configured.",
     "hypervVm": "Virtual machine name",
     "hypervVmRequired": "Enter the virtual machine name.",
     "hypervSetup": "Set up once",
@@ -1059,7 +1065,7 @@ window.__ModuleLoader__.load({
     "hypervErrVmUnknown": "No virtual machine has this name; check the name in step 5.",
     "hypervErrSignIn": "Could not sign in to the VM: check that it has reached the desktop and that the user name and password are right (steps 4 and 6).",
     "hypervBusy": "Another connection is being configured.",
-    "hypervHomeEdition": "This PC runs Windows Home, which does not include Hyper-V, so virtual machine mode is unavailable. You can use Low disruption instead: apps DSH opens run on a hidden desktop, and the mouse and keyboard are borrowed only briefly.",
+    "hypervHomeEdition": "This PC runs Windows Home, which has no Hyper-V. Use Remote Windows to work in Windows on VMware, VirtualBox or another PC, or use Low disruption to work in the background on this PC.",
     "hypervUseQuiet": "Use Low disruption",
     "reportCancelledConnection": "Connection setup was cancelled."
   }
@@ -2126,15 +2132,15 @@ window.__ModuleLoader__.load({
       // in the tooltip.
       const configureHyperv = async () => {
         setHypervConfiguring(true);setHypervMessage('');
-        const issues=saved.vmBackend==='winrm'?WINRM_ISSUES:HYPERV_ISSUES;
+        const remote=saved.vmBackend==='winrm',issues=remote?WINRM_ISSUES:HYPERV_ISSUES,failed=remote?'winrmFailed':'hypervFailed';
         try {
           const {status,data}=await requestJson('/dsh-computer-use-win/api/hyperv',{method:'POST',body:{},headers:{'x-wcu-request':'1'},timeoutMs:165000});
           const detail=String(data?.error||''),issue=issues[data?.ok?data.missing:detail.match(/^WCU_(?:HYPERV|REMOTE)_[A-Z_]+/)?.[0]];
           setHypervMessage(data?.cancelled?{text:t('reportCancelledConnection')}
-            :data?.ok?(issue?{text:t(issue[0]),tone:'warning',step:issue[1]}:{text:t('hypervReady'),tone:'success'})
+            :data?.ok?(issue?{text:t(issue[0]),tone:'warning',step:issue[1]}:{text:t(remote?'winrmReady':'hypervReady'),tone:'success'})
             :issue?{text:t(issue[0]),tone:'error',step:issue[1],detail}
-            :{text:t('hypervFailed')+(detail?' '+detail:status===409?' '+t('hypervBusy'):''),tone:'error'});
-        } catch {setHypervMessage({text:t('hypervFailed'),tone:'error'});}
+            :{text:t(failed)+(detail?' '+detail:status===409?' '+t('hypervBusy'):''),tone:'error'});
+        } catch {setHypervMessage({text:t(failed),tone:'error'});}
         finally {setHypervConfiguring(false);}
       };
       // The support note is a display choice. Save it at once, outside the draft,
@@ -2208,12 +2214,12 @@ window.__ModuleLoader__.load({
           draft.desktopTarget==='hyperv'&&(()=>{
             const winrmHostCommand="Start-Service WinRM; Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '"+trustedHostValue(draft.remoteHost,t('remoteHostPlaceholder'))+"' -Concatenate -Force";
             return h('div',{className:'wcu-notice','data-wincu-hyperv-steps':true},
-              h('div',{className:'wcu-segment',role:'radiogroup','aria-label':t('workMode'),style:{marginBottom:'8px'}},
+              h('div',{className:'wcu-segment',role:'radiogroup','aria-label':t('vmBackend'),style:{marginBottom:'8px'}},
                 ...[['hyperv','vmBackendHyperv'],['winrm','vmBackendWinrm']].map(([value,label])=>h('label',{key:value},
                   h('input',{type:'radio',name:idPrefix+'-vmBackend',id:idPrefix+'-vmBackend-'+value,value,checked:draft.vmBackend===value,disabled,onChange:()=>change('vmBackend',value)}),t(label)))),
               draft.vmBackend==='hyperv'&&hypervProbe?.available===false&&['home-edition','not-enabled'].includes(hypervProbe.reason)&&h('p',{'data-wincu-hyperv-unavailable':hypervProbe.reason,'data-tone':'warning'},
                 t(hypervProbe.reason==='home-edition'?'hypervHomeEdition':'hypervErrUnavailable'),' ',
-                hypervProbe.reason==='home-edition'&&h(React.Fragment,null,button('vmUseWinrm',{className:'wcu-small',disabled,onClick:()=>change('vmBackend','winrm')}),' '),
+                button('vmUseWinrm',{className:'wcu-small',disabled,onClick:()=>change('vmBackend','winrm')}),' ',
                 button('hypervUseQuiet',{className:'wcu-small',disabled,onClick:()=>change('desktopTarget','quiet')})),
               h('strong',null,t('hypervSetup')),
               draft.vmBackend==='winrm'

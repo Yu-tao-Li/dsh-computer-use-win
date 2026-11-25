@@ -915,7 +915,7 @@ app.whenReady().then(async()=>{
   assert.equal(await evaluate("window.fetchCalls.filter(call=>call.url==='/dsh-computer-use-win/api/hyperv'&&call.method==='POST').length"),1,'Credential setup starts only after the explicit action');
   // The Hyper-V choice explains itself and lists its setup steps; a result
   // names the step that fixes it, in its tone, with Windows' words in the tooltip.
-  assert.equal(await evaluate("document.querySelector('[data-wincu-desktop-hint]').textContent.startsWith('在 Hyper-V 或开了 WinRM')"),true);
+  assert.equal(await evaluate("document.querySelector('[data-wincu-desktop-hint]').textContent.startsWith('在 Hyper-V 虚拟机或远程 Windows 里操作')"),true);
   assert.equal(await evaluate("document.querySelectorAll('[data-wincu-hyperv-steps] li').length"),6);
   assert.equal(await evaluate("document.querySelector('[data-wincu-hyperv-steps] li:nth-child(2) code').textContent"),'Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)');
   await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:500,body:{ok:false,error:'WCU_HYPERV_PERMISSION: add your Windows account to the Hyper-V Administrators group, then sign out and back in.'}}:window.previousFetch(call);window.clickButton('配置连接')");
@@ -935,6 +935,26 @@ app.whenReady().then(async()=>{
   await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.includes('见第 4 步')");
   assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'error|3');
   await evaluate("document.getElementById('wincu-page-vmBackend-hyperv').click()");
+  await until("!!document.getElementById('wincu-page-hypervVm')");
+  // On Windows Home the page says at once that Hyper-V is missing and offers
+  // Remote Windows or Low disruption; Remote Windows results name Remote Windows.
+  await evaluate("window.trustFetch=window.fakeFetch;window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?(call.method==='GET'?{status:200,body:{ok:true,backend:'hyperv',available:false,reason:'home-edition',edition:'CoreCountrySpecific'}}:{status:500,body:{ok:false,error:'WCU_HYPERV_READINESS_FAILED: could not check the Windows guest.'}}):window.previousFetch(call);window.selectDesktop('quiet')");
+  await until("!document.querySelector('[data-wincu-hyperv-steps]')");
+  await evaluate("window.selectDesktop('hyperv')");
+  await until("(p=>!!p&&p.textContent.startsWith('这台电脑是 Windows 家庭版，没有 Hyper-V。可以改用“远程 Windows”'))(document.querySelector('[data-wincu-hyperv-unavailable=home-edition]'))");
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-wincu-hyperv-unavailable] button')].map(b=>b.textContent)"),['改用远程 Windows','改用少打扰']);
+  await evaluate("document.querySelector('[data-wincu-hyperv-steps]').scrollIntoView({block:'start'})");
+  await savePicture('work-mode-vm-home.png');
+  await evaluate("window.clickButton('改用远程 Windows')");
+  await until("document.getElementById('wincu-page-vmBackend-winrm').checked&&!!document.getElementById('wincu-page-remoteHost')&&!document.querySelector('[data-wincu-hyperv-unavailable]')");
+  assert.equal(await evaluate("document.querySelector('[data-wincu-hyperv-steps] [role=radiogroup]').getAttribute('aria-label')"),'连接方式');
+  await evaluate("window.clickButton('配置连接')");
+  await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.startsWith('远程 Windows 的连接没有配置成功。 WCU_HYPERV_READINESS_FAILED')");
+  await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:200,body:{ok:true}}:window.previousFetch(call);window.clickButton('配置连接')");
+  await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent==='连接已配置，DSH 之后在那台 Windows 里操作。'");
+  await evaluate("document.querySelector('[data-wincu-hyperv-steps]').scrollIntoView({block:'start'})");
+  await savePicture('work-mode-vm-winrm.png');
+  await evaluate("window.fakeFetch=window.trustFetch;document.getElementById('wincu-page-vmBackend-hyperv').click()");
   await until("!!document.getElementById('wincu-page-hypervVm')");
   await evaluate("window.selectDesktop('quiet')");
   await until("document.querySelector('[data-wincu-desktop-hint]').textContent.includes('照常用电脑')&&document.querySelectorAll('[data-wincu-quiet-notes] li').length===4&&!document.querySelector('[data-wincu-hyperv-steps]')");
