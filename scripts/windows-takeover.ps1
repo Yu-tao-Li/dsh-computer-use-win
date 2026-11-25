@@ -28,7 +28,14 @@ try {
     if (Get-Command Import-HelperAssembly -ErrorAction SilentlyContinue) {
       $runtime = [Environment]::Version
       $file = 'wcu-takeover-core-clr{0}-{1}-{2}.dll' -f $runtime.Major,$runtime.Minor,(Get-NativeSourceHash $coreSource)
-      Import-HelperAssembly -Path (Join-Path (Get-HelperCacheDir) $file) -Compile $compile
+      try {
+        Import-HelperAssembly -Path (Join-Path (Get-HelperCacheDir) $file) -Compile $compile
+      } catch {
+        # The cache only saves time. When it cannot be used (TEMP points at a
+        # folder other accounts can write, the disk is full), compile in memory
+        # as before rather than go without the Esc listener.
+        if (-not ('DshTakeover.Host' -as [type])) { & $compile }
+      }
     } else {
       & $compile
     }

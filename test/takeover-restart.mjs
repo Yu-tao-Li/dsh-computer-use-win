@@ -105,3 +105,21 @@ try{
   await lifetime.close();
 }
 console.log('PASS quiet calls skip the helper, input retains its stop listener, and idle retirement respects progress windows');
+
+// PowerShell 7 compiles the helper into a private cache. A TEMP that other
+// accounts can write is refused as a cache; the helper must still start (it
+// compiles in memory, as before 0.6.4) and leave nothing in that folder.
+if(core){
+  const shared=path.join(root,'shared-temp');
+  const {mkdir}=await import('node:fs/promises');const {execFileSync}=await import('node:child_process');
+  await mkdir(shared);
+  execFileSync('icacls',[shared,'/grant','*S-1-5-32-545:(OI)(CI)M'],{windowsHide:true});
+  process.env.TEMP=shared;process.env.TMP=shared;
+  const fallback=new TakeoverControl({powershell,testMode:true,config:{indicatorEnabled:false,cursorIndicatorEnabled:false}});fallback.disabledForTest=false;
+  try{
+    const status=await fallback.command('status');
+    assert.equal(status.ok,true,'The helper starts without a usable cache');
+    assert.deepEqual((await readdir(shared)).filter(name=>name.startsWith('wcu-')),[],'Nothing is cached in a shared TEMP');
+  }finally{await fallback.close();process.env.TEMP=root;process.env.TMP=root;}
+  console.log('PASS the PowerShell 7 helper starts when TEMP cannot hold a private cache');
+}

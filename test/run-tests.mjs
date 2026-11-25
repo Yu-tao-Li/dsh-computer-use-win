@@ -20,6 +20,7 @@ const suites = [
   ['input-hold',powershell,['-NoProfile','-File','test/input-hold.ps1']],
   ['input-release-sweep',process.execPath,['test/input-release-sweep.mjs']],
   ['input-compose',process.execPath,['test/input-compose.mjs']],
+  ['stop-key-release',process.execPath,['test/stop-key-release.mjs']],
   ['restart-route',process.execPath,['test/restart-route.mjs']],
   ['update-guard',process.execPath,['test/update-guard.mjs']],
   ['observation-budget',process.execPath,['test/observation-budget.mjs']],
