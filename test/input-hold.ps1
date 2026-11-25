@@ -104,6 +104,7 @@ $mon = New-Rect -1920 0 0 1080
 $maxSecondary = New-Rect -1931 -11 11 1091
 $smaller = New-Rect -1900 10 -20 1060
 Check (-not [WcuInputHold]::LooksFullscreen(2, 0x15C70000, 'Chrome_WidgetWin_1', $maxSecondary, $mon)) 'Maximized captioned window on secondary monitor is not fullscreen'
+Check (-not [WcuInputHold]::LooksFullscreen(2, 0x11040000, 'CustomTitleBar', $maxSecondary, $mon)) 'Maximized resizable custom frame is not fullscreen'
 Check ([WcuInputHold]::LooksFullscreen(2, ([Convert]::ToInt32('96000000', 16) -bor 0), 'TestPopup', $mon, $mon)) 'Captionless popup covering monitor on QUNS_BUSY is fullscreen'
 Check (-not [WcuInputHold]::LooksFullscreen(2, ([Convert]::ToInt32('96000000', 16) -bor 0), 'TestPopup', $smaller, $mon)) 'Smaller popup on QUNS_BUSY is not fullscreen'
 Check ([WcuInputHold]::LooksFullscreen(3, 0x15C70000, 'Any', $smaller, $mon)) 'Direct3D fullscreen (3) is always fullscreen'
@@ -111,11 +112,29 @@ Check ([WcuInputHold]::LooksFullscreen(4, 0x15C70000, 'Any', $smaller, $mon)) 'P
 Check (-not [WcuInputHold]::LooksFullscreen(5, ([Convert]::ToInt32('96000000', 16) -bor 0), 'TestPopup', $mon, $mon)) 'QUNS_ACCEPTS_NOTIFICATIONS (5) is not fullscreen'
 Check (-not [WcuInputHold]::LooksFullscreen(2, ([Convert]::ToInt32('96000000', 16) -bor 0), 'WorkerW', $mon, $mon)) 'Desktop WorkerW covering monitor is not fullscreen'
 
+# A recovery can release only inputs the backend actually submitted and left
+# down. Test the accepted packet prefixes without injecting into the desktop.
+$click = [WindowsComputerUseNative]::ClickPacket(1, 1, 0, 0, 10, 10, 2, 4)
+$left = [WindowsComputerUseNative]::PendingInputAfter($click, 2, 0, 0)
+Check ($left -ne 0) 'An accepted button press without an up is recorded'
+Check ([WindowsComputerUseNative]::PendingInputAfter($click, 1, 0, 0) -eq 0) 'A rejected press is not recorded'
+Check ([WindowsComputerUseNative]::PendingInputAfter($click, 2, 0, $left) -eq 0) 'An already-held user button is not recorded'
+Check ([WindowsComputerUseNative]::PendingInputAfter($click, 3, $left, $left) -eq 0) 'An accepted release clears the pending press'
+$alt = [WindowsComputerUseNative]::KeyChordPacket(@('alt','tab'), 0)
+$pendingAlt = [WindowsComputerUseNative]::PendingInputAfter($alt, 1, 0, 0)
+Check ($pendingAlt -ne 0 -and $pendingAlt -ne $left) 'A partial Alt chord is distinct from a held button'
+Check ([WindowsComputerUseNative]::PendingInputAfter($alt, $alt.Length, 0, 0) -eq 0) 'A complete Alt chord adds no pending input'
+$userPress = New-Object WcuInputHold+Held
+$userPress.Key = $true
+$userPress.Vk = 0x12
+$userInput = [WindowsComputerUseNative+INPUT[]]@([WcuInputHold]::ToInput($userPress))
+Check ([WindowsComputerUseNative]::PendingInputAfter($userInput, 1, 0, 0) -eq 0) 'Replayed user input is not recorded as plugin input'
+
 # What the server reads before borrowing, and a hook pair that comes and goes.
 $state=[WcuInputHold]::UserState()
 Check ($null -ne $state -and $state.Notification -ge 0) 'The user state reads'
 Check ($null -ne $state.HeldKeys -and $state.HeldKeys -is [string[]]) 'HeldKeys is a string array'
-Check ($null -ne [WcuInputHold].GetMethod('ReleaseStuck')) 'The release sweep exists'
+Check ($null -ne [WindowsComputerUseNative].GetMethod('ReleaseOwnedInput')) 'The scoped release sweep exists'
 Check ($null -eq [WcuInputHold]::End($null)) 'Ending without a hold says nothing'
 $begun=[WcuInputHold]::Begin(0)
 try {

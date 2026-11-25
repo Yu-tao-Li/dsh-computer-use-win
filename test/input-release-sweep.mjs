@@ -19,7 +19,7 @@ const env = {
   WINDOWS_CU_POWERSHELL: process.env.WINDOWS_CU_POWERSHELL || 'powershell.exe',
 };
 
-async function fixture(name) {
+async function fixture(name, crashOnClick = false) {
   const dir = path.join(root, name);
   await mkdir(path.join(dir, 'mcp'), { recursive: true });
   await mkdir(path.join(dir, 'scripts'));
@@ -43,7 +43,9 @@ async function fixture(name) {
     '  if([string]::IsNullOrWhiteSpace($line)){continue}',
     '  $r=$line|ConvertFrom-Json',
     '  [IO.File]::AppendAllText($log, "$PID $($r.action)`n")',
-    "  if($r.action -eq 'click'){Start-Sleep -Milliseconds 5000}",
+    "  if($r.action -eq 'click'){[IO.File]::WriteAllText($env:WCU_INPUT_RECOVERY_FILE,'1');" +
+      (crashOnClick ? 'exit 47}' : 'Start-Sleep -Milliseconds 5000}'),
+    "  elseif($r.action -eq 'release_input'){if([IO.File]::ReadAllText($env:WCU_INPUT_RECOVERY_FILE) -ne '1'){throw 'Missing journal'};[IO.File]::Delete($env:WCU_INPUT_RECOVERY_FILE)}",
     "  elseif($r.action -eq 'wait'){Start-Sleep -Milliseconds ([int]$r.args.milliseconds)}",
     '  [Console]::WriteLine((@{id=$r.id;ok=$true;held=$false;fullscreen=$false;notification=5;foreground=0;released=@()}|ConvertTo-Json -Compress))',
     '}',
@@ -79,17 +81,14 @@ try {
   assert.equal(timedOut.isError, true);
   assert.match(timedOut.content[0].text, /timed out after 1500ms/);
 
-  let newPidEntries = [];
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    const entries = await readLog(a.logFile);
-    newPidEntries = entries.filter(e => e.pid !== firstPid);
-    if (newPidEntries.length > 0) break;
-    await delay(50);
-  }
+  // Send immediately so the test exercises the recovery gate rather than
+  // waiting for the new backend's first action before issuing another call.
+  assert.equal((await call(a.client, 'wait', { milliseconds: 1 })).isError, undefined);
+  const newPidEntries = (await readLog(a.logFile)).filter(e => e.pid !== firstPid);
   assert.ok(newPidEntries.length > 0, 'Replacement backend never started after click timeout');
   assert.equal(newPidEntries[0].action, 'release_input', 'First action on replacement backend must be release_input');
-  assert.equal((await call(a.client, 'wait', { milliseconds: 1 })).isError, undefined);
+  assert.equal(newPidEntries[1].action, 'wait');
+  assert.doesNotMatch(a.client.stderr, /Missing journal|release sweep failed/);
 
   // Scenario B: timeout during non-input (`wait`) must NOT trigger `release_input`.
   const b = await fixture('non-input-timeout');
@@ -105,8 +104,17 @@ try {
   assert.ok(bNewEntries.length >= 1, 'Replacement backend did not log follow-up wait');
   assert.equal(bNewEntries[0].action, 'wait', 'Non-input timeout must not run release_input');
 
-  console.log('PASS release sweep runs after real-input timeout and skips non-input timeout; no physical input');
-  console.log(JSON.stringify({ passed: true, scenarioA: newPidEntries[0].action, scenarioB: bNewEntries[0].action }));
+  const c = await fixture('real-input-crash', true);
+  const crash = await call(c.client, 'click', { x: 1, y: 2 });
+  assert.equal(crash.isError, true);
+  assert.match(crash.content[0].text, /Backend process exited \(exit code 47\)/);
+  assert.equal((await call(c.client, 'wait', { milliseconds: 1 })).isError, undefined);
+  const crashedActions = await readLog(c.logFile);
+  const afterCrash = crashedActions.filter(entry => entry.pid !== crashedActions[0].pid);
+  assert.deepEqual(afterCrash.map(entry => entry.action), ['release_input', 'wait']);
+  assert.doesNotMatch(c.client.stderr, /Missing journal|release sweep failed/);
+
+  console.log('PASS release sweep runs after real-input timeout and crash, skips non-input timeout; no physical input');
 } finally {
   for (const client of clients) client.child.stdin.end();
   await Promise.all(clients.map(async client => {

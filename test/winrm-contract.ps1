@@ -8,10 +8,14 @@ if ($errors.Count) { throw ($errors | Out-String) }
 $connect = $ast.Find({ param($node)
   $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Connect-Target'
 }, $true)
+$leaseState = $ast.Find({ param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-GuestLeaseState'
+}, $true)
 $cleanup = $ast.Find({ param($node)
   $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$guestCleanup'
 }, $true)
 . ([scriptblock]::Create($connect.Extent.Text))
+. ([scriptblock]::Create($leaseState.Extent.Text))
 . ([scriptblock]::Create($cleanup.Extent.Text))
 
 function New-PSSessionOption {
@@ -84,7 +88,12 @@ try {
   [IO.File]::WriteAllText((Join-Path $foreign 'lease'), 'keep')
   & $guestCleanup $foreign $name
   if (-not [IO.File]::Exists((Join-Path $foreign 'lease'))) { throw 'Cleanup touched an unrelated directory' }
+  $lease = Join-Path $script:worker 'lease'
+  if ((Get-GuestLeaseState $lease) -ne 'cancelled') { throw 'An absent lease must cancel the worker' }
   foreach ($file in @('lease', 'ready')) { [IO.File]::WriteAllText((Join-Path $script:worker $file), '1') }
+  if ((Get-GuestLeaseState $lease) -ne 'active') { throw 'A renewed lease must keep the worker running' }
+  [IO.File]::SetLastWriteTimeUtc($lease, [DateTime]::UtcNow.AddSeconds(-60))
+  if ((Get-GuestLeaseState $lease) -ne 'expired') { throw 'A disconnected worker must detect an expired lease' }
   $script:taskRemovalRequested = $false
   $script:workerClosedFirst = $false
   & $guestCleanup $script:worker $name

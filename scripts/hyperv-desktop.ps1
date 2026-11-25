@@ -132,6 +132,12 @@ function Connect-Target($Guest, [pscredential]$Credential) {
   }
 }
 
+function Get-GuestLeaseState([string]$Path) {
+  if (-not [IO.File]::Exists($Path)) { return 'cancelled' }
+  if (([DateTime]::UtcNow - [IO.File]::GetLastWriteTimeUtc($Path)).TotalSeconds -gt 45) { return 'expired' }
+  return 'active'
+}
+
 function Start-GuestWorker([string]$Root) {
   $config = Get-Content -LiteralPath (Join-Path $Root 'worker.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   if ((Get-Process -Id $PID).SessionId -ne $config.sessionId -or $config.sessionId -le 0) {
@@ -155,6 +161,7 @@ function Start-GuestWorker([string]$Root) {
   $process = [Diagnostics.Process]::new()
   $process.StartInfo = $start
   $started = $false
+  $leaseState = 'active'
   $recentCalls = [Collections.Generic.Queue[object]]::new()
   try {
     $started = $process.Start()
@@ -165,7 +172,8 @@ function Start-GuestWorker([string]$Root) {
     $inputPipe.AutoFlush = $true
     [IO.File]::WriteAllText((Join-Path $Root 'ready'),[string]$config.sessionId)
     while (-not $process.HasExited) {
-      if (-not [IO.File]::Exists($lease) -or ([DateTime]::UtcNow - [IO.File]::GetLastWriteTimeUtc($lease)).TotalSeconds -gt 45) { break }
+      $leaseState = Get-GuestLeaseState $lease
+      if ($leaseState -ne 'active') { break }
       $batch = Join-Path $Root ('in-' + $sequence + '.ndjson')
       if (-not [IO.File]::Exists($batch)) { Start-Sleep -Milliseconds 35; continue }
       try { $lines = [IO.File]::ReadAllLines($batch,$utf8) }
@@ -199,6 +207,7 @@ function Start-GuestWorker([string]$Root) {
     $process.Dispose()
     [IO.File]::WriteAllText((Join-Path $Root 'closed'),'1')
   }
+  return ($leaseState -eq 'expired')
 }
 
 $guestCleanup = {
@@ -244,7 +253,13 @@ if ($Mode -eq 'Probe') {
 }
 
 if ($Mode -eq 'Guest') {
-  try { Start-GuestWorker $GuestRoot }
+  try {
+    # When the host can no longer connect, the guest is the only side that
+    # can remove the worker folder and its scheduled task.
+    if (Start-GuestWorker $GuestRoot) {
+      & $guestCleanup $GuestRoot ([IO.Path]::GetFileName($GuestRoot))
+    }
+  }
   catch {
     [IO.File]::WriteAllText((Join-Path $GuestRoot 'failed'),$_.Exception.Message,$utf8)
     exit 1
@@ -324,12 +339,12 @@ try {
       }
     }
   } finally { $zip.Dispose() }
-  Copy-Item -LiteralPath $archive -Destination (Join-Path $remote 'worker.zip') -ToSession $session
+  Copy-Item -LiteralPath $archive -Destination ([IO.Path]::Combine($remote,'worker.zip')) -ToSession $session
 
   $hostFiles = [ordered]@{ WCU_CONFIG_FILE='settings.json'; WCU_ACTIVITY_FILE='activity.json' }
   $guestFiles = [ordered]@{ WCU_STATE_FILE='state.json'; WCU_LAYOUT_FILE='overlay-layout.json' }
   $guestEnvironment = @{
-    WCU_IMAGE_MODE='inline'; WCU_BROWSER_ATTACH_USER='0'; WCU_APPROVAL_LEDGER=(Join-Path $remote 'approvals.json')
+    WCU_IMAGE_MODE='inline'; WCU_BROWSER_ATTACH_USER='0'; WCU_APPROVAL_LEDGER=[IO.Path]::Combine($remote,'approvals.json')
   }
   # The guest has its own loopback interface; the host web server's port is not a guest service.
   foreach ($key in @('WCU_TOOL_MODE','WCU_ENABLED_TOOLS','WCU_BROWSER_APP','WCU_BROWSER_HEADLESS','WCU_BROWSER_SIGNIN','WCU_SETTINGS_JSON','WCU_ADAPTER_NOTICES','WCU_APPROVAL_SECRET','WCU_LOCALE')) {
@@ -338,7 +353,7 @@ try {
   }
   foreach ($map in @($hostFiles,$guestFiles)) {
     foreach ($key in $map.Keys) {
-      if ([Environment]::GetEnvironmentVariable($key)) { $guestEnvironment[$key] = Join-Path $remote $map[$key] }
+      if ([Environment]::GetEnvironmentVariable($key)) { $guestEnvironment[$key] = [IO.Path]::Combine($remote,$map[$key]) }
     }
   }
   $payload = @{ sessionId=$guestInfo.sessionId; node=$guestInfo.node; environment=$guestEnvironment } | ConvertTo-Json -Compress -Depth 5

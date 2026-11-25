@@ -2,7 +2,7 @@
 import {RpcFramer,validateRpcEnvelope,negotiateProtocolVersion,BACKEND_PROTOCOL_VERSION} from './protocol.mjs';
 import { spawn } from "node:child_process";
 import { readFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +21,7 @@ process.env.WCU_INPUT_MARKER ||= SESSION_INPUT_MARKER;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(__dirname, "..");
 const backgroundDesktop = process.env.WCU_BACKGROUND_DESKTOP === '1';
+const inputRecoveryFile = path.join(os.tmpdir(), 'dsh-wcu-input-' + randomUUID());
 // Advertised over MCP serverInfo; derived from package.json so the two
 // cannot drift apart between releases.
 const SERVER_VERSION = (() => {
@@ -817,16 +818,25 @@ const interruptibleActions = INTERRUPTIBLE_ACTIONS;
 // one may leave a key or button down (#99); the next backend releases them.
 const REAL_INPUT_ACTIONS = new Set(['launch_app','click','double_click','move','drag','scroll','type_text','keypress','focus','invoke','set_value','activate_window','close_window','move_window']);
 const sendsRealInput = (action, args) => REAL_INPUT_ACTIONS.has(action) || args?.activate === true;
-let releaseSweepPending = false;
-function requestReleaseSweep() {
-  if (backgroundDesktop || releaseSweepPending) return;
-  releaseSweepPending = true;
-  setImmediate(() => {
-    releaseSweepPending = false;
-    dispatchBackend('release_input', {}, 10000, undefined, 'current').then(result => {
-      if (result?.released?.length) process.stderr.write(`[wcu] released input left down by a stopped backend: ${result.released.join(', ')}\n`);
-    }, error => process.stderr.write(`[wcu] release sweep failed: ${error.message}\n`));
-  });
+const backendHadInput = proc => proc.wcuDesk === 'current' && [...backendWaiters.values()].some(w => w.proc === proc && w.sent && sendsRealInput(w.action, w.args));
+let releaseSweep;
+function requestReleaseSweep(proc) {
+  if (backgroundDesktop || releaseSweep) return;
+  releaseSweep = (async () => {
+    // A timeout requests termination. Wait for it before consuming the old
+    // process's input journal or accepting another desktop action.
+    if (proc.pid && proc.exitCode === null && proc.signalCode === null) {
+      const exited = await new Promise(resolve => {
+        const onExit = () => { clearTimeout(timer); resolve(true); };
+        const timer = setTimeout(() => { proc.off('exit', onExit); resolve(false); }, 2000);
+        proc.once('exit', onExit);
+      });
+      if (!exited) return;
+    }
+    const result = await dispatchBackend('release_input', {}, 10000, undefined, 'current');
+    if (result?.released?.length) process.stderr.write(`[wcu] released input left down by a stopped backend: ${result.released.join(', ')}\n`);
+  })().catch(error => process.stderr.write(`[wcu] release sweep failed: ${error.message}\n`))
+    .finally(() => { releaseSweep = undefined; });
 }
 const takeover = new TakeoverControl({ powershell, config: process.env.WCU_SETTINGS_JSON ? JSON.parse(process.env.WCU_SETTINGS_JSON) : {}, onStop(error) {
   const stoppedByUser = error.message === STOPPED;
@@ -950,7 +960,8 @@ function spawnBackend(desk = 'current', desktopName) {
     // the backend starts without a folder of their own start here too.
     cwd: WORK_DIR,
     // Under WSL the backend reads the WCU_ variables only when WSLENV names them (#79).
-    env: backendEnv({ ...process.env, WCU_CANCEL_EVENT: takeover.helperDisabled ? '' : takeover.eventName, WCU_READY_EVENT: takeover.helperDisabled ? '' : takeover.eventName+'-ready' }),
+    env: backendEnv({ ...process.env, WCU_CANCEL_EVENT: takeover.helperDisabled ? '' : takeover.eventName, WCU_READY_EVENT: takeover.helperDisabled ? '' : takeover.eventName+'-ready',
+      WCU_INPUT_RECOVERY_FILE: desk === 'current' && !backgroundDesktop ? windowsScript(inputRecoveryFile) : '' }),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true
   };
@@ -976,7 +987,9 @@ function spawnBackend(desk = 'current', desktopName) {
   const failProtocol = error => {
     if (invalid) return;
     invalid = true;
+    const interrupted = backendHadInput(proc);
     killBackend(error, proc);
+    if (interrupted) requestReleaseSweep(proc);
   };
   const output = new RpcFramer({
     allowHeaders: false, maxBytes: 64*1024*1024,
@@ -1013,18 +1026,17 @@ function spawnBackend(desk = 'current', desktopName) {
   const onDeath = (err) => {
     if (proc.wcuDeathHandled) return;
     proc.wcuDeathHandled = true;
-    const interrupted = !proc.wcuKilled && desk === 'current' && [...backendWaiters.values()].some(w => w.proc === proc && w.sent && sendsRealInput(w.action, w.args));
+    const interrupted = !proc.wcuKilled && backendHadInput(proc);
     clearTimeout(proc.wcuReadyTimer);
     if (backends[desk] === proc) backends[desk] = null;
+    if (interrupted) requestReleaseSweep(proc);
     if (err) {
       failBackendWaiters(err, proc);
-      if (interrupted) requestReleaseSweep();
       return;
     }
     // 'exit' can precede the last stderr chunk; wait briefly for the stream.
     const report = () => {
       failBackendWaiters(backendExitError(proc.exitCode, stderrTail), proc);
-      if (interrupted) requestReleaseSweep();
     };
     if (proc.stderr.readableEnded) { report(); return; }
     const timer = setTimeout(report, 300);
@@ -1265,6 +1277,8 @@ async function runBackendOnce(action, args, timeoutMs, request, quiet, desk = 'c
 }
 
 async function dispatchBackend(action, args = {}, timeoutMs = 30000, request, desk = 'current') {
+  if (releaseSweep && action !== 'release_input' && desk === 'current') await releaseSweep;
+  if (request?.cancelled) throw new Error(request.takeoverError || 'COMPUTER_USE_CANCELLED');
   if (Number.isFinite(request?.deadlineMs)) {
     const remaining = request.deadlineMs - Date.now();
     if (remaining <= 0) throw new Error(`Windows Computer Use backend timed out after batch wall-clock budget during ${action}`);
@@ -1286,7 +1300,7 @@ async function dispatchBackend(action, args = {}, timeoutMs = 30000, request, de
       // The wedged call may have stalled the backend loop: kill it and
       // respawn lazily on the next call.
       killBackend(new Error("Backend stopped after another action timed out"), proc);
-      if (interruptedInput) requestReleaseSweep();
+      if (interruptedInput) requestReleaseSweep(proc);
     };
     backendWaiters.set(id, { resolve, reject, timer: null, onTimeout, timeoutMs, proc, request, action, args, sent: false });
     dispatchNextBackend(proc);
@@ -1921,7 +1935,10 @@ let shuttingDown;
 function installShutdown() {
   process.once('SIGINT', () => { void shutdown(130); });
   process.once('SIGTERM', () => { void shutdown(143); });
-  process.on('exit', () => { killBackends(); void ownedHiddenDesktop?.dispose(); browserLane.close(); takeover.child?.kill(); });
+  process.on('exit', () => {
+    killBackends(); void ownedHiddenDesktop?.dispose(); browserLane.close(); takeover.child?.kill();
+    for (const file of [inputRecoveryFile, inputRecoveryFile + '.tmp']) { try { unlinkSync(file); } catch {} }
+  });
 }
 
 function shutdown(code) {

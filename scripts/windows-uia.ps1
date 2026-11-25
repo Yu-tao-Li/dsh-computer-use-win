@@ -331,8 +331,101 @@ public static class WindowsComputerUseNative {
     public uint type;
     public INPUTUNION U;
   }
-  [DllImport("user32.dll")]
-  public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+  [DllImport("user32.dll", EntryPoint = "SendInput")]
+  private static extern uint SendInputNative(uint nInputs, INPUT[] pInputs, int cbSize);
+
+  // The MCP server gives each instance a private recovery file. Only accepted
+  // plugin input can add a pending press. Replayed user input uses another tag.
+  static readonly string recoveryFile = Environment.GetEnvironmentVariable("WCU_INPUT_RECOVERY_FILE");
+  static readonly object recoveryLock = new object();
+  static readonly int[] recoveryKeys = { 0x01, 0x02, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12 };
+  static readonly uint[] buttonDown = { 0x0002, 0x0008, 0x0020, 0x0080, 0x0080 };
+  static readonly uint[] buttonUp = { 0x0004, 0x0010, 0x0040, 0x0100, 0x0100 };
+  static readonly string[] recoveryNames = { "LButton", "RButton", "MButton", "XButton1", "XButton2", "Shift", "Ctrl", "Alt" };
+  static int ownedInput;
+
+  static int RecoveryBit(INPUT input, out bool up) {
+    up = false;
+    if (input.type == 1 && input.U.ki.dwExtraInfo.ToInt64() == (long)(ulong)InputMarker) {
+      up = (input.U.ki.dwFlags & KEYEVENTF_KEYUP) != 0;
+      for (int i = 5; i < recoveryKeys.Length; i++) if (input.U.ki.wVk == recoveryKeys[i]) return 1 << i;
+    } else if (input.type == 0 && input.U.mi.dwExtraInfo.ToInt64() == (long)(ulong)InputMarker) {
+      for (int i = 0; i < buttonDown.Length; i++) {
+        if (i >= 3 && input.U.mi.mouseData != (uint)(i - 2)) continue;
+        if ((input.U.mi.dwFlags & buttonUp[i]) != 0) { up = true; return 1 << i; }
+        if ((input.U.mi.dwFlags & buttonDown[i]) != 0) return 1 << i;
+      }
+    }
+    return 0;
+  }
+
+  public static int PendingInputAfter(INPUT[] packet, uint accepted, int previous, int alreadyHeld) {
+    int remaining = previous;
+    for (int i = 0; i < packet.Length && (uint)i < accepted; i++) {
+      bool up;
+      int bit = RecoveryBit(packet[i], out up);
+      if (up) remaining &= ~bit;
+      else remaining |= bit & ~alreadyHeld;
+    }
+    return remaining;
+  }
+
+  static void SaveOwnedInput(int next) {
+    if (next == ownedInput) return;
+    ownedInput = next;
+    try {
+      if (next == 0) { System.IO.File.Delete(recoveryFile); return; }
+      string staged = recoveryFile + ".tmp";
+      System.IO.File.WriteAllText(staged, next.ToString(System.Globalization.CultureInfo.InvariantCulture));
+      if (System.IO.File.Exists(recoveryFile)) System.IO.File.Replace(staged, recoveryFile, null);
+      else System.IO.File.Move(staged, recoveryFile);
+    } catch (System.IO.IOException) {
+    } catch (UnauthorizedAccessException) {
+    }
+  }
+
+  public static uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize) {
+    if (String.IsNullOrEmpty(recoveryFile)) return SendInputNative(nInputs, pInputs, cbSize);
+    int touched = 0;
+    for (int i = 0; i < pInputs.Length && (uint)i < nInputs; i++) {
+      bool ignored;
+      touched |= RecoveryBit(pInputs[i], out ignored);
+    }
+    if (touched == 0) return SendInputNative(nInputs, pInputs, cbSize);
+    lock (recoveryLock) {
+      int alreadyHeld = 0;
+      for (int i = 0; i < recoveryKeys.Length; i++) {
+        if ((touched & (1 << i)) != 0 && (GetAsyncKeyState(recoveryKeys[i]) & 0x8000) != 0) alreadyHeld |= 1 << i;
+      }
+      uint sent = SendInputNative(nInputs, pInputs, cbSize);
+      SaveOwnedInput(PendingInputAfter(pInputs, sent, ownedInput, alreadyHeld));
+      return sent;
+    }
+  }
+
+  public static string[] ReleaseOwnedInput() {
+    var released = new System.Collections.Generic.List<string>();
+    if (String.IsNullOrEmpty(recoveryFile)) return released.ToArray();
+    int recorded;
+    try {
+      if ((DateTime.UtcNow - System.IO.File.GetLastWriteTimeUtc(recoveryFile)).TotalSeconds > 60 ||
+          !Int32.TryParse(System.IO.File.ReadAllText(recoveryFile), out recorded) ||
+          recorded <= 0 || recorded >= (1 << recoveryKeys.Length)) return released.ToArray();
+      System.IO.File.Delete(recoveryFile);
+    } catch (System.IO.IOException) { return released.ToArray(); }
+    catch (UnauthorizedAccessException) { return released.ToArray(); }
+    for (int i = 0; i < recoveryKeys.Length; i++) {
+      if ((recorded & (1 << i)) == 0 || (GetAsyncKeyState(recoveryKeys[i]) & 0x8000) == 0) continue;
+      var input = i < buttonUp.Length ? new INPUT() : KeyInput(recoveryKeys[i], true);
+      if (i < buttonUp.Length) {
+        input.U.mi.dwFlags = buttonUp[i];
+        if (i >= 3) input.U.mi.mouseData = (uint)(i - 2);
+        input.U.mi.dwExtraInfo = new IntPtr((long)(ulong)InputMarker);
+      }
+      if (SendInputNative(1, new[] { input }, Marshal.SizeOf(typeof(INPUT))) == 1) released.Add(recoveryNames[i]);
+    }
+    return released.ToArray();
+  }
 
   // Send a button or wheel event at the CURRENT pointer position. Movement is
   // done with SetCursorPos (raw screen coords, matching the UIA/screenshot
@@ -850,6 +943,8 @@ public static class WcuInputHold {
     if (notification == 3 || notification == 4) return true;
     if (notification != 2) return false;
     if ((style & 0x00C00000) == 0x00C00000) return false; // WS_CAPTION
+    if ((style & 0x01040000) == 0x01040000) return false; // WS_MAXIMIZE | WS_THICKFRAME (custom title bars)
+    if (monitor.right <= monitor.left || monitor.bottom <= monitor.top) return false;
     if (className == "Progman" || className == "WorkerW" || className == "Shell_TrayWnd" || className == "Shell_SecondaryTrayWnd") return false;
     return window.left <= monitor.left && window.top <= monitor.top && window.right >= monitor.right && window.bottom >= monitor.bottom;
   }
@@ -884,34 +979,6 @@ public static class WcuInputHold {
       }
     }
     return state;
-  }
-
-  // After a backend was killed during real input (#99): release modifiers and
-  // mouse buttons that still read as down. Esc and other keys are left alone.
-  public static string[] ReleaseStuck() {
-    var released = new System.Collections.Generic.List<string>();
-    int size = Marshal.SizeOf(typeof(WindowsComputerUseNative.INPUT));
-    int[] keys = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C };
-    string[] keyNames = { "LShift", "RShift", "LCtrl", "RCtrl", "LAlt", "RAlt", "LWin", "RWin" };
-    for (int i = 0; i < keys.Length; i++) {
-      if ((GetAsyncKeyState(keys[i]) & 0x8000) == 0) continue;
-      var input = new WindowsComputerUseNative.INPUT[1];
-      input[0].type = 1;
-      input[0].U.ki.wVk = (ushort)keys[i];
-      bool extended = keys[i] == 0xA3 || keys[i] == 0xA5 || keys[i] == 0x5B || keys[i] == 0x5C;
-      input[0].U.ki.dwFlags = WindowsComputerUseNative.KEYEVENTF_KEYUP | (extended ? 1u : 0u);
-      input[0].U.ki.dwExtraInfo = new IntPtr((long)(ulong)WindowsComputerUseNative.InputMarker);
-      if (WindowsComputerUseNative.SendInput(1, input, size) == 1) released.Add(keyNames[i]);
-    }
-    int[] buttons = { 0x01, 0x02, 0x04, 0x05, 0x06 };
-    uint[] ups = { 0x0004, 0x0010, 0x0040, 0x0100, 0x0100 };
-    int[] data = { 0, 0, 0, 1, 2 };
-    string[] buttonNames = { "LButton", "RButton", "MButton", "XButton1", "XButton2" };
-    for (int i = 0; i < buttons.Length; i++) {
-      if ((GetAsyncKeyState(buttons[i]) & 0x8000) == 0) continue;
-      if (WindowsComputerUseNative.SendMouseEvent(0, 0, ups[i], data[i]) == 1) released.Add(buttonNames[i]);
-    }
-    return released.ToArray();
   }
 
   // Before DSH's input on the user's desktop: hold the user's input from now
@@ -4271,7 +4338,8 @@ function Invoke-Action {
       return [ordered]@{ ok = $true; action = 'input_state'; held = $state.Held; heldKeys = @($state.HeldKeys); fullscreen = $state.Fullscreen; notification = $state.Notification; foreground = $state.Foreground }
     }
     "release_input" {
-      $released = [WcuInputHold]::ReleaseStuck()
+      $inputLease = Enter-DesktopInput -Skip:$background
+      $released = [WindowsComputerUseNative]::ReleaseOwnedInput()
       return [ordered]@{ ok = $true; action = 'release_input'; released = @($released) }
     }
     "health" {
