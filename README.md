@@ -38,7 +38,7 @@
    ```
 
 2. 再右键托盘图标，选“退出”，然后重新打开 DSH Desktop。只关掉窗口不够：窗口关了，DSH 还在托盘里运行，不会加载新装的插件。
-3. 打开 **设置 → 电脑操控**（鼠标图标）看看各项选项。不改也能直接用，默认加载全部工具。然后给 agent 布置一个桌面任务，比如[第 6 节](#6-使用示例)里的例子。
+3. 打开 **设置 → 电脑操控**（鼠标图标）看看各项选项。默认采用懒启动，只加载管理入口，DSH 会按任务启用工具。然后给 agent 布置一个桌面任务，比如[第 6 节](#6-使用示例)里的例子。
 
 #### 1.2 升级
 
@@ -205,7 +205,7 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 |---|---|
 | 更新 | 标题右侧 GitHub 左边的按钮：平时是“检查更新”，有新版本时变成“更新”，点了才安装，见 1.2 |
 | 反馈问题 | 保存诊断 TXT 到下载文件夹并打开 GitHub 新建问题页面，见 8.4 |
-| 工具加载 | **全部**（26 个，默认）；**精简**（12 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
+| 工具加载 | **懒启动**（默认，开始只加载 1 个管理工具，随后按需加载）；**全部**（26 个）；**精简**（12 个常用工具）；**自定义**（逐个或整组勾选） |
 | 工作方式 | **少打扰**（默认）：你照常用电脑，任务也不耽搁。能在后台做的都在后台做，DSH 自己打开的程序放在看不见的后台桌面里；必须用鼠标键盘的步骤马上做、只借一下，你这期间按的键和鼠标动作先存住，随后补到你的窗口；只在你按着键、拼音没上屏或在用全屏程序时等一下；**前台操作**：适合你暂时不用电脑时，DSH 把窗口放在最前面，直接用鼠标键盘，按 Esc 停止；**虚拟机**：在一台 Hyper-V 虚拟机或通过远程 Windows（WinRM，实验）连接的 Windows 系统（VMware、VirtualBox 虚拟机或另一台电脑，Windows 家庭版可用）里操作，不碰你本机的桌面与文件，设置页列出一次性的配置步骤。见[设置与停止](docs/computer-use-settings.md) |
 | 优先使用网页控件 | 默认打开。网页能直接读写时在后台完成，不动鼠标、不抢前台；桌面程序和读不到的网页内容再交给电脑操控 |
 | 显示 DSH 浏览器窗口 | 默认打开，能看到 DSH 浏览器在做什么；关掉后它在后台运行，没有窗口 |
@@ -309,6 +309,8 @@ Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定
 
 #### 7.5 少读一点，省上下文
 
+懒启动对 Windows 控件树、快照的文字部分和 OCR 默认使用 64 KiB 字节预算。可用 `maxBytes` 调整。树和快照也可用 `detailLevel:"full"` 取消默认预算。
+
 - **精简树。** Windows 界面上的 `accessibility_tree` 和 `snapshot` 支持 `detailLevel:"summary"`，每个节点只保留 ID、控件类型、名称和状态。
 - **给树设字节预算。** 这两个工具的 `maxBytes` 最小为 2,000，限制返回的 UTF-8 JSON 大小，截图另算。超出时先转为精简树，再只留可操作控件和它们的祖先，最后按层截断。截断时从 `budget.fullResultPath` 读取完整结果。如果剩余内容仍放不下，结果会给出文件路径。
 - **重读时只要变化。** 用 `accessibility_tree` 传 `treeDeltaBase:"start"` 取得树和 `treeId`。重读同一目标时，把这个 ID 传给 `treeDeltaBase`，就会收到新增、删除和变化的控件，以及新的 `treeId`。要比较控件的值，用 `detailLevel:"full"`。找不到基准、窗口或视图参数变了、任一树被截断，或变化超过 40% 时，会退回树结果并说明 `delta.fallback` 的原因。增量本身超出 `maxBytes` 也会回退，再按预算缩减。预算缩减后的树不能作为增量基准。
@@ -411,7 +413,7 @@ You need a Windows computer with DSH Desktop installed. The plugin uses Windows 
    ```
 
 2. Right-click the tray icon again, choose **Quit**, then open DSH Desktop again. Closing the window is not enough: DSH keeps running in the tray and does not load the new plugin.
-3. Open **Settings → Computer Use** (the mouse icon; 电脑操控 in the Chinese interface) to look around. You don't have to change anything: all tools are loaded by default. Then give the agent a desktop task, such as one from [section 6](#6-try-a-task).
+3. Open **Settings → Computer Use** (the mouse icon) to look around. The default setup starts with the management tool, and DSH enables the tools needed for each task. Try a desktop task from [section 6](#6-try-a-task).
 
 #### 1.2 Upgrade
 
@@ -578,7 +580,7 @@ Change these in **Settings → Computer Use**. Most take effect after you click 
 |---|---|
 | Update | The button left of the GitHub link at the top right: Check for updates, or Update when a newer version exists, which installs it only when clicked; see 1.2 |
 | Report a problem | Saves a TXT to Downloads and opens GitHub’s new-issue page; see 8.4 |
-| Tool loading | **All** (26 tools, the default); **Lite** (12 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
+| Tool loading | **Lazy** (default, starts with 1 management tool and enables others on demand) · **All** (26 tools) · **Lite** (12 common tools) · **Custom** (pick tools one by one or by group) |
 | Work mode | **Low disruption** (the default): keep using your PC and the task keeps going. DSH does what it can in the background and opens the apps it starts on a hidden desktop; steps that need the mouse and keyboard run at once and borrow them briefly, while what you type or click meanwhile is held and then replayed to your window; it waits only while you hold a key, have input-method text not yet committed, or use a full-screen app; **Foreground**: for when you step away; DSH keeps its window in front and uses the mouse and keyboard directly, and Esc stops it; **Virtual machine**: works inside a Hyper-V virtual machine or a remote Windows system over WinRM (experimental; VMware, VirtualBox, or another Windows PC; works from Windows Home) without touching your host desktop or files, with one-time setup steps on the settings page. See [settings and stopping](docs/computer-use-settings.md) |
 | Prefer web page controls | On by default. Pages it can read and operate directly are handled in the background, without moving the pointer or taking the foreground; desktop apps and page content it cannot read go to Computer Use |
 | Show the DSH browser window | On by default, so you can watch the DSH browser; turn it off to run the browser in the background with no window |
@@ -681,6 +683,8 @@ The browser comes from one of three places:
 The Chromium lane reads and operates same-origin, cross-origin and nested iframes. Element ids bind their frame and document and expire on navigation/removal. With browserTab, coordinates use CSS pixels in the current page screenshot viewport, including canvas; the desktop pointer does not move. With the browser window shown, Chrome's own JavaScript dialogs (alert, confirm and the like) sometimes come to the front briefly. Shortcuts such as Ctrl+L and Ctrl+T belong to the browser window and never reach the page; use `address`, `new-tab` and `close_window` instead. Environment variables and result formats are in the [MCP tools reference](docs/wiki/mcp-tools.md#browser-lane).
 
 #### 7.5 Read less to save context
+
+Lazy mode uses a 64 KiB text budget for Windows control trees, snapshots and OCR by default. Set `maxBytes` to adjust it. For trees and snapshots, `detailLevel:"full"` also opts out of the automatic budget.
 
 - **Summarize a tree.** Use `detailLevel:"summary"` with `accessibility_tree` or `snapshot` on Windows controls. Each node keeps its ID, control type, name and states.
 - **Set a tree byte budget.** `maxBytes` starts at 2,000 and limits the UTF-8 JSON response. Screenshots are separate. Over the limit, the tool summarizes the tree first, then keeps actionable controls and their ancestors, then cuts the tree by level. If it cuts the tree, `budget.fullResultPath` points to the complete result. If the remaining content still cannot fit, the response gives the file path.

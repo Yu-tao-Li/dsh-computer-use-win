@@ -636,6 +636,7 @@ const compactedToolByName = new Map(tools.map(tool => [tool.name, {
 }]));
 const toolMode = process.env.WCU_TOOL_MODE || 'full';
 if (!['lite', 'full', 'lazy'].includes(toolMode)) throw new Error('WCU_TOOL_MODE must be lite, full or lazy');
+const lazyObservationBudget = toolMode === 'lazy' ? 64 * 1024 : undefined;
 const prefix = 'windows_computer_use_';
 const discoveryName = prefix + 'tools';
 const liteNames = LITE_TOOL_NAMES.filter(name=>name!=='tools');
@@ -1382,10 +1383,8 @@ async function callTool(name, args, request) {
       if (adapterNotices) result.adapterNotices = adapterNotices;
       return { content: [{ type: "text", text: safeJson(result) }] };
     }
-    case "windows_computer_use_snapshot": {
-      const result = await shapeTree(await observeBackend("snapshot", backendTreeArgs(args), request), args);
-      return imageResult(result, args.includeScreenshot ?? true);
-    }
+    case "windows_computer_use_snapshot":
+      return observationText("snapshot", args, request);
     case "windows_computer_use_accessibility_tree":
       return observationText("tree", args, request);
     case "windows_computer_use_list_windows": {
@@ -1432,10 +1431,11 @@ async function callTool(name, args, request) {
       return backendText("wait", args, Math.max(31000, Number(args?.milliseconds || 500) + 1000), request);
     case "windows_computer_use_ocr": {
       const result = await runBackend("ocr", args, 20000, request);
-      if (!args.maxBytes) return imageResult(result);
+      const maxBytes = args.maxBytes ?? lazyObservationBudget;
+      if (!maxBytes) return imageResult(result);
       const { screenshot, ...rest } = result;
-      const shaped = await budgetOcr(rest, args.maxBytes);
-      return imageResult(screenshot ? { ...shaped, screenshot } : shaped, true, args.maxBytes);
+      const shaped = await budgetOcr(rest, maxBytes);
+      return imageResult(screenshot ? { ...shaped, screenshot } : shaped, true, maxBytes);
     }
     case "windows_computer_use_screenshot":
       return imageResult(await runBackend("screenshot", args, 15000, request));
@@ -1564,7 +1564,10 @@ async function shapeTree(result, args) {
   return result;
 }
 async function observationText(action, args, request) {
-  return imageResult(await shapeTree(await observeBackend(action, backendTreeArgs(args), request), args), true, args.maxBytes);
+  const autoBudget = action !== 'find' && args.detailLevel !== 'full' ? lazyObservationBudget : undefined;
+  const maxBytes = args.maxBytes ?? autoBudget;
+  const result = await observeBackend(action, backendTreeArgs(args), request);
+  return imageResult(await shapeTree(result, { ...args, maxBytes }), args.includeScreenshot ?? true, maxBytes);
 }
 
 let batchOwner = null;

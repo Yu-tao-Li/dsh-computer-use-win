@@ -57,7 +57,8 @@ export function normalizeSettings(input = {}) {
   value.desktopTarget = LEGACY_DESKTOP_TARGETS[value.desktopTarget] ?? value.desktopTarget;
   for(const key of Object.keys(SETTINGS_SCHEMA))validateSetting(key,value[key]);
   value.enabledTools=normalizeEnabledTools(value.enabledTools);
-  if(value.toolPreset==='auto')value.toolPreset=value.enabledTools.length===TOOL_NAMES.length?'full':'custom';
+  if(value.toolPreset==='auto')value.toolPreset=value.enabledTools.length===TOOL_NAMES.length
+    ? (value.mode==='lazy'?'lazy':'full') : 'custom';
   if(value.browserApp==='firefox'||value.desktopTarget==='hyperv')value.browserAttachUser=false;
   value.hypervVm=value.hypervVm.trim();
   value.remoteHost=value.remoteHost.trim();

@@ -6,7 +6,6 @@
 
 $ErrorActionPreference = "Stop"
 $loader = Join-Path $PSScriptRoot 'native-loader.ps1'
-if ([IO.File]::Exists($loader)) { . $loader }
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $script:BackendStartupWatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1286,169 +1285,33 @@ public static class WcuInputHold {
 }
 '@
 
-function Get-CsHash {
-  param([string]$Source)
-  $normalized = $Source.Replace("`r`n", "`n").Replace("`r", "`n")
-  $sha = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalized))
-    return ([BitConverter]::ToString($bytes).Replace("-", "").Substring(0, 16)).ToLowerInvariant()
-  } finally { $sha.Dispose() }
-}
-
-# Load a helper compiled into %TEMP%, compiling it first when no cached copy
-# exists. The bytes are read rather than passed to Assembly.LoadFrom: .NET
-# Framework refuses LoadFrom for an unsigned DLL it treats as coming from a
-# remote or internet location (0x80131515), which left every tool failing with
-# "Backend process exited" on some machines (#54). The compiler writes a
-# file of its own and only a complete one is moved into place, because another
-# backend may be reading the cache at the same time.
-#
-# TEMP is often an 8.3 short path. Windows PowerShell's FileSystemProvider
-# rejects a short name that is longer than the name it stands for, such as
-# C:\Users\LIHUA~1 for "Li Hua", with "An object at the specified path ...
-# does not exist" (#78). Remove-Item met that on every OCR compile, so
-# temporary files are handled with .NET calls only, never with Remove-Item,
-# Get-ChildItem or Test-Path.
 function Remove-TempFile {
   param([string]$Path)
   try { [System.IO.File]::Delete($Path) } catch { }
 }
 
-function Get-HelperCacheDir {
-  $local = [Environment]::GetFolderPath('LocalApplicationData')
-  $configured = [string]$env:TEMP
-  if ($configured -and [IO.Directory]::Exists($configured)) {
-    # Resolve a user's usual 8.3 TEMP spelling before deciding whether it is
-    # a caller override. Cache file I/O itself still uses .NET paths.
-    try { $configured = (Get-Item -LiteralPath $configured -ErrorAction Stop).FullName } catch {}
-  }
-  $default = Join-Path $local 'Temp'
-  $userTemp = [Environment]::ExpandEnvironmentVariables([string][Environment]::GetEnvironmentVariable('TEMP','User'))
-  if ($configured -and $configured.TrimEnd('\') -ne $default.TrimEnd('\') -and $configured -ne $userTemp) {
-    if (-not [IO.Path]::IsPathRooted($configured)) { throw 'The configured TEMP path must be absolute.' }
-    $dir = [IO.Path]::GetFullPath($configured)
-  } else {
-    $dir = Join-Path $local 'dsh-computer-use-win\native-cache'
-    if (-not [IO.Directory]::Exists($dir)) {
-      $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
-      try {
-        $acl=[Security.AccessControl.DirectorySecurity]::new()
-        $acl.SetAccessRuleProtection($true,$false)
-        foreach($sid in @($identity.User,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
-          $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
-        }
-        if ($PSVersionTable.PSEdition -eq 'Core') { [IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($dir),$acl) }
-        else { [void][IO.Directory]::CreateDirectory($dir,$acl) }
-      } finally { $identity.Dispose() }
-    }
-  }
-  [void][IO.Directory]::CreateDirectory($dir)
-  Assert-PrivateHelperPath $dir -Directory
-  return $dir
-}
-
-function Assert-PrivateHelperPath {
-  param([string]$Path, [switch]$Directory)
-  $attributes = [IO.File]::GetAttributes($Path)
-  if (($attributes -band [IO.FileAttributes]::ReparsePoint) -or
-      ([bool]($attributes -band [IO.FileAttributes]::Directory) -ne [bool]$Directory)) {
-    throw 'Native cache must contain ordinary files in a private directory.'
-  }
-  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-  try { $trusted = @($identity.User.Value,$identity.Owner.Value,'S-1-5-18','S-1-5-32-544') }
-  finally { $identity.Dispose() }
-  $item = if ($Directory) { [IO.DirectoryInfo]::new($Path) } else { [IO.FileInfo]::new($Path) }
-  $sections = [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner
-  $acl = if ($PSVersionTable.PSEdition -eq 'Core') { [IO.FileSystemAclExtensions]::GetAccessControl($item,$sections) } else { $item.GetAccessControl($sections) }
-  if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) {
-    throw 'Native cache ownership does not match the Windows account.'
-  }
-  $writeRights = [Security.AccessControl.FileSystemRights]'WriteData, AppendData, DeleteSubdirectoriesAndFiles, Delete, ChangePermissions, TakeOwnership'
-  foreach ($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {
-    if ($rule.AccessControlType -eq 'Allow' -and -not ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -and
-        ($rule.FileSystemRights -band $writeRights) -and $rule.IdentityReference.Value -notin $trusted) {
-      throw 'Native cache grants write access to another account.'
-    }
-  }
-}
-
-function Get-HelperDigest {
-  param([byte[]]$Bytes)
-  $sha = [Security.Cryptography.SHA256]::Create()
-  try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant() }
-  finally { $sha.Dispose() }
-}
-
-# A compile that failed or was cut off leaves <helper>.<pid>.<guid>.dll and
-# its .cs source behind (one pair per OCR call on the machines of #78). Those
-# an hour old are removed before a helper is compiled.
-function Remove-StaleHelperParts {
-  param([string]$Directory)
-  $cutoff = [DateTime]::UtcNow.AddHours(-1)
-  try {
-    foreach ($file in [System.IO.Directory]::EnumerateFiles($Directory, 'wcu-*.dll*')) {
-      if ([System.IO.Path]::GetFileName($file) -cmatch '^wcu-(native|ocr|clipboard|wgc)-[a-z0-9-]+\.\d+\.[0-9a-f]{32}\.dll(\.cs)?$' -and [System.IO.File]::GetLastWriteTimeUtc($file) -lt $cutoff) { Remove-TempFile $file }
-    }
-  } catch { }
-}
-
-function Import-HelperAssembly {
-  param([string]$Path, [scriptblock]$Compile)
-  $directory = [IO.Path]::GetDirectoryName($Path)
-  Assert-PrivateHelperPath $directory -Directory
-  $digestFile = $Path + '.sha256'
-  $mutex = [Threading.Mutex]::new($false, ('Local\DSH-WCU-Helper-' + (Get-CsHash $Path.ToUpperInvariant())))
-  $owned = $false
-  $partial = $Path -replace '\.dll$', (".$PID." + [Guid]::NewGuid().ToString('N') + '.dll')
-  try {
-    try { $owned = $mutex.WaitOne(20000) } catch [Threading.AbandonedMutexException] { $owned = $true }
-    if (-not $owned) { throw 'Timed out waiting for the native helper cache.' }
-    if ([IO.File]::Exists($Path)) { Assert-PrivateHelperPath $Path }
-    if ([IO.File]::Exists($digestFile)) { Assert-PrivateHelperPath $digestFile }
-    if ([IO.File]::Exists($Path) -and [IO.File]::Exists($digestFile)) {
-      $bytes = [IO.File]::ReadAllBytes($Path)
-      if ((Get-HelperDigest $bytes) -ceq [IO.File]::ReadAllText($digestFile)) {
-        [void][Reflection.Assembly]::Load($bytes)
-        return
-      }
-    }
-    Remove-StaleHelperParts $directory
-    & $Compile $partial
-    $bytes = [IO.File]::ReadAllBytes($partial)
-    [IO.File]::WriteAllText("$partial.sha256",(Get-HelperDigest $bytes))
-    if ([IO.File]::Exists($Path)) { [IO.File]::Replace($partial,$Path,[NullString]::Value) }
-    else { [IO.File]::Move($partial,$Path) }
-    if ([IO.File]::Exists($digestFile)) { [IO.File]::Replace("$partial.sha256",$digestFile,[NullString]::Value) }
-    else { [IO.File]::Move("$partial.sha256",$digestFile) }
-    [void][Reflection.Assembly]::Load($bytes)
-  } finally {
-    Remove-TempFile $partial
-    Remove-TempFile "$partial.cs"
-    Remove-TempFile "$partial.sha256"
-    if ($owned) { $mutex.ReleaseMutex() }
-    $mutex.Dispose()
-  }
-}
-
 function Load-Assemblies {
+  param([switch]$NativeOnly)
   # DPI awareness MUST be set before any GDI+/WinForms assembly is loaded:
   # loading System.Windows.Forms/System.Drawing initializes GDI, which locks
   # the process DPI context (and GetSystemMetrics then returns virtualized
   # 150%-scaled values like 3414x960 instead of physical 5120x1440).
-  if (-not ("WindowsComputerUseNative" -as [type])) {
+  if (-not $script:NativeAssembliesReady) {
     Write-BackendStage 'native-load-start'
-    # Add-Type targets the current runtime. A Core-built helper cannot be used
-    # by Windows PowerShell 5.1 even when its C# source is identical.
-    $runtimeKey = $PSVersionTable.PSEdition.ToLowerInvariant() + '-clr' + [Environment]::Version.Major
-    $precompiled = (Get-Command Import-PackagedHelper -ErrorAction SilentlyContinue) -and (Import-PackagedHelper -Name native -Source $script:WcuCs)
-    if (-not $precompiled) {
-      $dll = Join-Path (Get-HelperCacheDir) ("wcu-native-" + $runtimeKey + '-' + (Get-CsHash -Source $script:WcuCs) + ".dll")
-      Import-HelperAssembly -Path $dll -Compile { param($out) Add-Type -TypeDefinition $script:WcuCs -OutputAssembly $out }
+    if (-not ("WindowsComputerUseNative" -as [type])) {
+      # A locally compiled fallback targets the PowerShell runtime in use.
+      $runtimeKey = $PSVersionTable.PSEdition.ToLowerInvariant() + '-clr' + [Environment]::Version.Major
+      $precompiled = (Get-Command Import-PackagedHelper -ErrorAction SilentlyContinue) -and (Import-PackagedHelper -Name native -Source $script:WcuCs)
+      if (-not $precompiled) {
+        $dll = Join-Path (Get-HelperCacheDir) ("wcu-native-" + $runtimeKey + '-' + (Get-NativeSourceHash -Source $script:WcuCs) + ".dll")
+        Import-HelperAssembly -Path $dll -Compile { param($out) Add-Type -TypeDefinition $script:WcuCs -OutputAssembly $out }
+      }
     }
+    Write-BackendStage 'native-load-complete'
+    Set-DpiAware
+    $script:NativeAssembliesReady = $true
   }
-  Write-BackendStage 'native-load-complete'
-  Set-DpiAware
+  if ($NativeOnly -or $script:UiaAssembliesReady) { return }
   Write-BackendStage 'uia-assemblies-start'
 
   Add-Type -AssemblyName UIAutomationClient
@@ -1471,6 +1334,7 @@ function Load-Assemblies {
   Add-Type -AssemblyName WindowsBase
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName System.Drawing
+  $script:UiaAssembliesReady = $true
   Write-BackendStage 'assemblies-complete'
 }
 
@@ -2757,7 +2621,7 @@ function Get-OcrHelper {
   # Compile (once, cached) and load the C# WinRT OCR helper.
   if ("WindowsComputerUseOcr" -as [type]) { return }
   if ((Get-Command Import-PackagedHelper -ErrorAction SilentlyContinue) -and (Import-PackagedHelper -Name ocr -Source $script:WcuOcrCs)) { return }
-  $dll = Join-Path (Get-HelperCacheDir) ("wcu-ocr-" + (Get-CsHash -Source $script:WcuOcrCs) + ".dll")
+  $dll = Join-Path (Get-HelperCacheDir) ("wcu-ocr-" + (Get-NativeSourceHash -Source $script:WcuOcrCs) + ".dll")
   Import-HelperAssembly -Path $dll -Compile {
     param($target)
     $wd = "C:\Windows\System32\WinMetadata"
@@ -3294,7 +3158,7 @@ function Begin-ClipboardLease {
     $precompiled = (Get-Command Import-PackagedHelper -ErrorAction SilentlyContinue) -and (Import-PackagedHelper -Name clipboard -Source $clipboardSource)
     if (-not $precompiled) {
       $runtimeKey = $PSVersionTable.PSEdition.ToLowerInvariant() + '-clr' + [Environment]::Version.Major
-      $dll = Join-Path (Get-HelperCacheDir) ("wcu-clipboard-" + $runtimeKey + '-' + (Get-CsHash -Source $clipboardSource) + ".dll")
+      $dll = Join-Path (Get-HelperCacheDir) ("wcu-clipboard-" + $runtimeKey + '-' + (Get-NativeSourceHash -Source $clipboardSource) + ".dll")
       $references = @('System.Windows.Forms', 'System.Drawing')
       if ($PSVersionTable.PSEdition -eq 'Core') {
         # As for the takeover helper: the short names alone miss the .NET
@@ -5267,8 +5131,8 @@ try {
   Write-BackendStage 'utility-import-start'
   Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
   Write-BackendStage 'utility-import-complete'
-  Load-Assemblies
-  Set-DpiAware
+  . $loader
+  Load-Assemblies -NativeOnly
 } catch {
   # One line the server can quote. Otherwise a startup failure reached the
   # model only as "Backend process exited" (#54).
@@ -5279,6 +5143,7 @@ try {
   exit 3
 }
 Write-BackendStage 'backend-ready'
+$nativeOnlyActions = @('list_windows','wait','input_state','release_input')
 
 if ($Persistent) {
   [Console]::Out.WriteLine((@{type='ready';protocol=1;pid=$PID}|ConvertTo-Json -Compress))
@@ -5301,6 +5166,7 @@ if ($Persistent) {
     $name = [string](Get-Prop $req "action" "")
     $result = $null
     try {
+      if ($name -notin $nativeOnlyActions) { Load-Assemblies }
       $result = Invoke-Action -Action $name -InputObject (Get-Prop $req "args" $null)
       if ($null -eq $result) { throw "Unknown action '$name'." }
       $notice = [WcuInputHold]::TakeNotice()
@@ -5316,7 +5182,7 @@ if ($Persistent) {
     }
     $result["id"] = $id
     Write-BackendStage 'response-serialize-start'
-    Write-Host ($result | ConvertTo-Json -Depth 50 -Compress)
+    [Console]::Out.WriteLine(($result | ConvertTo-Json -Depth 50 -Compress))
     [Console]::Out.Flush()
   }
   exit 0
@@ -5328,6 +5194,7 @@ if ($Persistent) {
   $inputObject = Get-InputObject
   $result = $null
   try {
+    if ($Action -notin $nativeOnlyActions) { Load-Assemblies }
     $result = Invoke-Action -Action $Action -InputObject $inputObject
     if ($null -eq $result) { throw "Unknown action '$Action'." }
   } catch {

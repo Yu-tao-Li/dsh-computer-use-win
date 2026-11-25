@@ -10,13 +10,15 @@ if ($PSVersionTable.PSEdition -eq 'Core') {
   return
 }
 $source = [IO.File]::ReadAllText($BackendPath, [Text.Encoding]::UTF8)
+$env:WCU_DISABLE_PRECOMPILED = '1'
+. (Join-Path (Split-Path -Parent $BackendPath) 'native-loader.ps1')
 $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw 'Backend source did not parse.' }
 $helper = $ast.Find({param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$script:WcuOcrCs'}, $true)
 Invoke-Expression $helper.Extent.Text
-foreach ($name in @('Get-CsHash', 'Get-HelperCacheDir', 'Assert-PrivateHelperPath', 'Get-HelperDigest', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Get-OcrHelper', 'Invoke-Ocr')) {
+foreach ($name in @('Remove-TempFile', 'Get-OcrHelper', 'Invoke-Ocr')) {
   $function = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name}, $true)
   Invoke-Expression $function.Extent.Text
 }

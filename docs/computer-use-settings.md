@@ -70,6 +70,8 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
    如果之后连接时提示本机 WinRM 服务未运行，说明电脑重启后该服务回到了停止状态，在本机再次启动 WinRM 服务（或将“Windows Remote Management”服务启动类型设为“自动”）即可。
 5. **连接并保存凭据**：按设置页引导连接并在 Windows 凭据弹窗中输入目标机用户名和密码。凭据会用 Windows DPAPI 加密，仅保存给当前本机 Windows 账户使用。
 
+   如果确认凭据正确但仍收到“拒绝访问”，请在目标机用管理员 PowerShell 查看 `(Get-PSSessionConfiguration -Name Microsoft.PowerShell).Permission`。若端点允许 Remote Management Users，可把已经登录目标机桌面的专用账号加入这个组后重试。Windows 可能会筛除本地管理员账户远程登录时的管理员权限，所以即使该账号是本地管理员，也需要核对端点权限。
+
 连接成功后，后续复用与 Hyper-V 相同的桌面接力通道，所有界面查看、键鼠和文件操作均在目标 Windows 桌面会话内运行。要回到本机操作，选回 **少打扰** 或 **前台操作**。
 
 ### Agent 看不到电脑操控工具
@@ -185,6 +187,8 @@ Use this backend on **Windows Home** (where Hyper-V is not available), with a **
 
    If a later connection reports that the WinRM service is not running on this PC, Windows may have stopped the Manual-startup service after a restart—start the WinRM service again on this PC (or set **Windows Remote Management** to Automatic startup).
 5. **Connect and sign in**: follow the settings page prompt to connect and enter the target Windows username and password in the Windows credential prompt. Credentials are encrypted with Windows DPAPI for your current Windows account on this PC only.
+
+   If the credentials are correct and the target still reports access denied, check `(Get-PSSessionConfiguration -Name Microsoft.PowerShell).Permission` in an administrator PowerShell window on the target. If the endpoint allows Remote Management Users, add the dedicated desktop account to that group and try again. Windows can filter administrative rights for remote logons by local administrators, so local administrator membership alone may be insufficient.
 
 Once connected, browser actions, screenshots, mouse and keyboard input, and desktop relay work the same way inside the target Windows session. Select **Low disruption** or **Foreground** to return to your own desktop.
 

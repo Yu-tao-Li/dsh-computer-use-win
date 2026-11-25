@@ -14,9 +14,13 @@ $leaseState = $ast.Find({ param($node)
 $cleanup = $ast.Find({ param($node)
   $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$guestCleanup'
 }, $true)
+$context = $ast.Find({ param($node)
+  $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$guestContext'
+}, $true)
 . ([scriptblock]::Create($connect.Extent.Text))
 . ([scriptblock]::Create($leaseState.Extent.Text))
 . ([scriptblock]::Create($cleanup.Extent.Text))
+. ([scriptblock]::Create($context.Extent.Text))
 
 function New-PSSessionOption {
   param($OpenTimeout, $OperationTimeout)
@@ -25,6 +29,7 @@ function New-PSSessionOption {
 function New-PSSession {
   [CmdletBinding()]
   param($ComputerName, $Port, $Credential, $Authentication, $SessionOption)
+  if ($script:failure -is [Management.Automation.ErrorRecord]) { $PSCmdlet.ThrowTerminatingError($script:failure) }
   if ($script:failure) { throw $script:failure }
   return @{ host = $ComputerName; port = $Port; credential = $Credential; auth = $Authentication; option = $SessionOption }
 }
@@ -62,6 +67,11 @@ Assert-ConnectError WCU_REMOTE_CLIENT
 $script:failure = 'The remote address must be added to TrustedHosts.'
 Assert-ConnectError WCU_REMOTE_TRUST
 $script:failure = 'Access is denied.'
+Assert-ConnectError WCU_REMOTE_ACCESS_DENIED
+$script:failure = [Management.Automation.ErrorRecord]::new(
+  [UnauthorizedAccessException]::new('Simulated localized message'), 'AccessDenied,PSSessionOpenFailed', 'PermissionDenied', $remote.Host)
+Assert-ConnectError WCU_REMOTE_ACCESS_DENIED
+$script:failure = 'Logon failure: unknown user name or bad password.'
 Assert-ConnectError WCU_REMOTE_SIGNIN_FAILED
 
 function Get-Credential {
@@ -72,7 +82,7 @@ function Invoke-Command {
   [CmdletBinding()]
   param($Session, $ScriptBlock)
   if ($fixtureSetup.error) { throw $fixtureSetup.error }
-  if ($fixtureSetup.missing) { return $fixtureSetup.missing }
+  return @{ missing = $fixtureSetup.missing }
 }
 function Remove-PSSession {
   param($Session)
@@ -121,6 +131,30 @@ try {
   }
   if (@(Get-ChildItem -LiteralPath $credentialRoot -File).Count -ne 1) {
     throw 'A successful reconfiguration must leave only the current credential'
+  }
+  $probeName = 'Wincu-Guest-' + [Guid]::NewGuid().ToString('N')
+  & {
+    function Get-Process {
+      [CmdletBinding()]
+      param([string]$Name)
+      [pscustomobject]@{ Id = [int]::MaxValue; SessionId = 82 }
+      [pscustomobject]@{ Id = $PID; SessionId = 0 }
+    }
+    if ((& $guestContext).missing -ne 'WCU_HYPERV_DESKTOP_REQUIRED') { throw 'Unowned and session-zero processes must not satisfy the guest desktop check' }
+  }
+  & {
+    function Get-Process {
+      [CmdletBinding()]
+      param([string]$Name)
+      [pscustomobject]@{ Id = [int]::MaxValue; SessionId = 82 }
+      [pscustomobject]@{ Id = $PID; SessionId = 84 }
+    }
+    if ((& $guestContext).missing) { throw 'The matching account and Node must pass guest readiness' }
+    if (Test-Path (Join-Path $env:LOCALAPPDATA 'dsh-computer-use-win\hyperv-workers')) { throw 'Readiness created a guest worker directory' }
+    $info = & $guestContext $probeName
+    if ($info.sessionId -ne 84 -or $info.userSid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+      throw 'Relay setup did not choose the desktop belonging to the logged-on account'
+    }
   }
   $name = 'Wincu-Guest-' + [Guid]::NewGuid().ToString('N')
   $script:worker = Join-Path $env:LOCALAPPDATA "dsh-computer-use-win\hyperv-workers\$name"

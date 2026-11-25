@@ -31,24 +31,66 @@ function Get-SelectedVm {
   return $result[0]
 }
 
-# What the relay needs inside the guest, checked read-only when the connection
-# is configured: the same rules as the relay's own check below, without
-# creating a worker folder. Returns the missing step's code, or nothing.
-$guestReadiness = {
+# Read the same desktop and Node information during setup and relay startup.
+# Setup passes no worker name, so it leaves the guest filesystem alone.
+$guestContext = {
+  param([string]$name)
   $ErrorActionPreference = 'Stop'
+  # A WinRM login can use Task Scheduler for its own interactive account even
+  # when that account cannot read the Win32_Process WMI namespace.
+  if (-not ('WcuGuestProcess' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+
+public static class WcuGuestProcess {
+  private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+  private const uint TOKEN_QUERY = 0x0008;
+  [DllImport("kernel32.dll")]
+  private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  [DllImport("advapi32.dll")]
+  private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+  [DllImport("kernel32.dll")]
+  private static extern bool CloseHandle(IntPtr handle);
+
+  public static string OwnerSid(int pid) {
+    var process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+    if (process == IntPtr.Zero) return null;
+    try {
+      IntPtr token;
+      if (!OpenProcessToken(process, TOKEN_QUERY, out token)) return null;
+      try {
+        using (var identity = new WindowsIdentity(token)) {
+          return identity.User == null ? null : identity.User.Value;
+        }
+      } finally { CloseHandle(token); }
+    } finally { CloseHandle(process); }
+  }
+}
+'@
+  }
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-  $desktop = @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Where-Object {
-    $_.SessionId -gt 0 -and (Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid).Sid -eq $identity.User.Value
+  try { $sid = $identity.User.Value } finally { $identity.Dispose() }
+  $desktop = @(Get-Process -Name explorer -ErrorAction SilentlyContinue | Where-Object {
+    $_.SessionId -gt 0 -and [WcuGuestProcess]::OwnerSid($_.Id) -eq $sid
   } | Select-Object -ExpandProperty SessionId -Unique)
-  if ($desktop.Count -ne 1) { return 'WCU_HYPERV_DESKTOP_REQUIRED' }
+  if ($desktop.Count -ne 1) {
+    return @{ missing='WCU_HYPERV_DESKTOP_REQUIRED'; message='WCU_HYPERV_DESKTOP_REQUIRED: sign in to the target desktop with the configured Windows account.' }
+  }
   $node = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
   if (-not $node) {
     $node = @((Join-Path $env:ProgramFiles 'nodejs\node.exe'), (Join-Path $env:LOCALAPPDATA 'Programs\nodejs\node.exe')) |
       Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
   }
-  if (-not $node) { return 'WCU_HYPERV_NODE_REQUIRED' }
-  $version = (& $node --version | Select-Object -First 1)
-  if ($version -notmatch '^v(\d+)\.' -or [int]$Matches[1] -lt 22) { return 'WCU_HYPERV_NODE_REQUIRED' }
+  $version = if ($node) { & $node --version | Select-Object -First 1 }
+  if ($version -notmatch '^v(\d+)\.' -or [int]$Matches[1] -lt 22) {
+    return @{ missing='WCU_HYPERV_NODE_REQUIRED'; message='WCU_HYPERV_NODE_REQUIRED: install Node.js 22 or newer on the target Windows.' }
+  }
+  if (-not $name) { return @{ missing=$null } }
+  $folder = Join-Path $env:LOCALAPPDATA ('dsh-computer-use-win\hyperv-workers\' + $name)
+  [void][IO.Directory]::CreateDirectory($folder)
+  @{ root=$folder; node=$node; sessionId=$desktop[0]; userSid=$sid }
 }
 
 function Connect-Guest($Vm, [pscredential]$Credential) {
@@ -121,8 +163,11 @@ function Connect-Target($Guest, [pscredential]$Credential) {
     if ($message -match 'TrustedHosts') {
       throw 'WCU_REMOTE_TRUST: add this address to WinRM TrustedHosts on this PC (see the setup step), then try again.'
     }
-    if ($code -in @(5, 1326, -2147024891, -2147023570) -or $message -match '(?i)access is denied|logon failure') {
+    if ($code -in @(1326, 1330, 1907, -2147023570, -2147023566, -2147022989) -or $message -match '(?i)logon failure|password has expired') {
       throw ('WCU_REMOTE_SIGNIN_FAILED: ' + $message)
+    }
+    if ($code -in @(5, -2147024891) -or $_.FullyQualifiedErrorId -match '^AccessDenied(?:,|$)' -or $message -match '(?i)access is denied') {
+      throw ('WCU_REMOTE_ACCESS_DENIED: The target refused the WinRM session. Check the account''s PowerShell remoting permissions. ' + $message)
     }
     $localWinrm = Get-Service -Name WinRM -ErrorAction SilentlyContinue
     if (-not $localWinrm -or $localWinrm.Status -ne 'Running') {
@@ -289,8 +334,9 @@ try {
     }
     # Missing Node or a signed-in desktop is a setup step. An interrupted or
     # failed check must leave the saved connection alone.
-    try { $missing = Invoke-Command -Session $session -ScriptBlock $guestReadiness -ErrorAction Stop | Select-Object -First 1 }
+    try { $readiness = Invoke-Command -Session $session -ScriptBlock $guestContext -ErrorAction Stop | Select-Object -First 1 }
     catch { throw ('WCU_HYPERV_READINESS_FAILED: could not check the Windows guest. ' + $_.Exception.Message) }
+    $missing = $readiness.missing
     [void][IO.Directory]::CreateDirectory($credentialRoot)
     $pendingCredential = $credentialFile + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
     try {
@@ -310,26 +356,8 @@ try {
   $credential = Import-Clixml -LiteralPath $credentialFile
   if ($credential -isnot [pscredential]) { throw 'WCU_HYPERV_CONFIG_REQUIRED: configure the connection again.' }
   $session = Connect-Target $guest $credential
-  $guestInfo = Invoke-Command -Session $session -ArgumentList $taskName -ScriptBlock {
-    param($name)
-    $ErrorActionPreference = 'Stop'
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $desktop = @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Where-Object {
-      $_.SessionId -gt 0 -and (Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid).Sid -eq $identity.User.Value
-    } | Select-Object -ExpandProperty SessionId -Unique)
-    if ($desktop.Count -ne 1) { throw 'WCU_HYPERV_DESKTOP_REQUIRED: sign in to the VM with the configured Windows account.' }
-    $node = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
-    if (-not $node) {
-      $node = @((Join-Path $env:ProgramFiles 'nodejs\node.exe'), (Join-Path $env:LOCALAPPDATA 'Programs\nodejs\node.exe')) |
-        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-    }
-    if (-not $node) { throw 'WCU_HYPERV_NODE_REQUIRED: install Node.js 22 or newer in the virtual machine.' }
-    $version = (& $node --version | Select-Object -First 1)
-    if ($version -notmatch '^v(\d+)\.' -or [int]$Matches[1] -lt 22) { throw 'WCU_HYPERV_NODE_REQUIRED: install Node.js 22 or newer in the virtual machine.' }
-    $folder = Join-Path $env:LOCALAPPDATA ('dsh-computer-use-win\hyperv-workers\' + $name)
-    [void][IO.Directory]::CreateDirectory($folder)
-    @{ root=$folder; node=$node; sessionId=$desktop[0]; userSid=$identity.User.Value }
-  }
+  $guestInfo = Invoke-Command -Session $session -ArgumentList $taskName -ScriptBlock $guestContext
+  if ($guestInfo.missing) { throw $guestInfo.message }
   $remote = $guestInfo.root
 
   Add-Type -AssemblyName System.IO.Compression

@@ -17,7 +17,8 @@ async function fixture(name,script,shortTimeout=false){
   // worker startup/replacement must not be measured against a 1.5s hang budget.
   if(shortTimeout){assert.ok(server.includes('timeoutMs = 30000'));server=server.replace('function runBackend(action, args = {}, timeoutMs = 30000, request) {','function runBackend(action, args = {}, timeoutMs = 30000, request) { timeoutMs = action === "wait" && args.milliseconds === 5000 ? 1500 : 15000;');}
   await writeFile(path.join(dir,'mcp/server.mjs'),server);
-  if(script)await writeFile(path.join(dir,'scripts/windows-uia.ps1'),script);else await copyFile(path.join(source,'scripts/windows-uia.ps1'),path.join(dir,'scripts/windows-uia.ps1'));
+  if(script)await writeFile(path.join(dir,'scripts/windows-uia.ps1'),script);
+  else for(const file of ['windows-uia.ps1','native-loader.ps1'])await copyFile(path.join(source,'scripts',file),path.join(dir,'scripts',file));
   const client=new McpTestClient(process.execPath,[path.join(dir,'mcp/server.mjs')],{env});clients.push(client);await client.init();return client;
 }
 const call=(client,name,args={})=>client.request('tools/call',{name:'windows_computer_use_'+name,arguments:args});

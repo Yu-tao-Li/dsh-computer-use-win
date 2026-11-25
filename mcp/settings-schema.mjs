@@ -32,7 +32,7 @@ export const SETTINGS_SCHEMA = Object.freeze(Object.fromEntries(Object.entries({
   progressOverlayLocked: toggle(true,'锁定浮窗并穿透鼠标 / Lock overlay and pass through input'),
   progressLockShortcut: shortcut('浮窗锁定快捷键 / Overlay lock shortcut'),
   progressPreviewToken: command(),
-  mode: choice(['lite','full'],'full','旧版工具模式 / Legacy tool mode',{draft:false}),
+  mode: choice(['lite','full','lazy'],'full','启动工具模式 / Startup tool mode',{draft:false}),
   toolPreset: choice(['auto','full','lite','lazy','custom'],'auto','工具加载方案 / Tool preset',{clientDefault:'full'}),
   enabledTools: {type:'tools',default:TOOL_NAMES,description:'启用的工具 / Enabled tools'},
   indicatorEnabled: toggle(true,'接管提示 / Takeover indicator'),

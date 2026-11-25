@@ -1,6 +1,7 @@
 // Pluggable VM backend registry, WinRM address parsing, and setup route (#101).
 // Read-only probe only; never touches or starts any virtual machine.
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { createHypervSetupHandler } from '../mcp/hyperv-relay.mjs';
 import { hypervBackend, winrmBackend, parseRemoteHost, vmBackend, VM_BACKENDS } from '../mcp/vm-backends.mjs';
 
@@ -114,6 +115,13 @@ if (process.platform === 'win32') {
   assert.equal(typeof liveProbe.available, 'boolean');
   const winrmProbe = await winrmBackend.probe();
   assert.deepEqual(winrmProbe, { ok: true, backend: 'winrm', available: true, reason: null });
+  const child = winrmBackend.start('Probe', 'localhost', { ...process.env, PSExecutionPolicyPreference: 'Restricted' });
+  let stdout = '', stderr = '';
+  child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+  child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+  const [code] = await once(child, 'close', { signal: AbortSignal.timeout(20000) });
+  assert.equal(code, 0, stderr);
+  assert.equal(JSON.parse(stdout).ok, true, 'The packaged entry point runs under a restricted user policy');
 }
 
 console.log(JSON.stringify({ passed: true, interface: true, parseRemoteHost: true, routeProbe: true, routeSetup: true, platformProbe: process.platform === 'win32' }));

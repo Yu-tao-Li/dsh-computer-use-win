@@ -669,7 +669,8 @@ window.__ModuleLoader__.load({
     "winrmErrUnreachable": "连不上这个地址：确认对方已开机、地址正确，并已完成第 1 步。",
     "winrmErrTrust": "这台电脑还没信任这个地址，见第 4 步。",
     "winrmErrClient": "这台电脑的 WinRM 服务没有运行，见第 4 步。",
-    "winrmErrSignIn": "没能登录：确认用户名和密码正确，且这个账户能远程管理那台 Windows。",
+    "winrmErrSignIn": "登录失败。请确认目标机的用户名和密码，并检查密码是否过期。",
+    "winrmErrAccessDenied": "目标机拒绝了 WinRM 会话。若用户名和密码正确，请核对该账户的 PowerShell 远程会话权限。",
     "hypervMissingNodeRemote": "登录信息已保存。还差第 2 步：在那台 Windows 里装 Node.js 22+，然后再点“配置连接”。",
     "hypervMissingDesktopRemote": "登录信息已保存。还差第 2 步：用这个账户登录那台 Windows 的桌面，然后再点“配置连接”。",
     "winrmReady": "连接已配置，DSH 之后在那台 Windows 里操作。",
@@ -1039,7 +1040,8 @@ window.__ModuleLoader__.load({
     "winrmErrUnreachable": "Cannot reach this address: check that it is on, the address is right, and step 1 is done.",
     "winrmErrTrust": "This PC does not trust that address yet; see step 4.",
     "winrmErrClient": "WinRM is not running on this PC; see step 4.",
-    "winrmErrSignIn": "Could not sign in: check the user name and password, and that this account may manage that PC remotely.",
+    "winrmErrSignIn": "Sign-in failed. Check the target PC's user name and password, and whether the password has expired.",
+    "winrmErrAccessDenied": "The target refused the WinRM session. If the credentials are correct, check that the account can use PowerShell remoting.",
     "hypervMissingNodeRemote": "Sign-in saved. Step 2 is left: install Node.js 22 or later there, then choose Configure connection again.",
     "hypervMissingDesktopRemote": "Sign-in saved. Step 2 is left: sign in to that PC’s desktop with this account, then choose Configure connection again.",
     "winrmReady": "Connection configured. DSH now works in the remote Windows.",
@@ -1372,7 +1374,8 @@ window.__ModuleLoader__.load({
     const HYPERV_ISSUES={WCU_HYPERV_UNAVAILABLE:['hypervErrUnavailable',1],WCU_HYPERV_PERMISSION:['hypervErrPermission',2],WCU_HYPERV_VM_UNAVAILABLE:['hypervErrVmState',3],WCU_HYPERV_NODE_REQUIRED:['hypervMissingNode',3],
       WCU_HYPERV_DESKTOP_REQUIRED:['hypervMissingDesktop',4],WCU_HYPERV_VM_UNKNOWN:['hypervErrVmUnknown',5],WCU_HYPERV_VM_REQUIRED:['hypervVmRequired',5],WCU_HYPERV_SIGNIN_FAILED:['hypervErrSignIn',6]};
     const WINRM_ISSUES={WCU_REMOTE_UNREACHABLE:['winrmErrUnreachable',1],WCU_HYPERV_NODE_REQUIRED:['hypervMissingNodeRemote',2],WCU_HYPERV_DESKTOP_REQUIRED:['hypervMissingDesktopRemote',2],
-      WCU_REMOTE_HOST_REQUIRED:['winrmHostRequired',3],WCU_REMOTE_TRUST:['winrmErrTrust',4],WCU_REMOTE_CLIENT:['winrmErrClient',4],WCU_REMOTE_SIGNIN_FAILED:['winrmErrSignIn',5]};
+      WCU_REMOTE_HOST_REQUIRED:['winrmHostRequired',3],WCU_REMOTE_TRUST:['winrmErrTrust',4],WCU_REMOTE_CLIENT:['winrmErrClient',4],
+      WCU_REMOTE_SIGNIN_FAILED:['winrmErrSignIn',5],WCU_REMOTE_ACCESS_DENIED:['winrmErrAccessDenied',5]};
     function isValidRemoteHost(text){
       const s=String(text||'').trim();
       if(!s||s.startsWith('-')||/[\u0000-\u001f\s]/.test(s))return false;
@@ -2020,7 +2023,8 @@ window.__ModuleLoader__.load({
       const writable=available&&state.writable;
       const saved = {...defaults,...state.value};
       saved.desktopTarget = LEGACY_DESKTOP_TARGETS[saved.desktopTarget] ?? saved.desktopTarget;
-      if(!state.value?.toolPreset||saved.toolPreset==='auto')saved.toolPreset=saved.enabledTools.length===allToolNames.length?'full':'custom';
+      if(!state.value?.toolPreset||saved.toolPreset==='auto')saved.toolPreset=saved.enabledTools.length===allToolNames.length
+        ? (saved.mode==='lazy'?'lazy':'full') : 'custom';
       const [draft,setDraft] = React.useState(saved), [dirty,setDirty] = React.useState(false);
       const [saving,setSaving] = React.useState(false), [message,setMessage] = React.useState(''),[tone,setTone]=React.useState('');
       const [recording,setRecording] = React.useState(false), [recordMessage,setRecordMessage] = React.useState('');

@@ -1,8 +1,8 @@
 # 工具加载 / Tool loading
 
-外层提供“精简 / 全部 / 懒启动 / 自定义”四种加载方案，默认选“全部”。选择“自定义”后展开缩进的逐项清单，可按项或按组勾选。切换方案保留自定义清单；保存后在当前动作结束时生效，重启保留方案和清单。精简方案固定加载 12 项，全部方案加载 26 项；自定义按用户清单加载，允许全部关闭。
+外层提供“精简 / 全部 / 懒启动 / 自定义”四种加载方案。DSH 组合包默认懒启动。选择“自定义”后可按项或按组勾选。切换方案保留自定义清单，保存后在当前动作结束时生效。精简固定加载 12 项，全部加载 26 项，自定义可逐项选择或全部关闭。
 
-Choose Lite / All / Lazy / Custom in the outer preset selector; All is the default. Custom reveals the indented per-tool checklist. Switching presets preserves your custom selection. Save applies changes after the current action finishes; the preset and custom list survive restart. Lite loads 12 tools, All loads 26, and Custom loads the selected set, including an empty set.
+Choose Lite / All / Lazy / Custom in the preset selector. The DSH bundle defaults to Lazy. Custom reveals the per-tool checklist. Switching presets preserves your custom selection. Saved changes take effect after the current action finishes. Lite loads 12 tools, All loads 26, and Custom allows any selection, including an empty set.
 
 ## 懒启动 / Lazy startup
 
@@ -20,7 +20,7 @@ When the startup set is the management entry alone and at least one desktop tool
 
 ## 简体中文
 
-未保存过新方案字段时，包含全部工具的已有清单显示“全部”，其他已有清单显示“自定义”，保留先前选择。显式方案字段为 `toolPreset`，自定义清单为 `enabledTools`。
+已保存的 `toolPreset` 优先。旧配置中的非完整工具清单仍按“自定义”加载。组合包的默认方案用于没有这些设置的配置。
 
 DSH 0.2 使用插件条目 ID `mcp-dsh-computer-use-win` 的实时 Config 表单，旧宿主保留可配置插件卡片与 `windows-computer-use` 命名空间。适配器继续使用官方 `@deepseek-ai/dsh-mcp-client`，不需要手动新增第二个 `wincu` MCP 服务。
 
@@ -48,7 +48,7 @@ DSH 0.2 使用插件条目 ID `mcp-dsh-computer-use-win` 的实时 Config 表单
 
 ## English
 
-Choose Lite / All / Lazy / Custom in Settings → Computer Use. All is the default; only Custom reveals the indented checklist. Preset changes preserve custom selections, and Save persists the preset and list across restart. Lite loads 12 tools and All loads 26.
+Choose Lite / All / Lazy / Custom in Settings → Computer Use. Saved presets take precedence. A legacy list with fewer than all tools keeps its Custom selection. The bundle default applies when neither choice is saved.
 
 Unchecked tools are omitted from discovery, and direct calls return `TOOL_DISABLED_IN_SETTINGS`. The agent cannot re-enable user-disabled tools through management. Management itself can also be disabled. Its `list` response includes `enabled` and `available`; `describe` reads one full contract without starting PowerShell; `disable` temporarily unloads an allowed tool; `enable` reloads allowed tools only; `reset` restores the user's startup selection. Runtime management never overwrites the saved configuration.
 

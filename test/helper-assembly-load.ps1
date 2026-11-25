@@ -89,12 +89,14 @@ if ($Phase -eq 'loadfrom') {
 
 # Phase 'load': the backend's own definitions, run as the backend runs them.
 $script:BackendStartupWatch = [System.Diagnostics.Stopwatch]::StartNew()
+$env:WCU_DISABLE_PRECOMPILED = '1'
+. (Join-Path $PSScriptRoot '../scripts/native-loader.ps1')
 foreach ($name in 'WcuCs', 'WcuOcrCs') {
   $assignment = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq "`$script:$name" }, $false)
   if ($null -eq $assignment) { throw "Missing helper source $name" }
   . ([scriptblock]::Create($assignment.Extent.Text))
 }
-foreach ($name in 'Write-BackendStage', 'Get-CsHash', 'Get-HelperCacheDir', 'Assert-PrivateHelperPath', 'Get-HelperDigest', 'Remove-TempFile', 'Remove-StaleHelperParts', 'Import-HelperAssembly', 'Load-Assemblies', 'Set-DpiAware', 'Get-OcrHelper') {
+foreach ($name in 'Write-BackendStage', 'Remove-TempFile', 'Load-Assemblies', 'Set-DpiAware', 'Get-OcrHelper') {
   $function = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
   if ($null -eq $function) { throw "Missing backend function $name" }
   . ([scriptblock]::Create($function.Extent.Text))
@@ -109,7 +111,7 @@ if ($Phase -eq 'cache-dir') {
   $local = Join-Path $Cache 'local'
   [void][IO.Directory]::CreateDirectory((Join-Path $local 'Temp'))
   $local = (Get-Item -LiteralPath $local).FullName
-  $definition = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-HelperCacheDir' }, $true).Extent.Text
+  $definition = (Get-Command Get-HelperCacheDir).ScriptBlock.Ast.Parent.Extent.Text
   $redirected = $definition.Replace("[Environment]::GetFolderPath('LocalApplicationData')", "'" + $local.Replace("'", "''") + "'")
   if ($redirected -eq $definition) { throw 'Get-HelperCacheDir no longer reads LocalApplicationData' }
   . ([scriptblock]::Create($redirected))

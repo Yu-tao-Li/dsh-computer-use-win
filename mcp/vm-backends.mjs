@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('../scripts/hyperv-desktop.ps1', import.meta.url));
 const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+const scriptArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script];
 
 const REMOTE_HOST_ERROR = 'WCU_REMOTE_HOST_REQUIRED: enter the remote Windows address (IP or computer name, optional :port) in Computer Use settings.';
 
@@ -60,7 +61,7 @@ function startHyperv(mode, name, env = process.env) {
   if (typeof name !== 'string' || !name.trim() || name.startsWith('-') || /[\u0000-\u001f]/.test(name)) {
     throw new Error('WCU_HYPERV_VM_REQUIRED: choose a local Hyper-V virtual machine in Computer Use settings.');
   }
-  return spawn(powershell, ['-NoProfile', '-File', script, '-Mode', mode, '-Backend', 'HyperV', '-VMName', name], {
+  return spawn(powershell, [...scriptArgs, '-Mode', mode, '-Backend', 'HyperV', '-VMName', name], {
     windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env,
   });
 }
@@ -68,7 +69,7 @@ function startHyperv(mode, name, env = process.env) {
 function probeHyperv() {
   if (process.platform !== 'win32') return Promise.resolve({ ok: true, backend: 'hyperv', available: false, reason: 'platform' });
   return new Promise(resolve => {
-    const worker = spawn(powershell, ['-NoProfile', '-File', script, '-Mode', 'Probe'], {
+    const worker = spawn(powershell, [...scriptArgs, '-Mode', 'Probe'], {
       windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
@@ -93,7 +94,7 @@ function probeHyperv() {
 function startWinrm(mode, target, env = process.env) {
   if (process.platform !== 'win32') throw new Error('WCU_REMOTE_UNAVAILABLE: use a native Windows DSH host to connect to a remote Windows PC.');
   parseRemoteHost(target);
-  return spawn(powershell, ['-NoProfile', '-File', script, '-Mode', mode, '-Backend', 'WinRM', '-Target', target.trim()], {
+  return spawn(powershell, [...scriptArgs, '-Mode', mode, '-Backend', 'WinRM', '-Target', target.trim()], {
     windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env,
   });
 }

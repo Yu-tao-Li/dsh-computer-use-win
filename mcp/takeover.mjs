@@ -12,6 +12,7 @@ import { RpcFramer } from './protocol.mjs';
 export const STOPPED = 'COMPUTER_USE_STOPPED_BY_USER: Stopped by user (Esc or custom shortcut). Do not retry desktop input in this turn; the next user turn resumes automatically with no settings change needed.';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const MAX_BLOCKED_SERIES = 32;
+const HELPER_IDLE_MS = 30000;
 async function readControl(file) {
   for (let attempt = 0; ; attempt++) {
     try { return JSON.parse(readFileSync(file, 'utf8')); }
@@ -146,7 +147,8 @@ export async function atomicJsonAsync(file, value) {
 
 export class TakeoverControl {
   constructor({ powershell = DEFAULT_POWERSHELL, onStop = () => {}, configFile = process.env.WCU_CONFIG_FILE,
-    stateFile = process.env.WCU_STATE_FILE, activityFile=process.env.WCU_ACTIVITY_FILE,testMode = false, config = {}, locale } = {}) {
+    stateFile = process.env.WCU_STATE_FILE, activityFile=process.env.WCU_ACTIVITY_FILE,testMode = false, config = {}, locale,
+    helperIdleMs = HELPER_IDLE_MS } = {}) {
     this.powershell = powershell; this.onStop = onStop; this.configFile = configFile; this.stateFile = stateFile;
     // The overlay's language: the DSH interface language the host writes into
     // the activity file, unless a caller fixes one; standalone, the system's.
@@ -159,6 +161,8 @@ export class TakeoverControl {
     this.activityFile=activityFile;this.seriesHeld=false;this.seriesIndicator=false;this.seriesKey=null;this.stoppedSeriesKey=null;this.blockedSeries=new Map();
     this.eventName = `Local\\DSH-WCU-${randomUUID()}`; this.waiters = new Map(); this.nextId = 0;
     this.armedChild = null;
+    this.helperIdleMs = helperIdleMs;
+    this.previewUntil = 0;
     this.resumeToken = this.config.resumeToken; this.previewToken = this.config.previewToken; this.pauseMessage = STOPPED;
     this.backgroundOnly = process.env.WCU_BACKGROUND_DESKTOP === '1';
     this.disabledForTest = process.env.NODE_ENV === 'test' && process.env.WCU_TEST_NO_TAKEOVER === '1';
@@ -173,12 +177,52 @@ export class TakeoverControl {
       this.blockedSeries=new Map(Object.entries(saved.blockedSeries??(this.stoppedSeriesKey?{[this.stoppedSeriesKey]:this.pauseMessage}:{})).slice(-MAX_BLOCKED_SERIES));
       if (saved.active > 0) this.persist('previous-worker-ended');
     } catch (error) { if (this.stateFile && error.code !== 'ENOENT') throw error; }
-    if (configFile||activityFile) {
-      this.poll = setInterval(() => { this.sync().catch(error => this.presentationError(error)); }, 250);
-      this.poll.unref();
-    }
+    if (configFile||activityFile) this.pollControls();
   }
   get helperDisabled() { return this.backgroundOnly || this.disabledForTest; }
+  get seriesNeedsHelper() {
+    return this.seriesHeld && this.seriesIndicator && (
+      this.config.indicatorEnabled || this.config.cursorIndicatorEnabled || this.config.progressOverlayEnabled ||
+      this.shown > 0 || (this.child && this.armedChild === this.child)
+    );
+  }
+  pollControls() {
+    if (this.closed) return;
+    this.poll = setTimeout(async () => {
+      try { await this.sync(); } catch (error) { this.presentationError(error); }
+      this.pollControls();
+    }, this.active || this.seriesHeld || this.progressVisible || this.previewUntil > Date.now() ? 250 : 750);
+    this.poll.unref();
+  }
+  helperInUse() {
+    return this.starting || this.waiters.size || this.active || this.progressVisible ||
+      this.previewUntil > Date.now() || (this.seriesNeedsHelper && !this.paused);
+  }
+  scheduleHelperIdle() {
+    if (this.closed || !this.child || this.helperInUse()) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = undefined;
+    } else if (!this.idleTimer) {
+      this.idleTimer = setTimeout(async () => {
+        this.idleTimer = undefined;
+        const child = this.child;
+        if (!child || this.helperInUse()) return;
+        try {
+          const status = await this.command('status');
+          // A progress window can defer closing while the user adjusts it.
+          if (this.child === child && !this.helperInUse() && !status.progressVisible) {
+            this.killHelper(new Error('Takeover helper idle'), child, { failIfActive: false });
+            this.helperFailed = false;
+          }
+        } catch (error) {
+          this.presentationError(error);
+        } finally {
+          this.scheduleHelperIdle();
+        }
+      }, this.helperIdleMs);
+      this.idleTimer.unref();
+    }
+  }
   persist(reason) {
     const body = {
       pid: process.pid, paused: this.paused, active: this.active, seriesActive: this.seriesHeld, reason: reason ?? null,
@@ -214,7 +258,10 @@ export class TakeoverControl {
     // in-flight read can otherwise apply the previous turn's stopped state.
     const pending=(this.syncing??Promise.resolve()).catch(()=>{}).then(()=>this.syncInner());
     this.syncing=pending;
-    return pending.finally(()=>{if(this.syncing===pending)this.syncing=null;});
+    return pending.finally(()=>{
+      if(this.syncing===pending)this.syncing=null;
+      this.scheduleHelperIdle();
+    });
   }
   async syncInner() {
     if (this.closed) return;
@@ -252,6 +299,7 @@ export class TakeoverControl {
       if(this.config.progressPreviewToken!==this.progressPreviewToken&&this.config.progressPreviewToken>0&&rawLingering)this.suppressedLingerKey=turnKey;
       const lingering=rawLingering&&turnKey!==this.suppressedLingerKey;
       const progressPayload={enabled:this.config.progressOverlayEnabled&&(held||lingering),turnKey,remoteIndicatorVisible:this.config.remoteIndicatorVisible,locale:this.locale,settings:this.config,progress:{...activity.progress,status:this.paused&&held?'stopped':activity.progress?.status??'waiting'}};
+      this.progressVisible = progressPayload.enabled;
       const progress=JSON.stringify(progressPayload);
       // After the helper failed, the overlay does not start it again in this
       // series: the poll would launch PowerShell four times a second.
@@ -261,12 +309,12 @@ export class TakeoverControl {
       }
       if(held&&!this.blockedSeries.has(key)&&this.paused&&this.active===0)await this.resumeOperation();
       const changed=held!==this.seriesHeld||key!==this.seriesKey||indicator!==this.seriesIndicator;
-      if(changed || (indicator && (!this.child || this.armedChild !== this.child))){
-        this.seriesKey=key;
-        this.seriesHeld=held;this.seriesIndicator=indicator;
+      this.seriesKey=key;
+      this.seriesHeld=held;this.seriesIndicator=indicator;
+      if(changed || (this.seriesNeedsHelper && (!this.child || this.armedChild !== this.child))){
         if(!this.paused&&!this.blockedSeries.has(key)&&!this.helperDisabled){
           try {
-            if(indicator)await this.command('begin',this.config);
+            if(this.seriesNeedsHelper)await this.command('begin',this.config);
             else if(this.shown===0&&this.child)await this.command('end');
           } catch (error) { this.fail(error); throw error; }
         }
@@ -275,17 +323,23 @@ export class TakeoverControl {
     }
     const presentation=JSON.stringify([this.config.indicatorEnabled,this.config.cursorIndicatorEnabled,this.config.remoteIndicatorVisible,this.config.indicatorText,this.config.desktopTarget==='fast',this.config.indicatorPosition,this.config.indicatorIdleMs,this.config.stopShortcut,this.locale]);
     if (this.child && this.sentPresentation!==presentation) {
-      await this.command(((this.seriesHeld&&this.seriesIndicator)||this.shown>0)&&!this.paused&&!this.blockedSeries.has(this.seriesKey)?'begin':'configure', this.config);
+      await this.command((this.seriesNeedsHelper||this.shown>0)&&!this.paused&&!this.blockedSeries.has(this.seriesKey)?'begin':'configure', this.config);
       this.sentPresentation=presentation;
       this.sentShortcut = this.config.stopShortcut; this.sentCursorIndicator = this.config.cursorIndicatorEnabled;this.sentRemoteVisible=this.config.remoteIndicatorVisible;
     }
     if (this.config.previewToken !== this.previewToken) {
       this.previewToken = this.config.previewToken;
-      if (!this.paused && this.active === 0 && !this.helperDisabled) await this.command('preview', this.config);
+      if (!this.paused && this.active === 0 && !this.helperDisabled) {
+        await this.command('preview', this.config);
+        this.previewUntil = Math.max(this.previewUntil, Date.now() + 1800);
+      }
     }
     if(this.config.progressPreviewToken!==this.progressPreviewToken){
       this.progressPreviewToken=this.config.progressPreviewToken;
-      if(!this.helperDisabled&&this.progressPreviewToken>0)try { await this.command('progress',{enabled:true,preview:true,settings:this.config,remoteIndicatorVisible:this.config.remoteIndicatorVisible,progress:previewProgress(this.locale)}); } catch(error) { this.presentationError(error); }
+      if(!this.helperDisabled&&this.progressPreviewToken>0)try {
+        await this.command('progress',{enabled:true,preview:true,settings:this.config,remoteIndicatorVisible:this.config.remoteIndicatorVisible,progress:previewProgress(this.locale)});
+        this.previewUntil = Date.now() + 60000;
+      } catch(error) { this.presentationError(error); }
     }
   }
   // The helper's Windows process id, which the backend watches during input.
@@ -318,17 +372,19 @@ export class TakeoverControl {
     if (this.paused&&refuses(this.pauseMessage)) throw new Error(this.pauseMessage);
     if (this.closed) throw new Error('COMPUTER_USE_STOPPING');
     this.active++; if (!quiet) this.shown++;
+    this.scheduleHelperIdle();
     try { if (!quiet&&!this.helperDisabled&&(!this.child||this.armedChild!==this.child)) {
       try { await this.command('begin', this.config); this.sentShortcut = this.config.stopShortcut; this.sentCursorIndicator = this.config.cursorIndicatorEnabled;this.sentRemoteVisible=this.config.remoteIndicatorVisible; }
       catch (error) { this.fail(error); throw new Error(this.paused ? this.pauseMessage : error.message); }
     }
     if (this.paused&&refuses(this.pauseMessage)) throw new Error(this.pauseMessage);
     this.persist();
-    } catch(error) { this.active=Math.max(0,this.active-1);if(!quiet)this.shown=Math.max(0,this.shown-1);this.persist();throw error; }
+    } catch(error) { this.active=Math.max(0,this.active-1);if(!quiet)this.shown=Math.max(0,this.shown-1);this.persist();this.scheduleHelperIdle();throw error; }
   }
   async end({ quiet = false } = {}) {
     this.active = Math.max(0, this.active - 1); if (!quiet) this.shown = Math.max(0, this.shown - 1); this.persist(this.paused ? 'stopped-by-user' : null);
-    if (!quiet && this.shown === 0 && !(this.seriesHeld&&this.seriesIndicator)&&this.child && !this.paused) await this.command('end').catch(error => this.fail(error));
+    if (!quiet && this.shown === 0 && !this.seriesNeedsHelper&&this.child && !this.paused) await this.command('end').catch(error => this.fail(error));
+    this.scheduleHelperIdle();
   }
   fail(error) {
     if (this.closed || this.paused) return;
@@ -464,7 +520,7 @@ export class TakeoverControl {
     });
   }
   async close() {
-    this.closed = true; clearInterval(this.poll);
+    this.closed = true; clearTimeout(this.poll); clearTimeout(this.idleTimer);
     const child = this.child;
     if (child) {
       if (!this.starting) {

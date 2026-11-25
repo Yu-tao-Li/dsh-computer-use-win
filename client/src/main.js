@@ -310,7 +310,8 @@ window.__ModuleLoader__.load({
     const HYPERV_ISSUES={WCU_HYPERV_UNAVAILABLE:['hypervErrUnavailable',1],WCU_HYPERV_PERMISSION:['hypervErrPermission',2],WCU_HYPERV_VM_UNAVAILABLE:['hypervErrVmState',3],WCU_HYPERV_NODE_REQUIRED:['hypervMissingNode',3],
       WCU_HYPERV_DESKTOP_REQUIRED:['hypervMissingDesktop',4],WCU_HYPERV_VM_UNKNOWN:['hypervErrVmUnknown',5],WCU_HYPERV_VM_REQUIRED:['hypervVmRequired',5],WCU_HYPERV_SIGNIN_FAILED:['hypervErrSignIn',6]};
     const WINRM_ISSUES={WCU_REMOTE_UNREACHABLE:['winrmErrUnreachable',1],WCU_HYPERV_NODE_REQUIRED:['hypervMissingNodeRemote',2],WCU_HYPERV_DESKTOP_REQUIRED:['hypervMissingDesktopRemote',2],
-      WCU_REMOTE_HOST_REQUIRED:['winrmHostRequired',3],WCU_REMOTE_TRUST:['winrmErrTrust',4],WCU_REMOTE_CLIENT:['winrmErrClient',4],WCU_REMOTE_SIGNIN_FAILED:['winrmErrSignIn',5]};
+      WCU_REMOTE_HOST_REQUIRED:['winrmHostRequired',3],WCU_REMOTE_TRUST:['winrmErrTrust',4],WCU_REMOTE_CLIENT:['winrmErrClient',4],
+      WCU_REMOTE_SIGNIN_FAILED:['winrmErrSignIn',5],WCU_REMOTE_ACCESS_DENIED:['winrmErrAccessDenied',5]};
     function isValidRemoteHost(text){
       const s=String(text||'').trim();
       if(!s||s.startsWith('-')||/[\u0000-\u001f\s]/.test(s))return false;
@@ -958,7 +959,8 @@ window.__ModuleLoader__.load({
       const writable=available&&state.writable;
       const saved = {...defaults,...state.value};
       saved.desktopTarget = LEGACY_DESKTOP_TARGETS[saved.desktopTarget] ?? saved.desktopTarget;
-      if(!state.value?.toolPreset||saved.toolPreset==='auto')saved.toolPreset=saved.enabledTools.length===allToolNames.length?'full':'custom';
+      if(!state.value?.toolPreset||saved.toolPreset==='auto')saved.toolPreset=saved.enabledTools.length===allToolNames.length
+        ? (saved.mode==='lazy'?'lazy':'full') : 'custom';
       const [draft,setDraft] = React.useState(saved), [dirty,setDirty] = React.useState(false);
       const [saving,setSaving] = React.useState(false), [message,setMessage] = React.useState(''),[tone,setTone]=React.useState('');
       const [recording,setRecording] = React.useState(false), [recordMessage,setRecordMessage] = React.useState('');

@@ -934,6 +934,9 @@ app.whenReady().then(async()=>{
   await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:500,body:{ok:false,error:'WCU_REMOTE_TRUST: add this address to WinRM TrustedHosts on this PC'}}:window.previousFetch(call);window.clickButton('配置连接')");
   await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.includes('见第 4 步')");
   assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'error|3');
+  await evaluate("window.fakeFetch=call=>call.url==='/dsh-computer-use-win/api/hyperv'?{status:500,body:{ok:false,error:'WCU_REMOTE_ACCESS_DENIED: The target refused the WinRM session.'}}:window.previousFetch(call);window.clickButton('配置连接')");
+  await until("document.querySelector('[data-wincu-hyperv-result]')?.textContent.includes('PowerShell 远程会话权限')");
+  assert.equal(await evaluate("(li=>li.dataset.tone+'|'+[...li.parentNode.children].indexOf(li))(document.querySelector('[data-wincu-hyperv-steps] li[data-tone]'))"),'error|4');
   await evaluate("document.getElementById('wincu-page-vmBackend-hyperv').click()");
   await until("!!document.getElementById('wincu-page-hypervVm')");
   // On Windows Home the page says at once that Hyper-V is missing and offers

@@ -139,10 +139,11 @@ while($null -ne ($line=[Console]::In.ReadLine())) {
   [Console]::WriteLine('{"id":' + $r.id + ',' + $body.Substring(1))
 }
 `);
-const client = new McpTestClient(process.execPath, [path.join(root, 'mcp/server.mjs')], {
-  env: { ...process.env, NODE_ENV: 'test', WCU_TEST_NO_TAKEOVER: '1', WCU_BROWSER_LANE: 'off', WCU_FAKE_LOG: log, WCU_FAKE_FLAG: flag,
-    WCU_FAKE_TREE: fixtures.tree, WCU_FAKE_TREE2: fixtures.tree2, WCU_FAKE_OCR: fixtures.ocr, WCU_SETTINGS_JSON: undefined },
-});
+const clientEnv = { ...process.env, NODE_ENV: 'test', WCU_TEST_NO_TAKEOVER: '1', WCU_BROWSER_LANE: 'off', WCU_FAKE_LOG: log, WCU_FAKE_FLAG: flag,
+  WCU_FAKE_TREE: fixtures.tree, WCU_FAKE_TREE2: fixtures.tree2, WCU_FAKE_OCR: fixtures.ocr, WCU_SETTINGS_JSON: undefined };
+const makeClient = mode => new McpTestClient(process.execPath, [path.join(root, 'mcp/server.mjs')], { env: { ...clientEnv, WCU_TOOL_MODE: mode } });
+const client = makeClient('full');
+let lazy;
 const data = result => { assert.ok(!result.isError, result.content[0].text); return JSON.parse(result.content[0].text); };
 try {
   await client.init();
@@ -189,6 +190,20 @@ try {
   assert.equal(data(await call('accessibility_tree', { nativeWindowHandle:4242, treeDeltaBase:boundedDelta.treeId })).delta.fallback, 'truncated', 'a reduced tree is not a complete delta baseline');
   assert.match((await call('accessibility_tree', { nativeWindowHandle: 4242, treeDeltaBase: 'yesterday' })).content[0].text, /INVALID_ARGUMENTS/);
   assert.match((await call('accessibility_tree', { nativeWindowHandle: 4242, maxBytes: 100 })).content[0].text, /INVALID_ARGUMENTS/);
-} finally { client.close(); await rm(flag, { force: true }); }
+  lazy = makeClient('lazy');
+  await lazy.init();
+  const lazyCall = (name, args) => lazy.call('windows_computer_use_' + name, args);
+  assert.ok(!(await lazyCall('tools', { operation: 'enable', names: ['accessibility_tree', 'snapshot', 'ocr'] })).isError);
+  const target = { nativeWindowHandle: 4242 };
+  for (const [tool, options] of [['accessibility_tree', target], ['snapshot', { ...target, includeScreenshot: false }], ['ocr', target]]) {
+    const response = await lazyCall(tool, options);
+    assert.equal(data(response).budget?.maxBytes, 65536, tool + ' must apply the lazy budget');
+    assert.ok(Buffer.byteLength(response.content[0].text) <= 65536);
+    assert.equal(data(await lazyCall(tool, { ...options, maxBytes: 1_000_000 })).budget, undefined);
+  }
+  const full = data(await lazyCall('accessibility_tree', { ...target, detailLevel: 'full' }));
+  assert.equal(full.budget, undefined, 'An explicit full tree opts out of the lazy default budget');
+  assert.equal(full.tree.children[0].children[0].boundingBox.width, 300);
+} finally { client.close(); lazy?.close(); await rm(flag, { force: true }); }
 
-console.log(JSON.stringify({ passed: true, summary: true, actionableKept: true, cutWithFile: true, ocrSteps: true, deltas: true, deltaFallbacks: true, toolsApplyThem: true, defaultsUnchanged: true }));
+console.log(JSON.stringify({ passed: true, summary: true, actionableKept: true, cutWithFile: true, ocrSteps: true, deltas: true, deltaFallbacks: true, toolsApplyThem: true, lazyDefaultBudget: true }));
