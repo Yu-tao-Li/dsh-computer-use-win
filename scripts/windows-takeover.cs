@@ -93,6 +93,7 @@ namespace DshTakeover {
     [DllImport("user32.dll")] internal static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] internal static extern IntPtr GetModuleHandle(string name);
     [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int vk);
     [DllImport("imm32.dll")] internal static extern IntPtr ImmGetDefaultIMEWnd(IntPtr window);
     [DllImport("user32.dll")] internal static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
     // The input method of the window in front is open in native (non-Latin)
@@ -249,6 +250,8 @@ namespace DshTakeover {
     readonly ManualResetEvent started = new ManualResetEvent(false);
     readonly Func<int,bool,bool,bool> handle;
     IntPtr hook; uint threadId; volatile bool disposed;
+    volatile int installs;
+    internal int Installs {get{return installs;}}
     internal KeyboardWatch(string eventName, Func<int,bool,bool,bool> onKey) {
       handle=onKey;callback=OnKey;
       available=new EventWaitHandle(false,EventResetMode.ManualReset,eventName+"-ready");
@@ -259,7 +262,7 @@ namespace DshTakeover {
     void ReplaceHook(){
       var next=Native.SetWindowsHookEx(13,callback,Native.GetModuleHandle(null),0);
       if(next==IntPtr.Zero){available.Reset();return;}
-      var old=hook;hook=next;available.Set();
+      var old=hook;hook=next;available.Set();installs++;
       if(old!=IntPtr.Zero)Native.UnhookWindowsHookEx(old);
     }
     void Run(){
@@ -351,7 +354,7 @@ namespace DshTakeover {
     // in milliseconds of composeClock.
     readonly System.Diagnostics.Stopwatch composeClock = System.Diagnostics.Stopwatch.StartNew();
     long keyCount, letterAt = -1, letterIndex = -1, commitIndex = -1;
-    bool? testIme;
+    bool? testIme, testSystemDown;
     readonly bool testMode;
     readonly CommandJson json = new CommandJson();
     readonly List<Frame> frames = new List<Frame>();
@@ -500,6 +503,10 @@ namespace DshTakeover {
           indicator = nextIndicator; text = nextText; hint = nextHint; position = nextPosition;
           idleMs = Math.Max(200, Math.Min(3000, Get(command, "indicatorIdleMs", 800)));
           bool alreadyArmed=armed;
+          // Microsoft documents that Windows may remove a low-level hook that
+          // overruns its timeout, without telling the owner; Esc would then stop
+          // nothing. Install a fresh hook each time a series arms the listener.
+          if(!alreadyArmed&&keyboard!=null)keyboard.Reinstall();
           armed=true;previewOnly=action=="preview"&&!alreadyArmed;
           hideAt=previewOnly?DateTime.UtcNow.AddMilliseconds(1800):DateTime.MaxValue;
           bool displaysRebuilt=RefreshDisplays(true);
@@ -600,6 +607,7 @@ namespace DshTakeover {
           bool injected=Get(command,"injected",false);
           uint flags=(uint)Get<long>(command,"flags",injected?0x10L:0L);
           ulong extra=(ulong)Get<long>(command,"extra",injected?(long)(ulong)KeyboardWatch.InputMarker:0L);
+          object systemDown; testSystemDown = command.TryGetValue("systemDown", out systemDown) && systemDown != null ? (bool?)Convert.ToBoolean(systemDown) : null;
           consumed = HandleKey(Get(command, "vk", 0), KeyboardWatch.OwnInput(flags,new UIntPtr(extra)), Get(command, "down", true));
         } else if (action == "test_ime" && testMode) {
           object native; testIme = command.TryGetValue("native", out native) && native != null ? (bool?)Convert.ToBoolean(native) : null;
@@ -628,7 +636,7 @@ namespace DshTakeover {
         SyncTimer();
         if (testMode || action == "status") {
           Native.Point livePoint; bool liveCursorAvailable=Native.GetCursorPos(out livePoint);
-          Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0), consumed = consumed, uiWindowCount=Application.OpenForms.Count, stopShortcut = stopShortcut, windows = frames.Count, progressVisible=progress!=null, progressWindow=progress!=null?progress.Handle.ToInt64():0, progressClickThrough=progress!=null&&progress.ClickThrough, progressContent=progress!=null?progress.Content:null, progressLocked=progress!=null&&progress.Locked, progressHover=progress!=null?progress.HoverStatus():null, pointerWatchActive=pointerWatch!=null&&pointerWatch.Active, progressReading=progress!=null?progress.ReadingStatus():null, progressOpacity=progress!=null?progress.BackgroundOpacity:0, progressBounds=progress!=null?new {x=progress.Left,y=progress.Top,width=progress.Width,height=progress.Height}:null, remoteIndicatorVisible=remoteVisible, overlayCaptureExcluded=frames.Count>0&&frames.TrueForAll(frame=>frame.CaptureExcluded), overlayClickThrough=frames.Count>0&&frames.TrueForAll(frame=>frame.ClickThrough), displayRevision=displayRevision, displays=Array.ConvertAll(displays,r=>new {left=r.Left,top=r.Top,width=r.Width,height=r.Height}), overlayBounds=frames.ConvertAll(frame=>new {left=frame.DisplayBounds.Left,top=frame.DisplayBounds.Top,width=frame.DisplayBounds.Width,height=frame.DisplayBounds.Height}), cursorError = cursorError, liveCursorAvailable = liveCursorAvailable, pointerSource = testPointerPoint.HasValue ? "test-seam" : "windows", pointerVisible = pointer != null, pointerClickThrough = pointer != null && pointer.ClickThrough, pointerCaptureExcluded = pointer != null && pointer.CaptureExcluded, foreground = Native.GetForegroundWindow().ToInt64() });
+          Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0), consumed = consumed, keyboardInstalls = keyboard != null ? keyboard.Installs : 0, uiWindowCount=Application.OpenForms.Count, stopShortcut = stopShortcut, windows = frames.Count, progressVisible=progress!=null, progressWindow=progress!=null?progress.Handle.ToInt64():0, progressClickThrough=progress!=null&&progress.ClickThrough, progressContent=progress!=null?progress.Content:null, progressLocked=progress!=null&&progress.Locked, progressHover=progress!=null?progress.HoverStatus():null, pointerWatchActive=pointerWatch!=null&&pointerWatch.Active, progressReading=progress!=null?progress.ReadingStatus():null, progressOpacity=progress!=null?progress.BackgroundOpacity:0, progressBounds=progress!=null?new {x=progress.Left,y=progress.Top,width=progress.Width,height=progress.Height}:null, remoteIndicatorVisible=remoteVisible, overlayCaptureExcluded=frames.Count>0&&frames.TrueForAll(frame=>frame.CaptureExcluded), overlayClickThrough=frames.Count>0&&frames.TrueForAll(frame=>frame.ClickThrough), displayRevision=displayRevision, displays=Array.ConvertAll(displays,r=>new {left=r.Left,top=r.Top,width=r.Width,height=r.Height}), overlayBounds=frames.ConvertAll(frame=>new {left=frame.DisplayBounds.Left,top=frame.DisplayBounds.Top,width=frame.DisplayBounds.Width,height=frame.DisplayBounds.Height}), cursorError = cursorError, liveCursorAvailable = liveCursorAvailable, pointerSource = testPointerPoint.HasValue ? "test-seam" : "windows", pointerVisible = pointer != null, pointerClickThrough = pointer != null && pointer.ClickThrough, pointerCaptureExcluded = pointer != null && pointer.CaptureExcluded, foreground = Native.GetForegroundWindow().ToInt64() });
         } else {
           Emit(new { id = id, ok = true, armed = armed, paused = paused, cancelled = cancel.WaitOne(0) });
         }
@@ -683,7 +691,13 @@ namespace DshTakeover {
     }
     bool HandleKey(int vk, bool ownInput, bool down) { lock(keyState) {
       if (ownInput) return false;
-      if (!down) { physicalDown.Remove(vk); return swallowed.Remove(vk); }
+      // Swallow a release only when its press was swallowed and Windows has the
+      // key up as well. A press can reach Windows anyway: a hook call that runs
+      // past LowLevelHooksTimeout is passed on. Swallowing its release would then
+      // leave the key down for every app, and a stuck Esc cancels every drag and
+      // drop until it is pressed again (#99). The hook runs before Windows updates
+      // the key's asynchronous state, so GetAsyncKeyState still shows the press.
+      if (!down) { physicalDown.Remove(vk); return swallowed.Remove(vk) && !SystemKeyDown(vk); }
       physicalDown.Add(vk);
       TrackComposition(vk);
       if (swallowed.Contains(vk)) return true;
@@ -697,6 +711,9 @@ namespace DshTakeover {
       // Signal the worker first, before any rendering or pipe activity.
       cancel.Set(); Stop(vk == 0x1B ? "escape" : "shortcut"); return true;
     }}
+    bool SystemKeyDown(int vk) {
+      return testMode && testSystemDown.HasValue ? testSystemDown.Value : (Native.GetAsyncKeyState(vk) & 0x8000) != 0;
+    }
     void Stop(string reason, bool broadcast=true) {
       cancel.Set();paused=true;armed=false;
       if(broadcast)stopBus.Publish();

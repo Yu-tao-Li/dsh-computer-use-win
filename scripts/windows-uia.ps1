@@ -6,7 +6,6 @@
 
 $ErrorActionPreference = "Stop"
 $loader = Join-Path $PSScriptRoot 'native-loader.ps1'
-if ([IO.File]::Exists($loader)) { . $loader }
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $script:BackendStartupWatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -331,8 +330,101 @@ public static class WindowsComputerUseNative {
     public uint type;
     public INPUTUNION U;
   }
-  [DllImport("user32.dll")]
-  public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+  [DllImport("user32.dll", EntryPoint = "SendInput")]
+  private static extern uint SendInputNative(uint nInputs, INPUT[] pInputs, int cbSize);
+
+  // The MCP server gives each instance a private recovery file. Only accepted
+  // plugin input can add a pending press. Replayed user input uses another tag.
+  static readonly string recoveryFile = Environment.GetEnvironmentVariable("WCU_INPUT_RECOVERY_FILE");
+  static readonly object recoveryLock = new object();
+  static readonly int[] recoveryKeys = { 0x01, 0x02, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12 };
+  static readonly uint[] buttonDown = { 0x0002, 0x0008, 0x0020, 0x0080, 0x0080 };
+  static readonly uint[] buttonUp = { 0x0004, 0x0010, 0x0040, 0x0100, 0x0100 };
+  static readonly string[] recoveryNames = { "LButton", "RButton", "MButton", "XButton1", "XButton2", "Shift", "Ctrl", "Alt" };
+  static int ownedInput;
+
+  static int RecoveryBit(INPUT input, out bool up) {
+    up = false;
+    if (input.type == 1 && input.U.ki.dwExtraInfo.ToInt64() == (long)(ulong)InputMarker) {
+      up = (input.U.ki.dwFlags & KEYEVENTF_KEYUP) != 0;
+      for (int i = 5; i < recoveryKeys.Length; i++) if (input.U.ki.wVk == recoveryKeys[i]) return 1 << i;
+    } else if (input.type == 0 && input.U.mi.dwExtraInfo.ToInt64() == (long)(ulong)InputMarker) {
+      for (int i = 0; i < buttonDown.Length; i++) {
+        if (i >= 3 && input.U.mi.mouseData != (uint)(i - 2)) continue;
+        if ((input.U.mi.dwFlags & buttonUp[i]) != 0) { up = true; return 1 << i; }
+        if ((input.U.mi.dwFlags & buttonDown[i]) != 0) return 1 << i;
+      }
+    }
+    return 0;
+  }
+
+  public static int PendingInputAfter(INPUT[] packet, uint accepted, int previous, int alreadyHeld) {
+    int remaining = previous;
+    for (int i = 0; i < packet.Length && (uint)i < accepted; i++) {
+      bool up;
+      int bit = RecoveryBit(packet[i], out up);
+      if (up) remaining &= ~bit;
+      else remaining |= bit & ~alreadyHeld;
+    }
+    return remaining;
+  }
+
+  static void SaveOwnedInput(int next) {
+    if (next == ownedInput) return;
+    ownedInput = next;
+    try {
+      if (next == 0) { System.IO.File.Delete(recoveryFile); return; }
+      string staged = recoveryFile + ".tmp";
+      System.IO.File.WriteAllText(staged, next.ToString(System.Globalization.CultureInfo.InvariantCulture));
+      if (System.IO.File.Exists(recoveryFile)) System.IO.File.Replace(staged, recoveryFile, null);
+      else System.IO.File.Move(staged, recoveryFile);
+    } catch (System.IO.IOException) {
+    } catch (UnauthorizedAccessException) {
+    }
+  }
+
+  public static uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize) {
+    if (String.IsNullOrEmpty(recoveryFile)) return SendInputNative(nInputs, pInputs, cbSize);
+    int touched = 0;
+    for (int i = 0; i < pInputs.Length && (uint)i < nInputs; i++) {
+      bool ignored;
+      touched |= RecoveryBit(pInputs[i], out ignored);
+    }
+    if (touched == 0) return SendInputNative(nInputs, pInputs, cbSize);
+    lock (recoveryLock) {
+      int alreadyHeld = 0;
+      for (int i = 0; i < recoveryKeys.Length; i++) {
+        if ((touched & (1 << i)) != 0 && (GetAsyncKeyState(recoveryKeys[i]) & 0x8000) != 0) alreadyHeld |= 1 << i;
+      }
+      uint sent = SendInputNative(nInputs, pInputs, cbSize);
+      SaveOwnedInput(PendingInputAfter(pInputs, sent, ownedInput, alreadyHeld));
+      return sent;
+    }
+  }
+
+  public static string[] ReleaseOwnedInput() {
+    var released = new System.Collections.Generic.List<string>();
+    if (String.IsNullOrEmpty(recoveryFile)) return released.ToArray();
+    int recorded;
+    try {
+      if ((DateTime.UtcNow - System.IO.File.GetLastWriteTimeUtc(recoveryFile)).TotalSeconds > 60 ||
+          !Int32.TryParse(System.IO.File.ReadAllText(recoveryFile), out recorded) ||
+          recorded <= 0 || recorded >= (1 << recoveryKeys.Length)) return released.ToArray();
+      System.IO.File.Delete(recoveryFile);
+    } catch (System.IO.IOException) { return released.ToArray(); }
+    catch (UnauthorizedAccessException) { return released.ToArray(); }
+    for (int i = 0; i < recoveryKeys.Length; i++) {
+      if ((recorded & (1 << i)) == 0 || (GetAsyncKeyState(recoveryKeys[i]) & 0x8000) == 0) continue;
+      var input = i < buttonUp.Length ? new INPUT() : KeyInput(recoveryKeys[i], true);
+      if (i < buttonUp.Length) {
+        input.U.mi.dwFlags = buttonUp[i];
+        if (i >= 3) input.U.mi.mouseData = (uint)(i - 2);
+        input.U.mi.dwExtraInfo = new IntPtr((long)(ulong)InputMarker);
+      }
+      if (SendInputNative(1, new[] { input }, Marshal.SizeOf(typeof(INPUT))) == 1) released.Add(recoveryNames[i]);
+    }
+    return released.ToArray();
+  }
 
   // Send a button or wheel event at the CURRENT pointer position. Movement is
   // done with SetCursorPos (raw screen coords, matching the UIA/screenshot
@@ -377,6 +469,26 @@ public static class WindowsComputerUseNative {
     // A partial batch can leave the button down. Release it before reporting
     // failure; never replay the click, which might already have taken effect.
     if (sent == 2) SendMouseEvent(0, 0, up, 0);
+    return sent;
+  }
+
+  // Send a press and release in one atomic batch so process termination cannot
+  // leave a modifier key stuck down (#99).
+  public static uint TapKey(byte vk) {
+    INPUT[] inputs = new INPUT[2];
+    inputs[0].type = 1; // INPUT_KEYBOARD
+    inputs[0].U.ki.wVk = vk;
+    inputs[0].U.ki.dwExtraInfo = new IntPtr((long)(ulong)InputMarker);
+    inputs[1].type = 1; // INPUT_KEYBOARD
+    inputs[1].U.ki.wVk = vk;
+    inputs[1].U.ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[1].U.ki.dwExtraInfo = new IntPtr((long)(ulong)InputMarker);
+    int size = Marshal.SizeOf(typeof(INPUT));
+    uint sent = SendInput(2, inputs, size);
+    if (sent == 1) {
+      INPUT[] up = new INPUT[] { inputs[1] };
+      SendInput(1, up, size);
+    }
     return sent;
   }
 
@@ -718,11 +830,9 @@ public static class WcuInputHold {
       // (VK_PACKET, all characters on one code) never repeats.
       bool repeat = down && vk != 0xE7 && !Replaying.Contains(vk);
       if (State == Holding) {
+        if (up && Keys.Remove(vk)) { Add(vk, scan, flags, true); return true; }
         if (overdue || vk == 0x1B) return false;
-        if (up) {
-          if (Keys.Remove(vk)) { Add(vk, scan, flags, true); return true; }
-          PreHeld.Remove(vk); return false;
-        }
+        if (up) { PreHeld.Remove(vk); return false; }
         // A key pressed before the hold: its repeats are dropped, its release passes.
         if (PreHeld.Contains(vk) || (repeat && !Keys.Contains(vk))) { PreHeld.Add(vk); return true; }
         Keys.Add(vk); KeyCount++; Add(vk, scan, flags, false); return true;
@@ -747,6 +857,7 @@ public static class WcuInputHold {
       int button = Button(message, mouseData);
       // A click of the user's own picks the window: the guard ends.
       if (State == Guarding) { if (button != 0 && Down(message)) State = Idle; return false; }
+      if (State == Holding && button != 0 && !Down(message) && Buttons.Remove(button)) { AddMouse(message, mouseData); return true; }
       if (State != Holding || overdue) return false;
       if (message == 0x200) {
         // A mouse moves the pointer by a distance; remote control, pens and touch place it.
@@ -819,18 +930,53 @@ public static class WcuInputHold {
   static string notice;
   public const string GuardNote = "This window stays in front for now; if the user types before your next step, the foreground goes back to their window first.";
 
-  public sealed class UserInput { public bool Held, Fullscreen; public int Notification; public long Foreground; }
+  public sealed class UserInput { public bool Held, Fullscreen; public int Notification; public long Foreground; public string[] HeldKeys; }
   static readonly int[] Watched = { 0x01, 0x02, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x5B, 0x5C };
+  static readonly int[] DiagnosticVks = { 0x01, 0x02, 0x04, 0x05, 0x06, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C, 0x1B };
+  static readonly string[] DiagnosticNames = { "LButton", "RButton", "MButton", "XButton1", "XButton2", "LShift", "RShift", "LCtrl", "RCtrl", "LAlt", "RAlt", "LWin", "RWin", "Esc" };
   static bool AnyHeld() { foreach (int key in Watched) if ((GetAsyncKeyState(key) & 0x8000) != 0) return true; return false; }
+  // SHQueryUserNotificationState: 2 busy, 3 Direct3D full screen, 4 presentation mode.
+  // Windows also reports busy for a maximized window on a monitor without a taskbar (#100):
+  // with 2, only a window without a title bar that covers its whole monitor counts.
+  public static bool LooksFullscreen(int notification, int style, string className, WindowsComputerUseNative.RECT window, WindowsComputerUseNative.RECT monitor) {
+    if (notification == 3 || notification == 4) return true;
+    if (notification != 2) return false;
+    if ((style & 0x00C00000) == 0x00C00000) return false; // WS_CAPTION
+    if ((style & 0x01040000) == 0x01040000) return false; // WS_MAXIMIZE | WS_THICKFRAME (custom title bars)
+    if (monitor.right <= monitor.left || monitor.bottom <= monitor.top) return false;
+    if (className == "Progman" || className == "WorkerW" || className == "Shell_TrayWnd" || className == "Shell_SecondaryTrayWnd") return false;
+    return window.left <= monitor.left && window.top <= monitor.top && window.right >= monitor.right && window.bottom >= monitor.bottom;
+  }
   // Whether borrowing now would break what the user is doing: a modifier or a
-  // mouse button down, or a full-screen app or presentation in front
-  // (SHQueryUserNotificationState: 2 busy, 3 Direct3D full screen, 4 presentation mode).
+  // mouse button down, or a full-screen app or presentation in front.
   public static UserInput UserState() {
     var state = new UserInput();
     state.Held = AnyHeld();
+    var heldKeys = new System.Collections.Generic.List<string>();
+    for (int i = 0; i < DiagnosticVks.Length; i++) {
+      if ((GetAsyncKeyState(DiagnosticVks[i]) & 0x8000) != 0) heldKeys.Add(DiagnosticNames[i]);
+    }
+    state.HeldKeys = heldKeys.ToArray();
+    IntPtr fg = WindowsComputerUseNative.GetForegroundWindow();
+    state.Foreground = fg.ToInt64();
     int value;
-    if (SHQueryUserNotificationState(out value) == 0) { state.Notification = value; state.Fullscreen = value == 2 || value == 3 || value == 4; }
-    state.Foreground = WindowsComputerUseNative.GetForegroundWindow().ToInt64();
+    if (SHQueryUserNotificationState(out value) == 0) {
+      state.Notification = value;
+      if (value == 3 || value == 4) {
+        state.Fullscreen = true;
+      } else if (value == 2 && fg != IntPtr.Zero && WindowsComputerUseNative.IsWindowVisible(fg) && !WindowsComputerUseNative.IsIconic(fg)) {
+        var cls = new System.Text.StringBuilder(128);
+        WindowsComputerUseNative.RECT winRect;
+        IntPtr mon = MonitorFromWindow(fg, 2);
+        var mi = new MONITORINFO();
+        mi.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
+        if (WindowsComputerUseNative.GetClassName(fg, cls, cls.Capacity) > 0 &&
+            WindowsComputerUseNative.GetWindowRect(fg, out winRect) &&
+            mon != IntPtr.Zero && GetMonitorInfo(mon, ref mi)) {
+          state.Fullscreen = LooksFullscreen(value, WindowsComputerUseNative.GetWindowLong(fg, -16), cls.ToString(), winRect, mi.rcMonitor);
+        }
+      }
+    }
     return state;
   }
 
@@ -1035,7 +1181,10 @@ public static class WcuInputHold {
   [DllImport("user32.dll")] static extern bool PostThreadMessage(uint thread, uint message, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] static extern int GetMessage(out Msg message, IntPtr hwnd, uint min, uint max);
   [DllImport("user32.dll")] static extern bool PeekMessage(out Msg message, IntPtr hwnd, uint min, uint max, uint remove);
+  [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public WindowsComputerUseNative.RECT rcMonitor, rcWork; public uint dwFlags; }
   [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+  [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+  [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
   [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
   const uint InstallMessage = 0x8001, UninstallMessage = 0x8002;
   static readonly HookProc keyboardProc = OnKey, mouseProc = OnMouse;
@@ -1136,169 +1285,33 @@ public static class WcuInputHold {
 }
 '@
 
-function Get-CsHash {
-  param([string]$Source)
-  $normalized = $Source.Replace("`r`n", "`n").Replace("`r", "`n")
-  $sha = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalized))
-    return ([BitConverter]::ToString($bytes).Replace("-", "").Substring(0, 16)).ToLowerInvariant()
-  } finally { $sha.Dispose() }
-}
-
-# Load a helper compiled into %TEMP%, compiling it first when no cached copy
-# exists. The bytes are read rather than passed to Assembly.LoadFrom: .NET
-# Framework refuses LoadFrom for an unsigned DLL it treats as coming from a
-# remote or internet location (0x80131515), which left every tool failing with
-# "Backend process exited" on some machines (#54). The compiler writes a
-# file of its own and only a complete one is moved into place, because another
-# backend may be reading the cache at the same time.
-#
-# TEMP is often an 8.3 short path. Windows PowerShell's FileSystemProvider
-# rejects a short name that is longer than the name it stands for, such as
-# C:\Users\LIHUA~1 for "Li Hua", with "An object at the specified path ...
-# does not exist" (#78). Remove-Item met that on every OCR compile, so
-# temporary files are handled with .NET calls only, never with Remove-Item,
-# Get-ChildItem or Test-Path.
 function Remove-TempFile {
   param([string]$Path)
   try { [System.IO.File]::Delete($Path) } catch { }
 }
 
-function Get-HelperCacheDir {
-  $local = [Environment]::GetFolderPath('LocalApplicationData')
-  $configured = [string]$env:TEMP
-  if ($configured -and [IO.Directory]::Exists($configured)) {
-    # Resolve a user's usual 8.3 TEMP spelling before deciding whether it is
-    # a caller override. Cache file I/O itself still uses .NET paths.
-    try { $configured = (Get-Item -LiteralPath $configured -ErrorAction Stop).FullName } catch {}
-  }
-  $default = Join-Path $local 'Temp'
-  $userTemp = [Environment]::ExpandEnvironmentVariables([string][Environment]::GetEnvironmentVariable('TEMP','User'))
-  if ($configured -and $configured.TrimEnd('\') -ne $default.TrimEnd('\') -and $configured -ne $userTemp) {
-    if (-not [IO.Path]::IsPathRooted($configured)) { throw 'The configured TEMP path must be absolute.' }
-    $dir = [IO.Path]::GetFullPath($configured)
-  } else {
-    $dir = Join-Path $local 'dsh-computer-use-win\native-cache'
-    if (-not [IO.Directory]::Exists($dir)) {
-      $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
-      try {
-        $acl=[Security.AccessControl.DirectorySecurity]::new()
-        $acl.SetAccessRuleProtection($true,$false)
-        foreach($sid in @($identity.User,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
-          $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
-        }
-        if ($PSVersionTable.PSEdition -eq 'Core') { [IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($dir),$acl) }
-        else { [void][IO.Directory]::CreateDirectory($dir,$acl) }
-      } finally { $identity.Dispose() }
-    }
-  }
-  [void][IO.Directory]::CreateDirectory($dir)
-  Assert-PrivateHelperPath $dir -Directory
-  return $dir
-}
-
-function Assert-PrivateHelperPath {
-  param([string]$Path, [switch]$Directory)
-  $attributes = [IO.File]::GetAttributes($Path)
-  if (($attributes -band [IO.FileAttributes]::ReparsePoint) -or
-      ([bool]($attributes -band [IO.FileAttributes]::Directory) -ne [bool]$Directory)) {
-    throw 'Native cache must contain ordinary files in a private directory.'
-  }
-  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-  try { $trusted = @($identity.User.Value,$identity.Owner.Value,'S-1-5-18','S-1-5-32-544') }
-  finally { $identity.Dispose() }
-  $item = if ($Directory) { [IO.DirectoryInfo]::new($Path) } else { [IO.FileInfo]::new($Path) }
-  $sections = [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner
-  $acl = if ($PSVersionTable.PSEdition -eq 'Core') { [IO.FileSystemAclExtensions]::GetAccessControl($item,$sections) } else { $item.GetAccessControl($sections) }
-  if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) {
-    throw 'Native cache ownership does not match the Windows account.'
-  }
-  $writeRights = [Security.AccessControl.FileSystemRights]'WriteData, AppendData, DeleteSubdirectoriesAndFiles, Delete, ChangePermissions, TakeOwnership'
-  foreach ($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {
-    if ($rule.AccessControlType -eq 'Allow' -and -not ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -and
-        ($rule.FileSystemRights -band $writeRights) -and $rule.IdentityReference.Value -notin $trusted) {
-      throw 'Native cache grants write access to another account.'
-    }
-  }
-}
-
-function Get-HelperDigest {
-  param([byte[]]$Bytes)
-  $sha = [Security.Cryptography.SHA256]::Create()
-  try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant() }
-  finally { $sha.Dispose() }
-}
-
-# A compile that failed or was cut off leaves <helper>.<pid>.<guid>.dll and
-# its .cs source behind (one pair per OCR call on the machines of #78). Those
-# an hour old are removed before a helper is compiled.
-function Remove-StaleHelperParts {
-  param([string]$Directory)
-  $cutoff = [DateTime]::UtcNow.AddHours(-1)
-  try {
-    foreach ($file in [System.IO.Directory]::EnumerateFiles($Directory, 'wcu-*.dll*')) {
-      if ([System.IO.Path]::GetFileName($file) -cmatch '^wcu-(native|ocr|clipboard|wgc)-[a-z0-9-]+\.\d+\.[0-9a-f]{32}\.dll(\.cs)?$' -and [System.IO.File]::GetLastWriteTimeUtc($file) -lt $cutoff) { Remove-TempFile $file }
-    }
-  } catch { }
-}
-
-function Import-HelperAssembly {
-  param([string]$Path, [scriptblock]$Compile)
-  $directory = [IO.Path]::GetDirectoryName($Path)
-  Assert-PrivateHelperPath $directory -Directory
-  $digestFile = $Path + '.sha256'
-  $mutex = [Threading.Mutex]::new($false, ('Local\DSH-WCU-Helper-' + (Get-CsHash $Path.ToUpperInvariant())))
-  $owned = $false
-  $partial = $Path -replace '\.dll$', (".$PID." + [Guid]::NewGuid().ToString('N') + '.dll')
-  try {
-    try { $owned = $mutex.WaitOne(20000) } catch [Threading.AbandonedMutexException] { $owned = $true }
-    if (-not $owned) { throw 'Timed out waiting for the native helper cache.' }
-    if ([IO.File]::Exists($Path)) { Assert-PrivateHelperPath $Path }
-    if ([IO.File]::Exists($digestFile)) { Assert-PrivateHelperPath $digestFile }
-    if ([IO.File]::Exists($Path) -and [IO.File]::Exists($digestFile)) {
-      $bytes = [IO.File]::ReadAllBytes($Path)
-      if ((Get-HelperDigest $bytes) -ceq [IO.File]::ReadAllText($digestFile)) {
-        [void][Reflection.Assembly]::Load($bytes)
-        return
-      }
-    }
-    Remove-StaleHelperParts $directory
-    & $Compile $partial
-    $bytes = [IO.File]::ReadAllBytes($partial)
-    [IO.File]::WriteAllText("$partial.sha256",(Get-HelperDigest $bytes))
-    if ([IO.File]::Exists($Path)) { [IO.File]::Replace($partial,$Path,[NullString]::Value) }
-    else { [IO.File]::Move($partial,$Path) }
-    if ([IO.File]::Exists($digestFile)) { [IO.File]::Replace("$partial.sha256",$digestFile,[NullString]::Value) }
-    else { [IO.File]::Move("$partial.sha256",$digestFile) }
-    [void][Reflection.Assembly]::Load($bytes)
-  } finally {
-    Remove-TempFile $partial
-    Remove-TempFile "$partial.cs"
-    Remove-TempFile "$partial.sha256"
-    if ($owned) { $mutex.ReleaseMutex() }
-    $mutex.Dispose()
-  }
-}
-
 function Load-Assemblies {
+  param([switch]$NativeOnly)
   # DPI awareness MUST be set before any GDI+/WinForms assembly is loaded:
   # loading System.Windows.Forms/System.Drawing initializes GDI, which locks
   # the process DPI context (and GetSystemMetrics then returns virtualized
   # 150%-scaled values like 3414x960 instead of physical 5120x1440).
-  if (-not ("WindowsComputerUseNative" -as [type])) {
+  if (-not $script:NativeAssembliesReady) {
     Write-BackendStage 'native-load-start'
-    # Add-Type targets the current runtime. A Core-built helper cannot be used
-    # by Windows PowerShell 5.1 even when its C# source is identical.
-    $runtimeKey = $PSVersionTable.PSEdition.ToLowerInvariant() + '-clr' + [Environment]::Version.Major
-    $precompiled = (Get-Command Import-PackagedHelper -ErrorAction SilentlyContinue) -and (Import-PackagedHelper -Name native -Source $script:WcuCs)
-    if (-not $precompiled) {
-      $dll = Join-Path (Get-HelperCacheDir) ("wcu-native-" + $runtimeKey + '-' + (Get-CsHash -Source $script:WcuCs) + ".dll")
-      Import-HelperAssembly -Path $dll -Compile { param($out) Add-Type -TypeDefinition $script:WcuCs -OutputAssembly $out }
+    if (-not ("WindowsComputerUseNative" -as [type])) {
+      # A locally compiled fallback targets the PowerShell runtime in use.
+      $runtimeKey = $PSVersionTable.PSEdition.ToLowerInvariant() + '-clr' + [Environment]::Version.Major
+      $precompiled = (Get-Command Import-PackagedHelper -ErrorAction SilentlyContinue) -and (Import-PackagedHelper -Name native -Source $script:WcuCs)
+      if (-not $precompiled) {
+        $dll = Join-Path (Get-HelperCacheDir) ("wcu-native-" + $runtimeKey + '-' + (Get-NativeSourceHash -Source $script:WcuCs) + ".dll")
+        Import-HelperAssembly -Path $dll -Compile { param($out) Add-Type -TypeDefinition $script:WcuCs -OutputAssembly $out }
+      }
     }
+    Write-BackendStage 'native-load-complete'
+    Set-DpiAware
+    $script:NativeAssembliesReady = $true
   }
-  Write-BackendStage 'native-load-complete'
-  Set-DpiAware
+  if ($NativeOnly -or $script:UiaAssembliesReady) { return }
   Write-BackendStage 'uia-assemblies-start'
 
   Add-Type -AssemblyName UIAutomationClient
@@ -1321,6 +1334,7 @@ function Load-Assemblies {
   Add-Type -AssemblyName WindowsBase
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName System.Drawing
+  $script:UiaAssembliesReady = $true
   Write-BackendStage 'assemblies-complete'
 }
 
@@ -1575,8 +1589,7 @@ function Set-WindowForeground {
   }
   try {
     if ($env:WCU_CANCEL_EVENT) { [WindowsComputerUseNative]::ThrowIfCancelled() }
-    [void][WindowsComputerUseNative]::keybd_event([WindowsComputerUseNative]::VK_MENU, 0, 0, [UIntPtr]([uint64][WindowsComputerUseNative]::InputMarker))
-    [void][WindowsComputerUseNative]::keybd_event([WindowsComputerUseNative]::VK_MENU, 0, [WindowsComputerUseNative]::KEYEVENTF_KEYUP, [UIntPtr]([uint64][WindowsComputerUseNative]::InputMarker))
+    [void][WindowsComputerUseNative]::TapKey([WindowsComputerUseNative]::VK_MENU)
     if ($env:WCU_CANCEL_EVENT) { [WindowsComputerUseNative]::ThrowIfCancelled() }
     [WindowsComputerUseNative]::SetForegroundWindow($ptr) | Out-Null
     Start-Sleep -Milliseconds 120
@@ -2608,7 +2621,7 @@ function Get-OcrHelper {
   # Compile (once, cached) and load the C# WinRT OCR helper.
   if ("WindowsComputerUseOcr" -as [type]) { return }
   if ((Get-Command Import-PackagedHelper -ErrorAction SilentlyContinue) -and (Import-PackagedHelper -Name ocr -Source $script:WcuOcrCs)) { return }
-  $dll = Join-Path (Get-HelperCacheDir) ("wcu-ocr-" + (Get-CsHash -Source $script:WcuOcrCs) + ".dll")
+  $dll = Join-Path (Get-HelperCacheDir) ("wcu-ocr-" + (Get-NativeSourceHash -Source $script:WcuOcrCs) + ".dll")
   Import-HelperAssembly -Path $dll -Compile {
     param($target)
     $wd = "C:\Windows\System32\WinMetadata"
@@ -3145,7 +3158,7 @@ function Begin-ClipboardLease {
     $precompiled = (Get-Command Import-PackagedHelper -ErrorAction SilentlyContinue) -and (Import-PackagedHelper -Name clipboard -Source $clipboardSource)
     if (-not $precompiled) {
       $runtimeKey = $PSVersionTable.PSEdition.ToLowerInvariant() + '-clr' + [Environment]::Version.Major
-      $dll = Join-Path (Get-HelperCacheDir) ("wcu-clipboard-" + $runtimeKey + '-' + (Get-CsHash -Source $clipboardSource) + ".dll")
+      $dll = Join-Path (Get-HelperCacheDir) ("wcu-clipboard-" + $runtimeKey + '-' + (Get-NativeSourceHash -Source $clipboardSource) + ".dll")
       $references = @('System.Windows.Forms', 'System.Drawing')
       if ($PSVersionTable.PSEdition -eq 'Core') {
         # As for the takeover helper: the short names alone miss the .NET
@@ -4186,7 +4199,12 @@ function Invoke-Action {
     "launch_app" { return (Invoke-LaunchApp $inputObject) }
     "input_state" {
       $state = [WcuInputHold]::UserState()
-      return [ordered]@{ ok = $true; action = 'input_state'; held = $state.Held; fullscreen = $state.Fullscreen; notification = $state.Notification; foreground = $state.Foreground }
+      return [ordered]@{ ok = $true; action = 'input_state'; held = $state.Held; heldKeys = @($state.HeldKeys); fullscreen = $state.Fullscreen; notification = $state.Notification; foreground = $state.Foreground }
+    }
+    "release_input" {
+      $inputLease = Enter-DesktopInput -Skip:$background
+      $released = [WindowsComputerUseNative]::ReleaseOwnedInput()
+      return [ordered]@{ ok = $true; action = 'release_input'; released = @($released) }
     }
     "health" {
       $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -5113,8 +5131,8 @@ try {
   Write-BackendStage 'utility-import-start'
   Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
   Write-BackendStage 'utility-import-complete'
-  Load-Assemblies
-  Set-DpiAware
+  . $loader
+  Load-Assemblies -NativeOnly
 } catch {
   # One line the server can quote. Otherwise a startup failure reached the
   # model only as "Backend process exited" (#54).
@@ -5125,6 +5143,7 @@ try {
   exit 3
 }
 Write-BackendStage 'backend-ready'
+$nativeOnlyActions = @('list_windows','wait','input_state','release_input')
 
 if ($Persistent) {
   [Console]::Out.WriteLine((@{type='ready';protocol=1;pid=$PID}|ConvertTo-Json -Compress))
@@ -5147,6 +5166,7 @@ if ($Persistent) {
     $name = [string](Get-Prop $req "action" "")
     $result = $null
     try {
+      if ($name -notin $nativeOnlyActions) { Load-Assemblies }
       $result = Invoke-Action -Action $name -InputObject (Get-Prop $req "args" $null)
       if ($null -eq $result) { throw "Unknown action '$name'." }
       $notice = [WcuInputHold]::TakeNotice()
@@ -5162,7 +5182,7 @@ if ($Persistent) {
     }
     $result["id"] = $id
     Write-BackendStage 'response-serialize-start'
-    Write-Host ($result | ConvertTo-Json -Depth 50 -Compress)
+    [Console]::Out.WriteLine(($result | ConvertTo-Json -Depth 50 -Compress))
     [Console]::Out.Flush()
   }
   exit 0
@@ -5174,6 +5194,7 @@ if ($Persistent) {
   $inputObject = Get-InputObject
   $result = $null
   try {
+    if ($Action -notin $nativeOnlyActions) { Load-Assemblies }
     $result = Invoke-Action -Action $Action -InputObject $inputObject
     if ($null -eq $result) { throw "Unknown action '$Action'." }
   } catch {

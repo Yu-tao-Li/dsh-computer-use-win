@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';import {mkdtemp,writeFile} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
+import assert from 'node:assert/strict';import {mkdtemp,writeFile} from 'node:fs/promises';import {readFileSync} from 'node:fs';import path from 'node:path';import os from 'node:os';
 import {TakeoverControl,STOPPED} from '../mcp/takeover.mjs';import {installActivity} from '../mcp/activity.mjs';
 const root=await mkdtemp(path.join(os.tmpdir(),'wcu-presentation-failure-')),blocked=path.join(root,'not-a-directory');await writeFile(blocked,'fixture');
 const control=new TakeoverControl({stateFile:path.join(blocked,'state.json')});control.disabledForTest=true;
@@ -18,3 +18,28 @@ try{
  assert.equal(result.sentinel,'action completed');assert.ok(warnings.length);
 }finally{for(const dispose of disposers.reverse())dispose?.();}
 console.log(JSON.stringify({passed:true,stateWriteFailureDoesNotCorruptLease:true,publishFailurePreservesSuccessfulResult:true}));
+
+// Renew an in-flight lease and remove finished progress at its own deadline.
+// Activity publishing does not create any desktop UI.
+const heartbeatFile=path.join(root,'heartbeat.json');
+const heartbeatHandlers={},heartbeatDisposers=[];
+installActivity({on:(name,fn)=>heartbeatHandlers[name]=fn,effect:fn=>heartbeatDisposers.push(fn()),logger:console},heartbeatFile,{lingerMs:100});
+// Match the real control reader. An asynchronous read in the publisher's
+// process can keep the file open while Windows retries an atomic replace.
+const heartbeat=()=>JSON.parse(readFileSync(heartbeatFile,'utf8'));
+let finish;
+try{
+ const session={id:'heartbeat'};
+ const pending=heartbeatHandlers['tools/execute']({name:'windows_computer_use_wait',agent:{session,phase:{kind:'running',turn:1}}},()=>new Promise(resolve=>finish=resolve));
+ const first=heartbeat().expiresAt;
+ const deadline=Date.now()+2500;
+ while(heartbeat().expiresAt<=first&&Date.now()<deadline)await new Promise(r=>setTimeout(r,40));
+ assert.ok(heartbeat().expiresAt>first,'An in-flight tool must keep its lease renewed');
+ finish(true);await pending;
+ heartbeatHandlers['session/event'](session,{type:'turn/end',data:{turn:1}});
+ assert.equal(heartbeat().progress.status,'done');
+ const lingerDeadline=Date.now()+500;
+ while(heartbeat().lingerUntil&&Date.now()<lingerDeadline)await new Promise(r=>setTimeout(r,20));
+ assert.equal(heartbeat().progress,undefined,'Finished progress must expire at the linger deadline');
+}finally{finish?.(true);for(const dispose of heartbeatDisposers.reverse())dispose?.();}
+console.log('PASS tool lease renewal and finished progress expiry');

@@ -83,6 +83,9 @@ assert.deepEqual(Array.from(definition.factory(()=>({})).allToolNames),TOOL_NAME
 assert.ok(ui.includes("t('lazyCount')+' '+allToolNames.length"),'Lazy count follows the catalogue');
 assert.deepEqual(normalizeSettings({mode:'lite'}).enabledTools,TOOL_NAMES,'Legacy profiles default to all tools');
 assert.equal(normalizeSettings({}).toolPreset,'full');
+assert.equal(normalizeSettings({mode:'lazy'}).toolPreset,'lazy','The lazy bundle default starts on demand');
+assert.equal(normalizeSettings({mode:'lazy',enabledTools:['wait']}).toolPreset,'custom','A legacy custom list overrides the bundle default');
+assert.equal(normalizeSettings({mode:'lazy',toolPreset:'full'}).toolPreset,'full','An explicit preset overrides the bundle default');
 assert.equal(normalizeSettings({enabledTools:['wait']}).toolPreset,'custom','Migrate saved .11 selections');
 assert.deepEqual(enabledToolsForSettings({toolPreset:'lite',enabledTools:[]}),LITE_TOOL_NAMES);
 assert.deepEqual(enabledToolsForSettings({toolPreset:'full',enabledTools:[]}),TOOL_NAMES);

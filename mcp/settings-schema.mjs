@@ -14,6 +14,8 @@ const command = () => integer(0, Number.MAX_SAFE_INTEGER, 0, undefined, {draft:f
 export const SETTINGS_SCHEMA = Object.freeze(Object.fromEntries(Object.entries({
   desktopTarget: choice(['quiet','fast','hyperv'], 'quiet', '工作方式 / Work mode'),
   hypervVm: {type:'text',default:'',maxLength:120,allowEmpty:true,description:'Hyper-V 虚拟机名称 / Hyper-V virtual machine name'},
+  vmBackend: choice(['hyperv','winrm'],'hyperv','虚拟机连接方式 / VM connection'),
+  remoteHost: {type:'text',default:'',maxLength:255,allowEmpty:true,description:'远程 Windows 地址 / Remote Windows address'},
   browserFirst: toggle(true, '网页优先使用浏览器通道 / Prefer browser use for web pages'),
   browserVisible: toggle(true, '显示DSH浏览器窗口 / Show the DSH browser'),
   browserApp: choice(BROWSER_APPS, 'default', '使用的浏览器 / Browser'),
@@ -30,7 +32,7 @@ export const SETTINGS_SCHEMA = Object.freeze(Object.fromEntries(Object.entries({
   progressOverlayLocked: toggle(true,'锁定浮窗并穿透鼠标 / Lock overlay and pass through input'),
   progressLockShortcut: shortcut('浮窗锁定快捷键 / Overlay lock shortcut'),
   progressPreviewToken: command(),
-  mode: choice(['lite','full'],'full','旧版工具模式 / Legacy tool mode',{draft:false}),
+  mode: choice(['lite','full','lazy'],'full','启动工具模式 / Startup tool mode',{draft:false}),
   toolPreset: choice(['auto','full','lite','lazy','custom'],'auto','工具加载方案 / Tool preset',{clientDefault:'full'}),
   enabledTools: {type:'tools',default:TOOL_NAMES,description:'启用的工具 / Enabled tools'},
   indicatorEnabled: toggle(true,'接管提示 / Takeover indicator'),

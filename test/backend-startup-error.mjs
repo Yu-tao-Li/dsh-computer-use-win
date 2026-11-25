@@ -20,7 +20,7 @@ async function server(name, { script, temp } = {}) {
   await cp(path.join(source,'mcp'),path.join(dir,'mcp'),{recursive:true});
   await copyFile(path.join(source, 'package.json'), path.join(dir, 'package.json'));
   if (script) await writeFile(path.join(dir, 'scripts/windows-uia.ps1'), script);
-  else await copyFile(path.join(source, 'scripts/windows-uia.ps1'), path.join(dir, 'scripts/windows-uia.ps1'));
+  else for (const file of ['windows-uia.ps1', 'native-loader.ps1']) await copyFile(path.join(source, 'scripts', file), path.join(dir, 'scripts', file));
   const env = temp ? { ...baseEnv, TEMP: temp, TMP: temp } : baseEnv;
   const client = new McpTestClient(process.execPath, [path.join(dir, 'mcp/server.mjs')], { env });
   clients.push(client);

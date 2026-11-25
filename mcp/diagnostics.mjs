@@ -314,7 +314,7 @@ const stamp = (at = new Date()) => {
 function diagnosticSettings(settings) {
   const result = {};
   for (const [key, field] of Object.entries(SETTINGS_SCHEMA)) {
-    if (field.command || key === 'communityNote' || key === 'hypervVm') continue;
+    if (field.command || key === 'communityNote' || key === 'hypervVm' || key === 'remoteHost') continue;
     const value = settings[key];
     if (field.type === 'text' && typeof value === 'string') result[key] = `<${[...value].length} chars>`;
     if (field.type === 'boolean' && typeof value === 'boolean') result[key] = value;

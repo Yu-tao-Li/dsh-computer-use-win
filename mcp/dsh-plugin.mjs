@@ -5,7 +5,7 @@ import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { createServer, connect } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_SETTINGS, normalizeSettings, enabledToolsForSettings, toolSelectionKey, repairStaleSettings } from './settings.mjs';
+import { DEFAULT_SETTINGS, normalizeSettings, enabledToolsForSettings, toolSelectionKey, repairStaleSettings, vmTargetOf } from './settings.mjs';
 import {createSettingsFields} from './settings-schema.mjs';
 import { atomicJson, atomicJsonAsync } from './takeover.mjs';
 import { installActivity } from './activity.mjs';
@@ -138,15 +138,16 @@ export function bridgeConfig(config = {}, runtime = {}) {
   const settings = normalizeSettings(config);
   const isolated = settings.desktopTarget === 'hyperv';
   const entry = fileURLToPath(new URL(isolated ? './hyperv-relay.mjs' : './server.mjs', import.meta.url));
+  const toolMode = settings.toolPreset === 'lazy' ? 'lazy' : settings.mode === 'lite' ? 'lite' : 'full';
   return {
     serverName: 'wincu', transport: 'stdio', command: process.execPath, args: [entry],
-    env: { ELECTRON_RUN_AS_NODE: '1', WCU_IMAGE_MODE: 'file', WCU_BROWSER_ATTACH_USER: settings.browserAttachUser?'1':'0', WCU_BROWSER_HEADLESS: settings.browserVisible?'0':'1', WCU_BROWSER_APP: settings.browserApp, WCU_BROWSER_SIGNIN: settings.browserSignIn?'1':'0', WCU_TOOL_MODE: settings.toolPreset==='lazy'?'lazy':settings.mode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(settings),
+    env: { ELECTRON_RUN_AS_NODE: '1', WCU_IMAGE_MODE: 'file', WCU_BROWSER_ATTACH_USER: settings.browserAttachUser?'1':'0', WCU_BROWSER_HEADLESS: settings.browserVisible?'0':'1', WCU_BROWSER_APP: settings.browserApp, WCU_BROWSER_SIGNIN: settings.browserSignIn?'1':'0', WCU_TOOL_MODE: toolMode, WCU_ENABLED_TOOLS: JSON.stringify(enabledToolsForSettings(settings)), WCU_SETTINGS_JSON: JSON.stringify(settings),
       ...(runtime.backgroundFile && !isolated ? {WCU_BACKGROUND_FILE:runtime.backgroundFile} : {}),
       ...(runtime.approvalSecret ? {WCU_APPROVAL_SECRET: runtime.approvalSecret,WCU_APPROVAL_LEDGER:runtime.approvalLedger, WCU_HOST_PID: String(process.pid),WCU_HOST_EXECUTABLE:process.execPath, WCU_HOST_PORTS: (runtime.hostPorts ?? []).join('|'), WCU_HOST_PORT_FILE:runtime.hostPortFile, WCU_USER_TABS_FILE:runtime.userTabsFile} : {}),
       ...(runtime.configFile ? { WCU_CONFIG_FILE: runtime.configFile, WCU_STATE_FILE: runtime.stateFile } : {}),
       ...(runtime.activityFile ? {WCU_ACTIVITY_FILE:runtime.activityFile}: {}),
       ...(runtime.layoutFile ? {WCU_LAYOUT_FILE:runtime.layoutFile}: {}),
-      ...(isolated ? {WCU_HYPERV_VM:settings.hypervVm} : {}),
+      ...(isolated ? { WCU_VM_BACKEND: settings.vmBackend, ...(settings.vmBackend === 'winrm' ? { WCU_REMOTE_HOST: settings.remoteHost } : { WCU_HYPERV_VM: settings.hypervVm }) } : {}),
       ...(runtime.notices ? {WCU_ADAPTER_NOTICES:JSON.stringify(runtime.notices)}: {}) },
     toolCallTimeoutMs: config.toolCallTimeoutMs ?? 90000,
     failOnStartupError: config.failOnStartupError ?? false
@@ -203,7 +204,7 @@ export async function apply(ctx, config) {
     });
     if (typeof owner.webServer.register === 'function') owner.effect(() => {
       try { return owner.webServer.register({ kind: 'exact', path: HYPERV_ROUTE,
-        handler: createHypervSetupHandler({ settings: () => desired, reconnect: vm => applySettings(desired, desiredJson, vm) }),
+        handler: createHypervSetupHandler({ settings: () => desired, reconnect: (target, backend) => applySettings(desired, desiredJson, { target, backend }) }),
       }); }
       catch (error) { owner.logger.warn('dsh-computer-use-win: the Hyper-V setup route is unavailable: %s', error?.message ?? error); return () => {}; }
     });
@@ -239,7 +240,7 @@ export async function apply(ctx, config) {
   if (liveAdapters.size > 1) ctx.logger.warn('dsh-computer-use-win: %d entries of this plugin run in one profile, and DSH keeps only one set of mcp__wincu tools. Remove the extra entry from dsh.profile.bundles in the profile package.json or from its cordis.patch.yml.', liveAdapters.size);
   let desired = normalizeSettings(config), desiredJson = JSON.stringify(desired), desiredKey = toolSelectionKey(desired), lastWrittenConfigJson = desiredJson;
   let runningSelection, connection, stopped = false;
-  const desktopRoute = settings => JSON.stringify(settings.desktopTarget === 'hyperv' ? ['hyperv', settings.hypervVm] : ['local', '']);
+  const desktopRoute = settings => JSON.stringify(settings.desktopTarget === 'hyperv' ? ['hyperv', settings.vmBackend, vmTargetOf(settings)] : ['local', '']);
   let runningDesktop;
   runtime.desktopRoutePending = () => runningDesktop !== desktopRoute(desired);
   runtime.usesGuestLoopback = () => desired.desktopTarget === 'hyperv';
@@ -323,7 +324,7 @@ export async function apply(ctx, config) {
   let selectionPending=0,selectionRetry={at:0,delay:0};
   atomicJson(runtime.configFile, desired);
   ctx.effect(() => () => { stopped = true; void closeBackground(); });
-  const isSelectedVm = vm => desired.desktopTarget === 'hyperv' && desired.hypervVm === vm;
+  const isSelectedVm = ({ target, backend }) => desired.desktopTarget === 'hyperv' && desired.vmBackend === backend && vmTargetOf(desired) === target;
   const applySettings = (next, nextJson, reconnectVm) => {
     const nextSettings = next === desired ? desired : normalizeSettings(next);
     const json = next === desired ? desiredJson : (nextJson ?? JSON.stringify(nextSettings));

@@ -19,7 +19,15 @@ assert.equal(normalizeSettings({ desktopTarget: 'background' }).desktopTarget, '
 assert.deepEqual(repairStaleSettings({ desktopTarget: 'background' }), { value: { desktopTarget: 'quiet' }, repaired: [], migrated: true });
 assert.equal(repairStaleSettings({ desktopTarget: 'fast' }).migrated, false);
 assert.equal(toolSelectionKey({ desktopTarget: 'quiet' }), toolSelectionKey({ desktopTarget: 'fast' }));
-assert.notEqual(toolSelectionKey({ desktopTarget: 'quiet' }), toolSelectionKey({ desktopTarget: 'hyperv', hypervVm: 'vm' }));
+assert.notEqual(toolSelectionKey({ desktopTarget: 'quiet' }), toolSelectionKey({ desktopTarget: 'hyperv', vmBackend: 'hyperv', hypervVm: 'vm' }));
+assert.notEqual(
+  toolSelectionKey({ desktopTarget: 'hyperv', vmBackend: 'hyperv', hypervVm: 'vm' }),
+  toolSelectionKey({ desktopTarget: 'hyperv', vmBackend: 'winrm', remoteHost: 'vm' }),
+);
+assert.notEqual(
+  toolSelectionKey({ desktopTarget: 'hyperv', vmBackend: 'winrm', remoteHost: '192.168.56.10' }),
+  toolSelectionKey({ desktopTarget: 'hyperv', vmBackend: 'winrm', remoteHost: '192.168.56.11' }),
+);
 assert.equal(normalizeSettings({ desktopTarget: 'fast', browserAttachUser: true }).browserAttachUser, true);
 assert.equal(normalizeSettings({ desktopTarget: 'hyperv', browserAttachUser: true }).browserAttachUser, false);
 

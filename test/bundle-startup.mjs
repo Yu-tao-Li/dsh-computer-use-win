@@ -52,6 +52,11 @@ async function evaluateBundle(profile, patchPath) {
   assert.equal(adapter.bridgeConfig({}).toolCallTimeoutMs, 90000);
   assert.equal(adapter.bridgeConfig(adapter.Config({})).toolCallTimeoutMs, 90000);
   assert.equal(adapter.bridgeConfig({toolCallTimeoutMs:12345}).toolCallTimeoutMs, 12345, 'Preserve explicit host timeout');
+  const bundleDefaults=entries[0].config;
+  assert.equal(adapter.bridgeConfig(adapter.Config({...bundleDefaults,toolPreset:'full'})).env.WCU_TOOL_MODE,'full');
+  const custom=adapter.bridgeConfig(adapter.Config({...bundleDefaults,enabledTools:['wait']}));
+  assert.equal(custom.env.WCU_TOOL_MODE,'full');
+  assert.deepEqual(JSON.parse(custom.env.WCU_ENABLED_TOOLS),['wait']);
   return {
     config: adapter.bridgeConfig(adapter.Config(entries[0].config)),
     runtime: { execPath: process.execPath, node: process.versions.node, electron: process.versions.electron || null }
@@ -109,6 +114,9 @@ export async function probe(config, extraEnv = {}) {
     result = { connected: true, serverInfo: client.getServerVersion() };
     const list = await timed('listTools', () => client.listTools());
     result.toolCount = list.tools.length;
+    const enabled = await timed('enable', () => client.callTool({ name: 'windows_computer_use_tools', arguments: { operation: 'enable', names: ['health', 'wait'] } }));
+    assert.ok(!enabled.isError, JSON.stringify(enabled));
+    result.enabledToolCount = (await client.listTools()).tools.length;
     const reply = await timed('health', () => client.callTool({ name: 'windows_computer_use_health', arguments: {} }));
     const healthText = reply.content.find(item => item.type === 'text').text;
     if (reply.isError) throw new Error(healthText);
@@ -170,16 +178,17 @@ Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell
     assert.equal(result.connected, true, result.error || result.stderr);
     assert.equal(result.serverInfo.name, 'windows-computer-use');
     assert.equal(result.serverInfo.version, expectedVersion);
-    assert.equal(host.config.env.WCU_TOOL_MODE, 'full');
+    assert.equal(host.config.env.WCU_TOOL_MODE, 'lazy');
     assert.equal(JSON.parse(host.config.env.WCU_ENABLED_TOOLS).length,TOOL_NAMES.length);
-    assert.equal(result.toolCount, TOOL_NAMES.length);
+    assert.equal(result.toolCount, 1);
+    assert.equal(result.enabledToolCount, 3);
     assert.equal(result.healthOk, true);
     // Catch the old 12-30 second synthetic-worker stall even when it succeeds.
     // This is a test budget with ample runner headroom, not a production timeout.
     assert.ok(result.stagesMs.health < 10000, `Synthetic health exceeded 10000ms: ${JSON.stringify(result)}`);
     assert.equal(result.waitOk, true);
     assert.equal(result.resourceCount, 6);
-    console.log(`PASS ${name} bundle -> MCP initialize / ${TOOL_NAMES.length} selected tools / health / wait / 6 resources (synthetic PowerShell worker)`);
+    console.log(`PASS ${name} bundle -> 1 startup tool / 3 after enabling health and wait / 6 resources (synthetic PowerShell worker)`);
   }
   console.log(`BUNDLE_TIMING ${JSON.stringify({ phase: 'suite', durationMs: Math.round(performance.now() - suiteStarted) })}`);
 }

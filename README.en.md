@@ -38,7 +38,7 @@ You need a Windows computer with DSH Desktop installed. The plugin uses Windows 
    ```
 
 2. Right-click the tray icon again, choose **Quit**, then open DSH Desktop again. Closing the window is not enough: DSH keeps running in the tray and does not load the new plugin.
-3. Open **Settings → Computer Use** (the mouse icon; 电脑操控 in the Chinese interface) to look around. You don't have to change anything: all tools are loaded by default. Then give the agent a desktop task, such as one from [section 6](#6-try-a-task).
+3. Open **Settings → Computer Use** (the mouse icon; 电脑操控 in the Chinese interface) to look around. You don't have to change anything: by default it starts with the management tool and loads the other tools as a task needs them. Then give the agent a desktop task, such as one from [section 6](#6-try-a-task).
 
 #### 1.2 Upgrade
 
@@ -112,7 +112,7 @@ The overlay is locked by default, so the mouse passes through it and it never bl
 
 #### 2.4 Settings page
 
-Open **Computer Use**, the mouse-icon tab on the left (电脑操控 in the Chinese interface). The plugin version is beside the title, with **Check for updates** or **Update** and **Report a problem** on the right. **Work mode** offers **Low disruption** (the default), **Foreground**, and **Virtual machine**. Low disruption works in the background where possible. Its **More details** section starts collapsed. Foreground uses the mouse and keyboard directly. Virtual machine mode works inside a configured Hyper-V VM.
+Open **Computer Use**, the mouse-icon tab on the left (电脑操控 in the Chinese interface). The plugin version is beside the title, with **Check for updates** or **Update** and **Report a problem** on the right. **Work mode** offers **Low disruption** (the default), **Foreground**, and **Virtual machine**. Low disruption works in the background where possible. Its **More details** section starts collapsed. Foreground uses the mouse and keyboard directly. Virtual machine mode works inside a configured Hyper-V VM or over Remote Windows (WinRM, experimental) to VMware, VirtualBox, or another Windows PC (including from Windows Home).
 
 The page also lets you choose which tools load and adjust browser options, the takeover indicator, the reasoning and progress overlay, and the stop shortcut. The small illustration beside each setting reflects your selection. Open the ⓘ icon for an explanation. Folding the Star and Issue note leaves a GitHub link and an expand arrow. Your choice survives upgrades.
 
@@ -205,8 +205,8 @@ Change these in **Settings → Computer Use**. Most take effect after you click 
 |---|---|
 | Update | The button left of the GitHub link at the top right: Check for updates, or Update when a newer version exists, which installs it only when clicked; see 1.2 |
 | Report a problem | Saves a TXT to Downloads and opens GitHub’s new-issue page; see 8.4 |
-| Tool loading | **All** (26 tools, the default); **Lite** (12 common tools); **Lazy** (starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
-| Work mode | **Low disruption** (the default): keep using your PC and the task keeps going. DSH does what it can in the background and opens the apps it starts on a hidden desktop; steps that need the mouse and keyboard run at once and borrow them briefly, while what you type or click meanwhile is held and then replayed to your window; it waits only while you hold a key, have input-method text not yet committed, or use a full-screen app; **Foreground**: for when you step away; DSH keeps its window in front and uses the mouse and keyboard directly, and Esc stops it; **Virtual machine**: works inside a Hyper-V virtual machine and never touches your PC, with one-time setup steps on the settings page. See [settings and stopping](docs/computer-use-settings.md) |
+| Tool loading | **All** (26 tools); **Lite** (12 common tools); **Lazy** (the default; starts with 1 management tool and loads the rest when needed, with all tools allowed); **Custom** (pick tools one by one or by group) |
+| Work mode | **Low disruption** (the default): keep using your PC and the task keeps going. DSH does what it can in the background and opens the apps it starts on a hidden desktop; steps that need the mouse and keyboard run at once and borrow them briefly, while what you type or click meanwhile is held and then replayed to your window; it waits only while you hold a key, have input-method text not yet committed, or use a full-screen app; **Foreground**: for when you step away; DSH keeps its window in front and uses the mouse and keyboard directly, and Esc stops it; **Virtual machine**: works inside a Hyper-V virtual machine or a remote Windows system over WinRM (experimental; VMware, VirtualBox, or another Windows PC; works from Windows Home) without touching your host desktop or files, with one-time setup steps on the settings page. See [settings and stopping](docs/computer-use-settings.md) |
 | Prefer web page controls | On by default. Pages it can read and operate directly are handled in the background, without moving the pointer or taking the foreground; desktop apps and page content it cannot read go to Computer Use |
 | Show the DSH browser window | On by default, so you can watch the DSH browser; turn it off to run the browser in the background with no window |
 | Browser type | Follows the Windows default browser, or choose Edge, Chrome or the Firefox family (experimental); when the default is neither Edge nor Chrome, an installed Chrome or Edge is used. The Firefox family starts with the Windows default one; see [Firefox-family browsers](docs/browser-bidi.md) |
@@ -308,6 +308,8 @@ The browser comes from one of three places:
 The Chromium lane reads and operates same-origin, cross-origin and nested iframes. Element ids bind their frame and document and expire on navigation/removal. With browserTab, coordinates use CSS pixels in the current page screenshot viewport, including canvas; the desktop pointer does not move. With the browser window shown, Chrome's own JavaScript dialogs (alert, confirm and the like) sometimes come to the front briefly. Shortcuts such as Ctrl+L and Ctrl+T belong to the browser window and never reach the page; use `address`, `new-tab` and `close_window` instead. Environment variables and result formats are in the [MCP tools reference](docs/wiki/mcp-tools.md#browser-lane).
 
 #### 7.5 Read less to save context
+
+Lazy mode uses a 64 KiB text budget for Windows control trees, snapshots and OCR by default. Set `maxBytes` to adjust it. For trees and snapshots, `detailLevel:"full"` also opts out of the automatic budget.
 
 - **Summarize a tree.** Use `detailLevel:"summary"` with `accessibility_tree` or `snapshot` on Windows controls. Each node keeps its ID, control type, name and states.
 - **Set a tree byte budget.** `maxBytes` starts at 2,000 and limits the UTF-8 JSON response. Screenshots are separate. Over the limit, the tool summarizes the tree first, then keeps actionable controls and their ancestors, then cuts the tree by level. If it cuts the tree, `budget.fullResultPath` points to the complete result. If the remaining content still cannot fit, the response gives the file path.
@@ -411,7 +413,7 @@ MIT licensed. Derived from [cgissing/windows-computer-use](https://github.com/cg
    ```
 
 2. 再右键托盘图标，选“退出”，然后重新打开 DSH Desktop。只关掉窗口不够：窗口关了，DSH 还在托盘里运行，不会加载新装的插件。
-3. 打开 **设置 → 电脑操控**（鼠标图标）看看各项选项。不改也能直接用，默认加载全部工具。然后给 agent 布置一个桌面任务，比如[第 6 节](#6-使用示例)里的例子。
+3. 打开 **设置 → 电脑操控**（鼠标图标）看看各项选项。不改也能直接用：默认懒启动，开始只加载管理入口，按任务再加载需要的工具。然后给 agent 布置一个桌面任务，比如[第 6 节](#6-使用示例)里的例子。
 
 #### 1.2 升级
 
@@ -485,7 +487,7 @@ DSH 操作电脑时，屏幕角落有一个半透明的浮窗，按步骤显示�
 
 #### 2.4 设置页
 
-在左侧打开带鼠标图标的 **电脑操控**。标题旁显示插件版本，右侧有 **检查更新** 或 **更新**，以及 **反馈问题**。**工作方式** 可以选 **少打扰**（默认）、**前台操作** 或 **虚拟机**。少打扰会尽量在后台操作，详细说明默认折叠在 **更多说明** 里。前台操作直接使用鼠标和键盘。虚拟机模式在配置好的 Hyper-V 虚拟机里操作。
+在左侧打开带鼠标图标的 **电脑操控**。标题旁显示插件版本，右侧有 **检查更新** 或 **更新**，以及 **反馈问题**。**工作方式** 可以选 **少打扰**（默认）、**前台操作** 或 **虚拟机**。少打扰会尽量在后台操作，详细说明默认折叠在 **更多说明** 里。前台操作直接使用鼠标和键盘。虚拟机模式支持本地 Hyper-V 虚拟机，或通过远程 Windows（WinRM，实验）连接 VMware、VirtualBox 虚拟机及另一台 Windows 电脑（Windows 家庭版也可使用）。
 
 页面上还能调整工具加载方案、网页与浏览器、接管提示、思考与操作浮窗和停止快捷键。每项左边的小图会随设置变化，说明收在 ⓘ 图标里。顶部的 Star 和 Issue 说明可以折叠，折叠后只留 GitHub 链接和展开箭头，升级后也会保持这个选择。
 
@@ -578,8 +580,8 @@ agent 每一步都按“观察 → 定位 → 执行 → 确认”来做，开�
 |---|---|
 | 更新 | 标题右侧 GitHub 左边的按钮：平时是“检查更新”，有新版本时变成“更新”，点了才安装，见 1.2 |
 | 反馈问题 | 保存诊断 TXT 到下载文件夹并打开 GitHub 新建问题页面，见 8.4 |
-| 工具加载 | **全部**（26 个，默认）；**精简**（12 个常用工具）；**懒启动**（开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
-| 工作方式 | **少打扰**（默认）：你照常用电脑，任务也不耽搁。能在后台做的都在后台做，DSH 自己打开的程序放在看不见的后台桌面里；必须用鼠标键盘的步骤马上做、只借一下，你这期间按的键和鼠标动作先存住，随后补到你的窗口；只在你按着键、拼音没上屏或在用全屏程序时等一下；**前台操作**：适合你暂时不用电脑时，DSH 把窗口放在最前面，直接用鼠标键盘，按 Esc 停止；**虚拟机**：在一台 Hyper-V 虚拟机里操作，完全不碰你的电脑，设置页列出一次性的配置步骤。见[设置与停止](docs/computer-use-settings.md) |
+| 工具加载 | **全部**（26 个）；**精简**（12 个常用工具）；**懒启动**（默认；开始只加载 1 个管理工具，需要时再加载，全部工具都允许）；**自定义**（逐个或整组勾选） |
+| 工作方式 | **少打扰**（默认）：你照常用电脑，任务也不耽搁。能在后台做的都在后台做，DSH 自己打开的程序放在看不见的后台桌面里；必须用鼠标键盘的步骤马上做、只借一下，你这期间按的键和鼠标动作先存住，随后补到你的窗口；只在你按着键、拼音没上屏或在用全屏程序时等一下；**前台操作**：适合你暂时不用电脑时，DSH 把窗口放在最前面，直接用鼠标键盘，按 Esc 停止；**虚拟机**：在一台 Hyper-V 虚拟机或通过远程 Windows（WinRM，实验）连接的 Windows 系统（VMware、VirtualBox 虚拟机或另一台电脑，Windows 家庭版可用）里操作，不碰你本机的桌面与文件，设置页列出一次性的配置步骤。见[设置与停止](docs/computer-use-settings.md) |
 | 优先使用网页控件 | 默认打开。网页能直接读写时在后台完成，不动鼠标、不抢前台；桌面程序和读不到的网页内容再交给电脑操控 |
 | 显示 DSH 浏览器窗口 | 默认打开，能看到 DSH 浏览器在做什么；关掉后它在后台运行，没有窗口 |
 | 浏览器类型 | 默认跟随 Windows 的默认浏览器，也可以选 Edge、Chrome 或 Firefox 系（实验）；默认浏览器不是 Edge 或 Chrome 时，用已安装的 Chrome 或 Edge。选 Firefox 系时先用 Windows 默认的那一个，见 [Firefox 系浏览器](docs/browser-bidi.md) |
@@ -681,6 +683,8 @@ Electron 程序、Chrome 和 Edge 都用 Chromium 内核。这类程序要等有
 Chromium 浏览器通道支持同源、跨源和嵌套 iframe；元素 ID 绑定 frame 与文档，导航或卸载后失效。传入 browserTab 时，坐标使用当前页面截图的 CSS 视口像素，可操作 canvas；不会移动桌面鼠标。显示浏览器窗口时，Chrome 自己的 JavaScript 弹窗（alert、confirm 这类）有时会短暂切到前台。Ctrl+L、Ctrl+T 这类快捷键属于浏览器窗口，网页内部收不到，请改用 `address`、`new-tab` 和 `close_window`。环境变量和返回格式见 [MCP 工具文档](docs/wiki/mcp-tools.md#browser-lane)。
 
 #### 7.5 少读一点，省上下文
+
+懒启动对 Windows 控件树、快照的文字部分和 OCR 默认使用 64 KiB 字节预算。可用 `maxBytes` 调整。树和快照也可用 `detailLevel:"full"` 取消默认预算。
 
 - **精简树。** Windows 界面上的 `accessibility_tree` 和 `snapshot` 支持 `detailLevel:"summary"`，每个节点只保留 ID、控件类型、名称和状态。
 - **给树设字节预算。** 这两个工具的 `maxBytes` 最小为 2,000，限制返回的 UTF-8 JSON 大小，截图另算。超出时先转为精简树，再只留可操作控件和它们的祖先，最后按层截断。截断时从 `budget.fullResultPath` 读取完整结果。如果剩余内容仍放不下，结果会给出文件路径。

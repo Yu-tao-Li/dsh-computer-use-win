@@ -26,15 +26,17 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
 
 - **少打扰**（默认）：你可以照常用电脑。读窗口、按按钮、填输入框都用 UI 自动化在后台完成，网页在后台标签页里操作。DSH 自己用 `launch_app` 打开的程序放在当前 Windows 会话里一个看不见的后台桌面上，沿用你的账号、文件权限、已安装软件和 DSH 启动环境，不会弹到你面前；`list_windows` 把这些窗口标成 `desktop:"background"`。后台做不了的步骤（快捷键、拖拽、画图、只认真实鼠标键盘的程序）马上借用你的鼠标键盘，不等你停手：DSH 操作的窗口闪到前面，做完把窗口和鼠标放回原处。这一下里你按的键、点的鼠标先存起来，窗口还给你之后原样补上，不会丢，也不会打进 DSH 的窗口；Esc 照常停止 DSH。只在打断会坏事时等一下：你正按着键或鼠标（比如在拖东西）、拼音还没上屏，或在用全屏程序（全屏游戏、放幻灯片）。DSH 打开的菜单或对话框留在前面时，你接着打字，窗口先还给你，字打进你的窗口。少打扰从不把窗口一直顶在最前面。设置页里，这几条细节收在默认折叠的“更多说明”里。
 - **前台操作**：适合你暂时不用电脑时。DSH 把工作窗口一直留在最前面，直接用鼠标键盘，不等你，也不在每步之后还原，所以最快、最稳，菜单也不会被打断。屏幕顶部提示“DSH 正在前台操作，请别动鼠标键盘”，按 Esc 随时停止。
-- **虚拟机**：在 Hyper-V 虚拟机里操作，完全不碰你的电脑；用的是虚拟机里的文件和软件，第一次要先配置（见下一节）。
+- **虚拟机**：在 Hyper-V 虚拟机或已启用 WinRM 的远程 Windows（VMware、VirtualBox 虚拟机或另一台电脑）里操作，不碰你本机的桌面与文件；用的是目标系统里的文件和软件，第一次要先配置（见下面两节）。
 
 后台桌面上的程序只接受 UI 自动化和窗口消息，按坐标点击、拖拽、系统组合键和整屏截图到不了那里；需要这些时，agent 会关掉它，用 `desktop:"current"` 在你的桌面上重新打开。快捷方式、商店应用和已安装应用的名称只能在你的桌面上打开。已在你的桌面上运行的单实例程序会把窗口开在你的桌面上。普通设置保存和 MCP 重连会保留后台桌面上的程序；选 **虚拟机** 或退出 DSH 会关闭它们，没保存的内容会丢失。
 
 ### 虚拟机（Hyper-V）
 
+选 **虚拟机** 时，设置页先只读检查这台电脑能否使用 Hyper-V：Windows 家庭版或还没打开 Hyper-V 时会直接说明，并可一键改用 **远程 Windows（WinRM）** 或 **少打扰**。
+
 在 **工作方式** 选 **虚拟机**，设置页会列出下面的配置步骤，只需做一次：
 
-1. 打开 Hyper-V：在“启用或关闭 Windows 功能”里勾选 Hyper-V 并重启。Windows 家庭版没有 Hyper-V。
+1. 打开 Hyper-V：在“启用或关闭 Windows 功能”里勾选 Hyper-V 并重启。Windows 家庭版没有 Hyper-V，可切换到同一设置下的 **远程 Windows（WinRM）** 后端（见下一节），或改用 **少打扰**。
 2. 允许你的账户管理 Hyper-V：以管理员身份打开 PowerShell，运行 `Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)`，再注销后重新登录。DSH 没有以管理员身份运行时，Windows 只让“Hyper-V Administrators”组的成员查询和连接虚拟机；这个组用 SID 指定，任何语言的 Windows 都一样。
 3. 在 Hyper-V 管理器里新建一台 Windows 10 或 11 虚拟机，并在里面安装 Node.js 22 或更新版本。
 4. 在虚拟机里用你的 Windows 账户登录桌面，保持登录。Hyper-V 的预览窗口可以关掉。
@@ -43,7 +45,34 @@ DSH 启动时自动查询 npm 的 `latest`。打开设置页时，上次查询�
 
 **配置连接** 先用这组凭据登录虚拟机，再检查虚拟机里是否已有这个账户登录的桌面、是否装了 Node.js 22 或更新版本。结果会指出该做哪一步：Hyper-V 没打开指向第 1 步，账户没有权限指向第 2 步，找不到虚拟机指向第 5 步，登录失败指向第 4、6 步；凭据可用但虚拟机里还差桌面登录或 Node.js 时，凭据已保存，补上那一步后再点一次 **配置连接** 检查。Windows 的原始提示放在结果的提示框里。
 
-之后浏览器、截图、鼠标和键盘操作都在选定的虚拟机内执行。截图会复制回主机。应用读写虚拟机里的文件，并使用虚拟机安装的软件和运行环境。需要处理主机文件时，先把文件复制或共享到虚拟机。Hyper-V 管理器里的预览窗口可以关闭。要取消操作，用主机 DSH 的停止按钮。连接、登录或启动失败时，本轮操作会暂停。要回到本机操作，选回 **少打扰** 或 **全速**。
+之后浏览器、截图、鼠标和键盘操作都在选定的虚拟机内执行。截图会复制回主机。应用读写虚拟机里的文件，并使用虚拟机安装的软件和运行环境。需要处理主机文件时，先把文件复制或共享到虚拟机。Hyper-V 管理器里的预览窗口可以关闭。要取消操作，用主机 DSH 的停止按钮。连接、登录或启动失败时，本轮操作会暂停。要回到本机操作，选回 **少打扰** 或 **前台操作**。
+
+### 远程 Windows（WinRM）
+
+适合没有 Hyper-V 的 **Windows 家庭版**、**VMware** / **VirtualBox** 里的 Windows 虚拟机，或同一网络里的 **另一台 Windows 电脑**。这是实验功能：设置、连接和接力已有离线与契约测试，还没在真实的 VMware 或 VirtualBox 虚拟机上走完整个流程，用到问题请在 [#101](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/101) 反馈。在 **工作方式** 选 **虚拟机** 并切到 **远程 Windows（WinRM）** 后，设置页会列出下面 5 步配置：
+
+1. **在目标 Windows 上开启 WinRM**：在目标虚拟机或电脑里用管理员权限打开 PowerShell，运行：
+
+   ```powershell
+   Enable-PSRemoting -Force -SkipNetworkProfileCheck
+   ```
+
+2. **确认目标机桌面与 Node.js**：目标 Windows 需要保持已登录且未锁屏的桌面会话，并已安装 **Node.js 22 或更高版本**。
+3. **填写目标地址**：填入目标主机名、IP，或 `IP:端口`：
+   - **VMware（NAT 或桥接）**：通常直接填写虚拟机内的 IP 地址。
+   - **VirtualBox**：使用 Host-Only（仅主机）或桥接网络时直接填虚拟机 IP；若使用 NAT 网络，请在虚拟机网络设置里添加端口转发（例如将宿主机 `127.0.0.1` 的 `55985` 端口转发到虚拟机的 `5985` 端口），然后在地址栏填 `127.0.0.1:55985`。
+4. **在本机启用 WinRM 客户端并添加受信任主机**：如果本机与目标机不在同一域内，在本机用管理员权限打开 PowerShell 运行（把 `<address>` 换成目标地址或主机名）：
+
+   ```powershell
+   Start-Service WinRM; Set-Item WSMan:\localhost\Client\TrustedHosts -Value '<address>' -Concatenate -Force
+   ```
+
+   如果之后连接时提示本机 WinRM 服务未运行，说明电脑重启后该服务回到了停止状态，在本机再次启动 WinRM 服务（或将“Windows Remote Management”服务启动类型设为“自动”）即可。
+5. **连接并保存凭据**：按设置页引导连接并在 Windows 凭据弹窗中输入目标机用户名和密码。凭据会用 Windows DPAPI 加密，仅保存给当前本机 Windows 账户使用。
+
+   如果确认凭据正确但仍收到“拒绝访问”，请在目标机用管理员 PowerShell 查看 `(Get-PSSessionConfiguration -Name Microsoft.PowerShell).Permission`。若端点允许 Remote Management Users，可把已经登录目标机桌面的专用账号加入这个组后重试。Windows 可能会筛除本地管理员账户远程登录时的管理员权限，所以即使该账号是本地管理员，也需要核对端点权限。
+
+连接成功后，后续复用与 Hyper-V 相同的桌面接力通道，所有界面查看、键鼠和文件操作均在目标 Windows 桌面会话内运行。要回到本机操作，选回 **少打扰** 或 **前台操作**。
 
 ### Agent 看不到电脑操控工具
 
@@ -71,7 +100,7 @@ Firefox 系网页通道为实验功能：选择“Firefox 系（实验性）”�
 
 ### 工具加载
 
-在 **全部 / 精简 / 懒启动 / 自定义** 一排选项里选择，默认全部 26 项（25 项操作工具加管理入口），下方一行说明当前方案。每项设置左边是一张随设置变化的小示意图，右边是名称和开关，两项一行。详细说明收在 ⓘ 图标里，鼠标停上去、点一下或用键盘聚焦时在图标上方弹出，不会被鼠标指针挡住；鼠标可以移到说明上，点一下后移开也不消失，按 Esc 或点别处关闭。精简固定加载 12 项；自定义才展开内部缩进清单，支持逐项、分组、全选和全部关闭。切换方案会保留自定义勾选，保存后在当前动作结束时生效，重启保留选择。agent 不能重新启用用户关闭的工具。
+在 **全部 / 精简 / 懒启动 / 自定义** 一排选项里选择，默认懒启动（开始只加载管理入口，全部 26 项都允许按需加载；保存过的方案照旧），下方一行说明当前方案。每项设置左边是一张随设置变化的小示意图，右边是名称和开关，两项一行。详细说明收在 ⓘ 图标里，鼠标停上去、点一下或用键盘聚焦时在图标上方弹出，不会被鼠标指针挡住；鼠标可以移到说明上，点一下后移开也不消失，按 Esc 或点别处关闭。精简固定加载 12 项；自定义才展开内部缩进清单，支持逐项、分组、全选和全部关闭。切换方案会保留自定义勾选，保存后在当前动作结束时生效，重启保留选择。agent 不能重新启用用户关闭的工具。
 
 懒启动仅注册管理入口，允许全部工具按需加载；启动显示“1 项，允许全部 26 项”。从别的方案切到自定义时，清单默认全部勾选，取消勾选后保存才生效；已经保存为自定义的清单照常显示。使用桌面工具前需要加载，`reset` 恢复为管理入口。
 
@@ -115,15 +144,17 @@ Choose by whether you are using the PC right now. You can switch at any time; th
 
 - **Low disruption** (the default): keep using your PC. Reading windows, pressing buttons and filling in fields go through UI Automation in the background, and web pages are worked in background tabs. Apps DSH opens with `launch_app` run on a hidden desktop in your current Windows session that keeps your account, file permissions, installed apps and the environment DSH started with, and never pop up in front of you; `list_windows` marks their windows `desktop:"background"`. Steps the background cannot do (shortcuts, drags, drawing, apps that accept only real input) borrow your mouse and keyboard at once, without waiting for you to stop: the window DSH works in comes forward, and the window and pointer go back afterwards. What you type or click in that moment is held and replayed once your window is back, so nothing is lost or typed into DSH's window; Esc still stops DSH. DSH waits only where interrupting would break what you are doing: while you hold a key or button (dragging something), have input-method text not yet committed, or use a full-screen app (a game, a slideshow). If a menu or dialog DSH opened stays in front, your next keystroke first gives the foreground back to your window and goes there. Low disruption never keeps a window in front. On the settings page these details sit under More details, folded by default.
 - **Foreground**: for when you step away. DSH keeps its window in front and uses the mouse and keyboard directly, does not wait for you and does not restore anything between steps, which is fastest and keeps menus open. The banner at the top says DSH is working in the foreground; press Esc to stop at any time.
-- **Virtual machine**: works inside a Hyper-V virtual machine and never touches your PC; it uses the VM’s own files and apps. Set it up once first (next section).
+- **Virtual machine**: works inside a Hyper-V virtual machine or a remote Windows host/VM over WinRM (VMware, VirtualBox, or another Windows PC) and does not touch your host desktop or files; it uses that system’s own files and apps. Set it up once first (next two sections).
 
 Apps on the hidden desktop take UI Automation and window messages only: clicks at screen positions, drags, system key combinations and full-screen screenshots cannot reach them. For those the agent closes the app and opens it again on your desktop with `desktop:"current"`. Shortcuts, Store apps and installed-app names open on your desktop only. A single-instance app already running on your desktop opens its window there. Ordinary settings changes and MCP reconnects keep the apps on the hidden desktop; choosing **Virtual machine** or quitting DSH closes them, and anything unsaved there is lost.
 
 ### Virtual machine (Hyper-V)
 
+When **Virtual machine** is selected, the settings page first checks, read-only, whether this PC can use Hyper-V: on Windows Home, or with Hyper-V turned off, it says so at once and offers a one-click switch to **Remote Windows (WinRM)** or **Low disruption**.
+
 Select **Virtual machine** under **Work mode**. The settings page lists these setup steps; they are needed once:
 
-1. Turn on Hyper-V: in “Turn Windows features on or off”, select Hyper-V and restart. Windows Home does not have Hyper-V.
+1. Turn on Hyper-V: in “Turn Windows features on or off”, select Hyper-V and restart. Windows Home does not have Hyper-V; switch the backend under **Virtual machine** to **Remote Windows (WinRM)** (next section), or use **Low disruption**.
 2. Let your account manage Hyper-V: open PowerShell as administrator, run `Add-LocalGroupMember -SID S-1-5-32-578 -Member (whoami)`, then sign out and back in. When DSH does not run as administrator, Windows lets only members of the Hyper-V Administrators group query and connect to virtual machines; the SID names that group in every Windows language.
 3. In Hyper-V Manager, create a Windows 10 or 11 virtual machine and install Node.js 22 or later in it.
 4. Sign in to the VM’s desktop with your Windows account and stay signed in. You can close the Hyper-V preview window.
@@ -132,7 +163,34 @@ Select **Virtual machine** under **Work mode**. The settings page lists these se
 
 **Configure connection** signs in to the VM with that credential, then checks that the account has a signed-in desktop there and that Node.js 22 or later is installed. The result names the step to look at: step 1 when Hyper-V is off, step 2 when your account lacks permission, step 5 when no VM has that name, steps 4 and 6 when signing in fails. When the credential works but the VM still lacks the signed-in desktop or Node.js, the credential is saved; finish that step and choose **Configure connection** again to check. Windows’ own message is in the result’s tooltip.
 
-Browser work, screenshots, mouse and keyboard actions run in the selected VM. Wincu copies screenshots back to the host, and other application files stay in the VM. You can close the Hyper-V preview window. Use DSH’s Stop button on the host to cancel a task. If the VM is unavailable, the task stops. Select **Low disruption** or **Full speed** to work on the host again.
+Browser work, screenshots, mouse and keyboard actions run in the selected VM. Wincu copies screenshots back to the host, and other application files stay in the VM. You can close the Hyper-V preview window. Use DSH’s Stop button on the host to cancel a task. If the VM is unavailable, the task stops. Select **Low disruption** or **Foreground** to work on the host again.
+
+### Remote Windows (WinRM)
+
+Use this backend on **Windows Home** (where Hyper-V is not available), with a **VMware** or **VirtualBox** Windows VM, or to control **another Windows PC** on the network. It is experimental: setup, connection and relay have offline and contract tests, but the whole flow has not yet been run on a real VMware or VirtualBox VM; please report problems in [#101](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/101). Select **Virtual machine** under **Work mode** and switch to **Remote Windows (WinRM)**; the settings page lists these 5 one-time steps:
+
+1. **Enable WinRM on the target Windows**: open an administrator PowerShell window on the VM or remote PC and run:
+
+   ```powershell
+   Enable-PSRemoting -Force -SkipNetworkProfileCheck
+   ```
+
+2. **Check the target desktop and Node.js**: keep the target Windows signed in to an unlocked desktop session, with **Node.js 22 or newer** installed.
+3. **Enter the target address**: enter the target hostname, IP, or `IP:port`:
+   - **VMware (NAT or Bridged)**: use the guest VM’s IP address directly.
+   - **VirtualBox**: use the guest IP in Host-Only or Bridged mode; with NAT networking, first add a port-forwarding rule on the host in VirtualBox (for example host `127.0.0.1` port `55985` to guest port `5985`) and enter `127.0.0.1:55985`.
+4. **Enable the WinRM client on this PC and trust the target**: if both PCs are not in the same Active Directory domain, open an administrator PowerShell window on this PC and run (replace `<address>` with the target host or IP):
+
+   ```powershell
+   Start-Service WinRM; Set-Item WSMan:\localhost\Client\TrustedHosts -Value '<address>' -Concatenate -Force
+   ```
+
+   If a later connection reports that the WinRM service is not running on this PC, Windows may have stopped the Manual-startup service after a restart—start the WinRM service again on this PC (or set **Windows Remote Management** to Automatic startup).
+5. **Connect and sign in**: follow the settings page prompt to connect and enter the target Windows username and password in the Windows credential prompt. Credentials are encrypted with Windows DPAPI for your current Windows account on this PC only.
+
+   If the credentials are correct and the target still reports access denied, check `(Get-PSSessionConfiguration -Name Microsoft.PowerShell).Permission` in an administrator PowerShell window on the target. If the endpoint allows Remote Management Users, add the dedicated desktop account to that group and try again. Windows can filter administrative rights for remote logons by local administrators, so local administrator membership alone may be insufficient.
+
+Once connected, browser actions, screenshots, mouse and keyboard input, and desktop relay work the same way inside the target Windows session. Select **Low disruption** or **Foreground** to return to your own desktop.
 
 ### Computer Use tools are missing from an Agent
 
@@ -152,7 +210,7 @@ Keep website sign-ins is off by default. When on, the DSH browser keeps one prof
 
 Firefox-family Browser Use is experimental: select Firefox family, or configure a separately started BiDi endpoint. The Firefox that the plugin starts runs headless, so choosing Firefox family turns Show the DSH browser window off and locks it until another browser is chosen, which restores its earlier state. Discovery starts with the Windows default browser when it is a Firefox-family one. The default selection retains its Chrome/Edge fallback. The blue status UI, automatic visible sign-in and cross-client sharing described above do not apply to BiDi; see [its scope](browser-bidi.md). Gecko desktop accessibility does not require this option.
 
-Choose **All / Lite / Lazy / Custom** in one row; a line below describes the selected preset, and each setting shows a small picture of its effect beside its name and switch, two to a row. Details open above the ⓘ icon on hover, click or keyboard focus, so the pointer never covers them; the pointer can move onto the text, a click keeps it open, and Esc or a click elsewhere closes it. All is the default (26 entries); Lite loads 12. Custom reveals the indented checklist with individual/group selection, select-all and disable-all. Preset changes preserve your custom selection. Save applies after the current action finishes and survives restart. Management cannot re-enable user-disabled tools.
+Choose **All / Lite / Lazy / Custom** in one row; a line below describes the selected preset, and each setting shows a small picture of its effect beside its name and switch, two to a row. Details open above the ⓘ icon on hover, click or keyboard focus, so the pointer never covers them; the pointer can move onto the text, a click keeps it open, and Esc or a click elsewhere closes it. Lazy is the default (only the management entry at startup, all 26 entries allowed on demand; a saved preset is kept); All loads 26 and Lite loads 12. Custom reveals the indented checklist with individual/group selection, select-all and disable-all. Preset changes preserve your custom selection. Save applies after the current action finishes and survives restart. Management cannot re-enable user-disabled tools.
 
 Lazy starts with one management entry while allowing all tools to be loaded on demand. Choosing Custom from another preset starts with every tool checked and takes effect when saved; a saved Custom selection is shown as saved; reset returns Lazy to management only.
 

@@ -97,6 +97,7 @@ function addAction(progress,label){
 // preview opens; otherwise the preview kept the language of the last series.
 export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGRESS_LINGER_MS,getSettings=()=>({}),getLocale=systemLocale,summaryOptions={}}={}){
   let owner,lingering,closed=false,needsPublish=true;
+  let timer,wakeAt;
   const locale=()=>overlayLocale(getLocale());
   // A turn's text that arrived before its first computer-use call (usually the
   // model deciding to use the browser). Kept in memory only, per running turn,
@@ -109,6 +110,16 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
   const summaries=createProgressSummarizer(ctx,{...summaryOptions,getSettings,getLocale:locale,onChange:()=>{if(!closed)publish();}});
   const expireIdle=()=>{if(owner&&owner.pending===0&&!owner.otherPending&&Date.now()-owner.lastActive>=idleMs)owner=undefined;};
   let lastPublishWarning=0;
+  const schedule=()=>{
+    const next=closed?Infinity:owner||needsPublish?Date.now()+1000:lingering?.until??Infinity;
+    if(timer&&Number.isFinite(next)&&wakeAt<=next)return;
+    clearTimeout(timer);timer=undefined;
+    if(!Number.isFinite(next))return;
+    wakeAt=next;
+    timer=setTimeout(()=>{timer=undefined;publish();},Math.max(0,next-Date.now()));
+    timer.unref();
+  };
+  const markDirty=()=>{needsPublish=true;schedule();};
   const publish=()=>{try{
     needsPublish=true;expireIdle();
     if(lingering&&(owner||Date.now()>=lingering.until))lingering=undefined;
@@ -124,7 +135,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
     // Display diagnostics must never turn an already completed action into a
     // failed tool result or prevent pending counters from being released.
     if (!closed && Date.now()-lastPublishWarning>10000) {lastPublishWarning=Date.now();try{ctx.logger.warn?.('Progress display unavailable: %s', error.message);}catch{}}
-  }
+  }finally{schedule();}
   };
   publish();
   const startOwner=(session,turn)=>{
@@ -147,10 +158,10 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
       if(!label)return next();
       const current=owner,progress=current.progress,action=addAction(progress,label);
       current.otherPending=(current.otherPending??0)+1;
-      progress.status='acting';needsPublish=true;if(getSettings().progressOverlayEnabled!==false)publish();
+      progress.status='acting';markDirty();if(getSettings().progressOverlayEnabled!==false)publish();
       try{const result=await next();action.state=result?.isError?'error':'done';return result;}
       catch(error){action.state='error';throw error;}
-      finally{current.otherPending=Math.max(0,(current.otherPending??1)-1);current.lastActive=Date.now();if(owner===current&&current.pending===0&&current.otherPending===0&&progress.action===label){progress.status='waiting';progress.action='';}if(owner===current&&getSettings().progressOverlayEnabled!==false)publish();needsPublish=true;}
+      finally{current.otherPending=Math.max(0,(current.otherPending??1)-1);current.lastActive=Date.now();if(owner===current&&current.pending===0&&current.otherPending===0&&progress.action===label){progress.status='waiting';progress.action='';}if(owner===current&&getSettings().progressOverlayEnabled!==false)publish();markDirty();}
     }
     if(exec.signal?.aborted)return readableAbort(exec,await next());
     if(session&&turn!==undefined){
@@ -222,7 +233,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
       const progress=owner.progress;
       if(step===undefined||step===progress.step&&progress.steps.at(-1)?.step===step)return;
       progress.step=step;stepEntry(progress,step);
-      progress.reasoning='';progress.reply='';progress.status='waiting';needsPublish=true;
+      progress.reasoning='';progress.reply='';progress.status='waiting';markDirty();
       return;
     }
     const seed=early.get(sessionId);
@@ -235,7 +246,7 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
       const entry=owner.progress.steps.find(item=>item.step===step);
       if(entry){entry.reasoning='';entry.reply='';replyStarts.delete(entry);}
       if(owner.progress.step===step){owner.progress.reasoning='';owner.progress.reply='';}
-      needsPublish=true;
+      markDirty();
     } else {const seed=early.get(sessionId);if(seed?.turn===turn&&seed.step===step){seed.reasoning='';seed.reply='';}}
   }
   // Only text already emitted by the host is displayed; never synthesize
@@ -269,14 +280,8 @@ export function installActivity(ctx,file,{idleMs=ACTIVITY_IDLE_MS,lingerMs=PROGR
       start.length+=text.length;replyStarts.set(entry,start);
     }
     progress.status=field==='reasoning'?'thinking':'replying';
-    needsPublish=true;
+    markDirty();
   }
-  ctx.effect(()=>{
-    // One more write when the linger time is over takes the finished text out of the file.
-    const timer=setInterval(()=>{if((owner||needsPublish||(lingering&&Date.now()>=lingering.until))&&!closed)try{publish();}catch(error){ctx.logger.error(error);}},1000);
-    timer.unref();
-    return ()=>{closed=true;clearInterval(timer);summaries.close();owner=undefined;lingering=undefined;early.clear();publish();};
-  });
-  // A failed write keeps needsPublish set, so the timer retries it.
+  ctx.effect(()=>()=>{closed=true;summaries.close();owner=undefined;lingering=undefined;early.clear();publish();});
   return {refresh(){if(!closed)try{publish();}catch(error){ctx.logger.error(error);}}};
 }
