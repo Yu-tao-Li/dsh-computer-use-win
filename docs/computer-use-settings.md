@@ -100,7 +100,7 @@ Firefox 系网页通道为实验功能：选择“Firefox 系（实验性）”�
 
 ### 工具加载
 
-在 **全部 / 精简 / 懒启动 / 自定义** 一排选项里选择，默认全部 26 项（25 项操作工具加管理入口），下方一行说明当前方案。每项设置左边是一张随设置变化的小示意图，右边是名称和开关，两项一行。详细说明收在 ⓘ 图标里，鼠标停上去、点一下或用键盘聚焦时在图标上方弹出，不会被鼠标指针挡住；鼠标可以移到说明上，点一下后移开也不消失，按 Esc 或点别处关闭。精简固定加载 12 项；自定义才展开内部缩进清单，支持逐项、分组、全选和全部关闭。切换方案会保留自定义勾选，保存后在当前动作结束时生效，重启保留选择。agent 不能重新启用用户关闭的工具。
+在 **全部 / 精简 / 懒启动 / 自定义** 一排选项里选择，默认懒启动（开始只加载管理入口，全部 26 项都允许按需加载；保存过的方案照旧），下方一行说明当前方案。每项设置左边是一张随设置变化的小示意图，右边是名称和开关，两项一行。详细说明收在 ⓘ 图标里，鼠标停上去、点一下或用键盘聚焦时在图标上方弹出，不会被鼠标指针挡住；鼠标可以移到说明上，点一下后移开也不消失，按 Esc 或点别处关闭。精简固定加载 12 项；自定义才展开内部缩进清单，支持逐项、分组、全选和全部关闭。切换方案会保留自定义勾选，保存后在当前动作结束时生效，重启保留选择。agent 不能重新启用用户关闭的工具。
 
 懒启动仅注册管理入口，允许全部工具按需加载；启动显示“1 项，允许全部 26 项”。从别的方案切到自定义时，清单默认全部勾选，取消勾选后保存才生效；已经保存为自定义的清单照常显示。使用桌面工具前需要加载，`reset` 恢复为管理入口。
 
@@ -210,7 +210,7 @@ Keep website sign-ins is off by default. When on, the DSH browser keeps one prof
 
 Firefox-family Browser Use is experimental: select Firefox family, or configure a separately started BiDi endpoint. The Firefox that the plugin starts runs headless, so choosing Firefox family turns Show the DSH browser window off and locks it until another browser is chosen, which restores its earlier state. Discovery starts with the Windows default browser when it is a Firefox-family one. The default selection retains its Chrome/Edge fallback. The blue status UI, automatic visible sign-in and cross-client sharing described above do not apply to BiDi; see [its scope](browser-bidi.md). Gecko desktop accessibility does not require this option.
 
-Choose **All / Lite / Lazy / Custom** in one row; a line below describes the selected preset, and each setting shows a small picture of its effect beside its name and switch, two to a row. Details open above the ⓘ icon on hover, click or keyboard focus, so the pointer never covers them; the pointer can move onto the text, a click keeps it open, and Esc or a click elsewhere closes it. All is the default (26 entries); Lite loads 12. Custom reveals the indented checklist with individual/group selection, select-all and disable-all. Preset changes preserve your custom selection. Save applies after the current action finishes and survives restart. Management cannot re-enable user-disabled tools.
+Choose **All / Lite / Lazy / Custom** in one row; a line below describes the selected preset, and each setting shows a small picture of its effect beside its name and switch, two to a row. Details open above the ⓘ icon on hover, click or keyboard focus, so the pointer never covers them; the pointer can move onto the text, a click keeps it open, and Esc or a click elsewhere closes it. Lazy is the default (only the management entry at startup, all 26 entries allowed on demand; a saved preset is kept); All loads 26 and Lite loads 12. Custom reveals the indented checklist with individual/group selection, select-all and disable-all. Preset changes preserve your custom selection. Save applies after the current action finishes and survives restart. Management cannot re-enable user-disabled tools.
 
 Lazy starts with one management entry while allowing all tools to be loaded on demand. Choosing Custom from another preset starts with every tool checked and takes effect when saved; a saved Custom selection is shown as saved; reset returns Lazy to management only.
 
