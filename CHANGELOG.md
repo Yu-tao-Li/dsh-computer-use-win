@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 测试：新增五态 Chromium 页面内容 benchmark（rich、long、shell、canvas、image），在同一 Electron fixture 上交替测当前实现与 `WCU_BASELINE_ROOT` 基线，记录 `contentState`、hint 和墙钟中位数；墙钟用相对阈值，不写死绝对毫秒。用于补齐 PR #85 当时没有复测的性能证据。/ Test: add a five-state Chromium page-content benchmark (rich, long, shell, canvas, image), alternating the current implementation with a `WCU_BASELINE_ROOT` baseline on the same Electron fixture and recording `contentState`, hints and median wall time. The wall-clock gate uses a relative threshold rather than absolute milliseconds, closing the performance evidence gap left by PR #85.
+
 ## 0.6.4 — 2026-11-25
 
 本版处理四个反馈：副屏上最大化的窗口不再被当成全屏（[#100](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/100)）；按 Esc 停止后 Esc 不会再一直算按着、让拖放失效，真实输入做到一半后端被结束时，插件按下的键和鼠标键也会被松开（[#99](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/99)）；虚拟机工作方式新增“远程 Windows（WinRM，实验）”，Windows 家庭版也能在 VMware、VirtualBox 里的 Windows 或另一台电脑上操作（[#101](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/101)）；插件更省上下文和内存：默认懒启动，接管助手只在需要时运行（[#102](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/102)）。/ This release handles four reports: a maximized window on a second monitor no longer counts as full screen ([#100](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/100)); stopping with Esc no longer leaves Esc down and drag and drop broken, and keys and mouse buttons the plugin pressed are released when a backend is stopped in the middle of real input ([#99](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/99)); Virtual machine mode adds Remote Windows (WinRM, experimental), so Windows Home can work in Windows on VMware, VirtualBox or another PC ([#101](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/101)); and the plugin takes less context and memory: Lazy loading by default, and the takeover helper runs only while it is needed ([#102](https://github.com/Yu-tao-Li/dsh-computer-use-win/issues/102)).
